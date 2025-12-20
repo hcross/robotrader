@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "robotrader.fullname" . }}
+  labels:
+    {{- include "robotrader.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "robotrader.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "robotrader.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: OPENROUTER_API_KEY
+              value: {{ .Values.env.openrouterApiKey | quote }}
+            - name: SOLANA_RPC_URL
+              value: {{ .Values.env.solanaRpcUrl | quote }}

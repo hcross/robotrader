@@ -1,0 +1,19 @@
+replicaCount: 1
+
+image:
+  repository: robotrader
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+
+resources: {}
+
+env:
+  openrouterApiKey: ""
+  solanaRpcUrl: "https://api.mainnet-beta.solana.com"
