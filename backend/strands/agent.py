@@ -1,6 +1,6 @@
 import threading
 import time
-from typing import List, Callable
+from typing import List, Callable, Any
 from .a2a import Message
 
 class BaseAgent(threading.Thread):
