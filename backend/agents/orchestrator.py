@@ -20,25 +20,22 @@ class OrchestratorAgent(BaseAgent):
     def process_user_command(self, command: str, sender: str):
         print(f"[{self.agent_name}] Processing user command: {command}")
         
-        # Use LLM to interpret command
-        messages = [
-            {"role": "system", "content": "You are the Orchestrator of a crypto trading team. Interpret the user's command and decide which agents to deploy. Available agents: TrendScout (sentiment), Chartist (technical), Sniper (trade execution), Swinger (trade execution). Return JSON with 'plan' and 'delegation'."},
-            {"role": "user", "content": command}
-        ]
-        
-        response = get_llm_response(messages)
-        if response:
-            content = response.choices[0].message.content
-            print(f"[{self.agent_name}] LLM Plan: {content}")
+        # Use Strands Agent to interpret command
+        try:
+            # The smart_agent(command) should return the LLM's response or tool output
+            response = self.smart_agent(command)
+            print(f"[{self.agent_name}] Strands Agent Response: {response}")
             
-            # Mock parsing and delegation
-            # In a real implementation, we would parse the JSON and send specific GOAL messages
-            self.send(sender, "RESPONSE", f"I have received your command: '{command}'. I am activating the team.")
+            # Send response back to user/sender
+            self.send(sender, "RESPONSE", str(response))
             
-            # Example delegation
-            if "buy" in command.lower() or "trade" in command.lower():
-                self.send("TrendScout", "GOAL", {"task": "analyze_sentiment", "asset": "SOL"})
-                self.send("Chartist", "GOAL", {"task": "analyze_technical", "asset": "SOL"})
+            # Note: In a full Strands implementation, the 'tools' would be executed automatically.
+            # Here we might need to parse the response if we still want manual delegation,
+            # but ideally we define tools on the agent.
+            
+        except Exception as e:
+            print(f"[{self.agent_name}] Error in Strands Agent: {e}")
+            self.send(sender, "ERROR", f"Failed to process command: {e}")
 
     def process_insight(self, insight: dict, sender: str):
         print(f"[{self.agent_name}] Received insight from {sender}: {insight}")

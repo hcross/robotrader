@@ -1,10 +1,11 @@
 import threading
 import time
-from typing import List, Callable, Any
+from typing import List, Callable, Any, Optional
 from .a2a import Message
+from strands import Agent
 
 class BaseAgent(threading.Thread):
-    def __init__(self, name: str, role: str):
+    def __init__(self, name: str, role: str, system_prompt: Optional[str] = None):
         super().__init__(name=name, daemon=True)
         self.agent_name = name
         self.role = role
@@ -12,6 +13,12 @@ class BaseAgent(threading.Thread):
         self.running = False
         self.lock = threading.Lock()
         
+        # Strands Integration
+        self.smart_agent = Agent(
+            name=name,
+            system_prompt=system_prompt or f"You are {name}. Role: {role}."
+        )
+
         # Registry of known agents (simplified discovery)
         self.known_agents = {}
 
