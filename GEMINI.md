@@ -1,59 +1,64 @@
 # Robotrader: AI Coding Agent Guide (GEMINI.md)
 
-Welcome, fellow agent! This document is designed to help you quickly understand the **Robotrader** project and how to contribute effectively.
+Welcome, fellow agent! This document is designed to help you quickly understand the **Robotrader v2** project and how to contribute effectively.
 
 ## Project Overview
-Robotrader is a multi-agent cryptocurrency trading bot framework built with a Python backend and a React frontend. It uses an agent-based architecture where different agents (Orchestrator, Monitor, etc.) communicate to execute trading strategies.
+Robotrader v2 is a **Hybrid Rust/Python Quantitative & Agentic Cryptocurrency Trading Platform** ([ADR-0001](docs/adr/0001-hybrid-quant-agentic-architecture.md)). It separates **deterministic sub-millisecond execution & risk enforcement (`engine-rs` in Rust)** from **asynchronous AI catalyst analysis & regime allocation (`backend` in Python)**.
 
 ## Tech Stack
-- **Backend**: Python 3.10+, FastAPI, Poetry, LiteLLM (for AI agent logic), CCXT (for exchange interaction), Solana (for blockchain interaction).
-- **Frontend**: React 19, Vite (Rolldown), Tailwind CSS v4, Lucide React, Axios.
-- **Infrastructure**: Docker Compose, Dockerfiles for both frontend and backend.
-- **Deployment**: Helm charts for Kubernetes deployment.
+- **Hot-Path & Replay Engine (`engine-rs`)**: Rust (Edition 2021), Cargo Workspace (`common`, `risk-gate`, `strategies`, `exec-router`, `backtest`, `node`), Serde.
+- **Warm-Path AI & Control Plane (`backend`)**: Python 3.10+, FastAPI, Poetry, `strands-agents`, LiteLLM, CCXT, Solana RPC.
+- **IPC & State Bus**: Redis 7 (with in-memory + TTL fallback for local dev/testing).
+- **Frontend (`frontend`)**: React 19, Vite (Rolldown), Tailwind CSS v4, Lucide React.
+- **Infrastructure**: Multi-stage Docker builds, Docker Compose, Helm charts (`charts/robotrader`).
 
 ## Project Structure
 ```bash
 .
-├── backend/            # Python backend source code
-│   ├── agents/         # AI agent implementations
-│   ├── config.py       # Configuration and env var loading
-│   ├── server.py       # FastAPI application entry point
-│   ├── strands/        # Core agent framework (A2A messaging, base classes)
-│   ├── tools/          # Tooling for agents (exchange interactions, etc.)
-│   ├── pyproject.toml  # Poetry dependencies
-│   └── poetry.lock
-├── frontend/           # React frontend source code
-│   ├── src/            # Components, hooks, and logic
-│   ├── Dockerfile      # Node 22 based build
-│   ├── package.json    # Dependencies and scripts
-│   └── tailwind.config.js # Tailwind CSS configuration
-├── docs/               # Technical documentation
-│   ├── architecture.md # Detailed architectural overview
-│   └── agents.md       # Agent-specific details
-├── Dockerfile.backend  # Backend Docker image definition
-├── docker-compose.yml  # Orchestrates development services
-└── charts/             # Helm charts for K8s
+├── engine-rs/          # Rust Hot-Path, HardRiskGate, 4 Strategy Pods & Backtest Workspace
+│   ├── Cargo.toml
+│   └── crates/
+│       ├── common/     # Canonical types: MarketEvent, OrderIntent, PolicyEnvelope, PortfolioState
+│       ├── risk-gate/  # Synchronous HardRiskGate (<50µs), Kelly sizer, Drawdown kill-switch, Solana anti-rug
+│       ├── strategies/ # StrategyPod trait + Pod 1 (Carry), Pod 2 (Momentum), Pod 3 (Solana), Pod 4 (Sniper)
+│       ├── exec-router/# Post-Only CEX maker router & Solana Jupiter v6 + Jito bundle simulator
+│       ├── backtest/   # Unified deterministic replay engine (Backtest == Paper == Live)
+│       └── node/       # CLI & runtime binary (`robotrader-node`)
+├── backend/            # Python Warm-Path AI Meta-Controller & FastAPI Control Plane
+│   ├── core/           # IPC State Store, schemas (mirroring engine-rs/common), BaseWarmAgent
+│   ├── agents/         # Orchestrator, CatalystScout, MetaAllocator, QuantAuditor, CostGuard
+│   ├── tools/          # Exchange & Solana RPC tools
+│   ├── tests/          # End-to-end Python <-> Rust integration tests
+│   └── server.py       # FastAPI REST + WebSocket entrypoint
+├── frontend/           # React 19 + Tailwind v4 Real-Time Command Center
+└── docs/               # ADRs, Architecture & Agent/Pod specifications
 ```
 
-## How to Run
-### Local Docker Development
-To start the entire stack:
+## How to Run & Test
+### 1. Run Rust Engine & Backtest Tests
+```bash
+cd engine-rs && cargo test
+```
+
+### 2. Run Python Warm-Path & Rust Bridge Integration Tests
+```bash
+PYTHONPATH=. python3 -m unittest discover -s backend/tests -v
+```
+
+### 3. Build Frontend
+```bash
+cd frontend && npm run build
+```
+
+### 4. Start Full Stack with Docker Compose
 ```bash
 docker compose up --build
 ```
-- **Backend API**: `http://localhost:8000`
-- **Frontend UI**: `http://localhost:5173`
+- **Backend Control Plane API**: `http://localhost:8000/api/v1/status`
+- **Frontend Command Center**: `http://localhost:5173`
 
 ## Coding Guidelines for Agents
-- **Dependency Management**: Use Poetry for backend (`backend/pyproject.toml`) and npm for frontend (`frontend/package.json`).
-- **Tailwind v4**: Note that this project uses Tailwind CSS v4. Use `@import "tailwindcss";` in `index.css` and the `@tailwindcss/postcss` plugin.
-- **Agent Communication**: Agents inherit from `BaseAgent` and use the `send/receive` pattern defined in `backend/strands/`.
-- **Environment Variables**: Always check `backend/config.py` when adding new external services or API keys. Use a `.env` file in the root.
-
-## Verified Fixes (Dec 2025)
-- Backend Docker build uses `backend/` directory as context for configuration files.
-- Frontend uses `node:22-alpine` to satisfy Vite requirements.
-- `.dockerignore` excludes local `node_modules` to prevent architecture mismatches.
-- `Any` is correctly imported in `backend/strands/agent.py`.
-
-Happy coding!
+- **Zero LLM in the Hot Path**: Never put LLM calls or blocking network I/O inside `StrategyPod::on_market_event` or `HardRiskGate::validate`.
+- **PolicyEnvelope Contract**: Keep `engine-rs/crates/common/src/lib.rs` and `backend/core/schemas.py` strictly synchronized.
+- **No Module Shadowing**: Warm-Path infrastructure lives in `backend/core/` so the external `strands-agents` package (`import strands`) is never shadowed.
+- **Capital Protection**: `CostGuard` (`backend/agents/monitor.py`) enforces a hard daily USD spend limit (`MAX_DAILY_LLM_BUDGET_USD`); never re-introduce unbounded automatic wallet refills.

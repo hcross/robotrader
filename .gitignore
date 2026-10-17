@@ -1,3 +1,7 @@
 .env
 __pycache__/
+*.pyc
 .venv/
+engine-rs/target/
+frontend/dist/
+frontend/node_modules/

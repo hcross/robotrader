@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/common",
+    "crates/risk-gate",
+    "crates/strategies",
+    "crates/exec-router",
+    "crates/backtest",
+    "crates/node",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Hoani Cross <hoani.cross@gmail.com>"]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"

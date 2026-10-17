@@ -1,0 +1,9 @@
+[package]
+name = "robotrader-risk-gate"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+robotrader-common = { path = "../common" }
+serde.workspace = true
+thiserror.workspace = true

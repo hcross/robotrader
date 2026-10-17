@@ -1,0 +1,17 @@
+[package]
+name = "robotrader-node"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "robotrader-node"
+path = "src/main.rs"
+
+[dependencies]
+robotrader-common = { path = "../common" }
+robotrader-risk-gate = { path = "../risk-gate" }
+robotrader-strategies = { path = "../strategies" }
+robotrader-exec-router = { path = "../exec-router" }
+robotrader-backtest = { path = "../backtest" }
+serde.workspace = true
+serde_json.workspace = true

@@ -1,6 +1,10 @@
-version: '3.8'
-
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --save 60 1 --loglevel warning
+
   backend:
     build:
       context: .
@@ -9,6 +13,11 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MAX_DAILY_LLM_BUDGET_USD=5.0
+    depends_on:
+      - redis
     volumes:
       - ./backend:/app/backend
     command: uvicorn backend.server:app --host 0.0.0.0 --port 8000 --reload
@@ -19,17 +28,11 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5173:5173"
+    depends_on:
+      - backend
     volumes:
       - ./frontend:/app
       - /app/node_modules
     environment:
       - VITE_API_URL=http://localhost:8000
     command: npm run dev -- --host
-
-  # Database (Optional, for future use)
-  # db:
-  #   image: postgres:15
-  #   environment:
-  #     POSTGRES_USER: user
-  #     POSTGRES_PASSWORD: password
-  #     POSTGRES_DB: robotrader

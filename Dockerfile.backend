@@ -1,18 +1,27 @@
-FROM python:3.10-slim
+FROM rust:1.83-slim AS engine-builder
+
+WORKDIR /build/engine-rs
+COPY engine-rs/ ./
+RUN cargo build --release --bin robotrader-node
+
+FROM python:3.11-slim
 
 WORKDIR /app
 
 # Install Poetry
-RUN pip install poetry
+RUN pip install --no-cache-dir poetry
 
-# Copy configuration
+# Copy Python configuration
 COPY backend/pyproject.toml backend/poetry.lock ./
 
 # Install dependencies
 RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --no-root
 
-# Copy code
+# Copy compiled Rust hot-path / replay binary
+COPY --from=engine-builder /build/engine-rs/target/release/robotrader-node /app/engine-rs/target/debug/robotrader-node
+
+# Copy Python Warm-Path & Control Plane code
 COPY backend ./backend
 
 CMD ["uvicorn", "backend.server:app", "--host", "0.0.0.0", "--port", "8000"]
