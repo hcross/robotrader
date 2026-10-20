@@ -22,6 +22,14 @@ class AssetOverride:
     catalyst_score: float
     bias: str = "NEUTRAL"
     max_leverage: float = 2.0
+    support_zone_usd: Optional[float] = None
+    resistance_zone_usd: Optional[float] = None
+    invalidation_price_usd: Optional[float] = None
+    entry_obi_threshold: float = 0.08
+    max_rsi_long: float = 70.0
+    min_rsi_short: float = 30.0
+    take_profit_bps: float = 45.0
+    stop_loss_bps: float = 30.0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -49,6 +57,26 @@ class PolicyEnvelope:
             "pod_allocations": {k: v.to_dict() for k, v in self.pod_allocations.items()},
             "asset_overrides": {k: v.to_dict() for k, v in self.asset_overrides.items()},
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> PolicyEnvelope:
+        now_ms = int(time.time() * 1000)
+        pod_allocs = {
+            k: PodAllocation(**v) if isinstance(v, dict) else v
+            for k, v in data.get("pod_allocations", {}).items()
+        }
+        overrides = {
+            k: AssetOverride(**v) if isinstance(v, dict) else v
+            for k, v in data.get("asset_overrides", {}).items()
+        }
+        return cls(
+            envelope_id=str(data.get("envelope_id", f"env_{now_ms}")),
+            issued_at_ms=int(data.get("issued_at_ms", now_ms)),
+            ttl_seconds=int(data.get("ttl_seconds", 900)),
+            global_regime=str(data.get("global_regime", "RISK_ON_HIGH_VOL")),
+            pod_allocations=pod_allocs,
+            asset_overrides=overrides,
+        )
 
     @classmethod
     def safe_baseline(cls, now_ms: Optional[int] = None) -> PolicyEnvelope:

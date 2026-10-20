@@ -42,6 +42,7 @@ class MetaAllocatorAgent(BaseWarmAgent):
         if preset_upper in ("FULL_SWARM", "AGGRESSIVE_SNIPER"):
             env = PolicyEnvelope.default_active(now_ms)
             env.envelope_id = f"env_full_swarm_{now_ms}"
+            env.global_regime = "TRENDING_BULL"
             env.pod_allocations["pod_carry"].capital_weight = 0.35
             env.pod_allocations["pod_momentum"].capital_weight = 0.30
             env.pod_allocations["pod_solana_alpha"].capital_weight = 0.20

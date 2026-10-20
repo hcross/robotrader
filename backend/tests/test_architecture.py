@@ -53,6 +53,30 @@ class TestHybridArchitectureV2(unittest.TestCase):
         bt_kill = self.store.run_rust_backtest()
         self.assertEqual(bt_kill["total_trades"], 0)
 
+    def test_pro_ta_engine_and_budget_driven_cognitive_depth(self) -> None:
+        from backend.tools.ta_tools import TechnicalAnalysisTool
+
+        candles = [
+            [1700000000000 + i * 900000, 80.0 + i * 0.2, 81.0 + i * 0.2, 79.5 + i * 0.2, 80.5 + i * 0.2, 1200.0]
+            for i in range(60)
+        ]
+        snap = TechnicalAnalysisTool.analyze_candles("SOL/USDT", candles, obi=0.22, timeframe="15m")
+        self.assertIn("ichimoku", snap)
+        self.assertIn("fibonacci", snap)
+        self.assertIn("rsi", snap)
+        self.assertEqual(snap["ichimoku"]["kumo_regime"], "ABOVE_KUMO_BULLISH")
+        self.assertGreater(snap["fibonacci"]["golden_pocket_618"], 0.0)
+
+        # Verify budget-driven cognitive depth transitions
+        cg = self.orchestrator.cost_guard
+        self.assertEqual(cg.get_thinking_depth(), "DEEP_THESIS")
+        cg.record_usage({"agent": "test", "cost": 3.0, "tokens": 1000})  # 40% remaining
+        self.assertEqual(cg.get_thinking_depth(), "TACTICAL_FOCUS")
+        cg.record_usage({"agent": "test", "cost": 1.5, "tokens": 1000})  # 10% remaining
+        self.assertEqual(cg.get_thinking_depth(), "ECO_CONSERVATION")
+        cg.record_usage({"agent": "test", "cost": 0.4, "tokens": 1000})  # 2% remaining
+        self.assertEqual(cg.get_thinking_depth(), "DETERMINISTIC_LOCK")
+
 
 if __name__ == "__main__":
     unittest.main()

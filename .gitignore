@@ -5,3 +5,5 @@ __pycache__/
 engine-rs/target/
 frontend/dist/
 frontend/node_modules/
+backend/data/*.jsonl
+

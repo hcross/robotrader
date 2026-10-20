@@ -86,7 +86,7 @@ const ChatInterface = ({ apiBase = 'http://localhost:8000', onCommandExecuted })
       </div>
 
       <div className="px-3 py-2 bg-gray-900 border-b border-gray-800 flex flex-wrap gap-1.5">
-        {['backtest', 'defensive carry', 'full swarm', 'kill switch', 'resume'].map((preset) => (
+        {['réflexion ichimoku', 'backtest', 'defensive carry', 'full swarm', 'kill switch', 'resume'].map((preset) => (
           <button
             key={preset}
             onClick={() => sendCommand(preset)}

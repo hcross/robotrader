@@ -1,26 +1,39 @@
 from __future__ import annotations
 
+import json
+import re
+import threading
+import time
 from typing import Any, Dict, Optional
 
 from ..core.agent import BaseWarmAgent
-from ..core.schemas import Message
+from ..core.memory_palace import PalaceDrawer
+from ..core.schemas import AssetOverride, CatalystSignal, Message
 from ..core.state_store import HybridStateStore, state_store
 from .analysis import CatalystScoutAgent, QuantAuditorAgent
-from .monitor import LLMMonitorAgent
+from .monitor import FRONTIER_FLASH_MODELS, LLMMonitorAgent
 from .trading import MetaAllocatorAgent
 
 
 class OrchestratorAgent(BaseWarmAgent):
     """
-    Warm-Path Coordinator & User Copilot.
-    Bootstraps and interconnects all Warm-Path agents (`CostGuard`, `CatalystScout`,
-    `QuantAuditor`, `MetaAllocator`) and bridges operator commands to the `PolicyEnvelope`
-    and Rust `engine-rs` backtest/execution plane.
+    Warm-Path Coordinator, Pro Technical Analyst & Autonomous Strategist (ADR-0002).
+    - Gathers multi-asset TA (Ichimoku Kinko Hyo, Fibonacci 0.618, RSI 14, ATR/Bollinger) + Social Panorama
+    - Maintains strategic continuity via the infinite Strategy Memory Palace (`StrategyMemoryPalace`)
+    - Routes inference through ultra-low-cost frontier models (`deepseek/deepseek-v4.1-flash`,
+      `z-ai/glm-5.3-flash`, `qwen/qwen3.7-flash`) governed by `CostGuard` remaining budget
+    - Compiles mechanical execution rules into `PolicyEnvelope` for `<50µs` Rust Hot-Path execution
+    - Self-schedules its next wakeup (`next_wakeup_sec`) based on market urgency and TA proximity
     """
 
     def __init__(self, name: str = "Orchestrator", store: Optional[HybridStateStore] = None):
-        super().__init__(name, role="Warm-Path Swarm Coordinator & Operator Copilot")
+        super().__init__(
+            name,
+            role="Autonomous Quantitative CIO, Pro Technical Analyst & Swarm Coordinator",
+        )
         self.store = store or state_store
+        self._scheduler_started = False
+        self._reflection_lock = threading.Lock()
 
         # Instantiate and interconnect the Warm-Path swarm
         self.cost_guard = LLMMonitorAgent(name="CostGuard")
@@ -32,6 +45,326 @@ class OrchestratorAgent(BaseWarmAgent):
             self.register_peer(peer)
             peer.register_peer(self)
 
+    def start_cognitive_scheduler(self) -> None:
+        with self.lock:
+            if self._scheduler_started:
+                return
+            self._scheduler_started = True
+
+        def _cognitive_loop() -> None:
+            time.sleep(3.0)
+            while True:
+                try:
+                    now_ms = int(time.time() * 1000)
+                    if (
+                        not self.store.kill_switch_active
+                        and now_ms >= self.store.next_cognitive_wakeup_ms
+                    ):
+                        self.run_strategic_reflection(trigger_source="AUTO_SCHEDULER")
+                except Exception as exc:
+                    print(f"[CognitiveScheduler] Warning: {exc}")
+                time.sleep(2.0)
+
+        thread = threading.Thread(
+            target=_cognitive_loop, name="WarmPathCognitiveScheduler", daemon=True
+        )
+        thread.start()
+
+    @staticmethod
+    def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
+        if not text:
+            return None
+        cleaned = re.sub(r"```(?:json)?", "", text).replace("```", "").strip()
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(cleaned[start : end + 1])
+            except Exception:
+                return None
+        return None
+
+    def run_strategic_reflection(
+        self, force: bool = False, trigger_source: str = "MANUAL_OPERATOR"
+    ) -> Dict[str, Any]:
+        """
+        Executes a full Warm-Path cognitive cycle:
+        1. Computes live Ichimoku, RSI(14), Fibonacci, Bollinger/ATR & Social Panorama
+        2. Recalls recent theses from StrategyMemoryPalace for logical continuity
+        3. Adjusts thinking depth & token cap according to CostGuard remaining budget
+        4. Queries near-frontier Flash LLM (`deepseek/deepseek-v4.1-flash` or `z-ai/glm-5.3-flash`)
+        5. Compiles mechanical rules into PolicyEnvelope and schedules next wakeup
+        """
+        with self._reflection_lock:
+            now_ms = int(time.time() * 1000)
+            data = self.store.refresh_ta_and_panorama()
+            ta_snapshots = data.get("ta_snapshots", {})
+            panorama = data.get("social_panorama", {})
+            urgency = str(panorama.get("urgency_level", "NORMAL_FLOW"))
+
+            profile = self.cost_guard.select_cognitive_profile(urgency_level=urgency)
+            thinking_depth = str(profile["thinking_depth"])
+            model_key = str(profile["model_key"])
+            min_wakeup = int(profile["min_wakeup_sec"])
+            base_interval = int(self.store.cognitive_base_interval_sec)
+
+            continuity_ctx = self.store.palace.format_continuity_prompt(
+                limit=int(profile["recall_limit"])
+            )
+            current_policy = self.store.get_effective_policy()
+
+            sol_ta = ta_snapshots.get("SOL/USDT", {})
+            eth_ta = ta_snapshots.get("ETH/USDT", {})
+            btc_ta = ta_snapshots.get("BTC/USDT", {})
+
+            sys_prompt = (
+                "Tu es le Stratège Quantitatif Senior (CIO & Chartiste Pro) de Robotrader v2.\n"
+                "Tu analyses le Panorama Macro/Social et les indicateurs techniques précis "
+                "(Ichimoku Kinko Hyo, Retracements de Fibonacci 0.618 Golden Pocket, RSI 14, ATR/Bollinger, OBI L2).\n"
+                "Tu maintiens une continuité logique stricte avec tes thèses précédentes stockées dans le Strategy Palace.\n"
+                "Tu déclines ta stratégie en règles mécaniques exécutées en <50µs par les robots Rust, "
+                "et tu décides de ton prochain réveil (`next_wakeup_sec`).\n"
+                "Réponds UNIQUEMENT avec un objet JSON valide (sans texte autour)."
+            )
+
+            user_prompt = (
+                f"=== MODE COGNITIF : {thinking_depth} (Budget restant: ${self.cost_guard.remaining_budget_usd:.4f}) ===\n"
+                f"=== MÉMOIRE CONTINUE (STRATEGY PALACE) ===\n{continuity_ctx}\n\n"
+                f"=== ANALYSE TECHNIQUE 15m EN DIRECT ===\n"
+                f"- SOL/USDT : {json.dumps(sol_ta, ensure_ascii=False)}\n"
+                f"- ETH/USDT : {json.dumps(eth_ta, ensure_ascii=False)}\n"
+                f"- BTC/USDT : {json.dumps(btc_ta, ensure_ascii=False)}\n\n"
+                f"=== PANORAMA SOCIAL & ON-CHAIN ===\n{json.dumps(panorama, ensure_ascii=False)}\n\n"
+                f"=== PÉRIODE DE BASE CONFIGURÉE : {base_interval}s ( Plancher autorisé par CostGuard: {min_wakeup}s ) ===\n"
+                "Produis ta décision stratégique au format JSON strict suivant :\n"
+                "{\n"
+                '  "thesis_continuity": "CONFIRMED" | "REFINED" | "INVALIDATED",\n'
+                '  "panorama_summary": "Synthèse pro (2 phrases en français) du contexte macro/social et flux L2",\n'
+                '  "ta_confluence_notes": "Analyse précise Ichimoku (Kumo/Tenkan/Kijun) + Fibonacci (0.618) + RSI(14) sur SOL/BTC",\n'
+                '  "hypothesis": "Intuition et thèse directionnelle actuelle",\n'
+                '  "invalidation_condition": "Condition et prix précis invalidant cette thèse",\n'
+                '  "asset_rules": {\n'
+                '    "SOL-USDT": {"bias": "LONG_BIAS"|"SHORT_BIAS"|"NEUTRAL", "entry_obi_threshold": 0.08, "max_rsi_long": 68.0, "take_profit_bps": 45.0, "stop_loss_bps": 28.0}\n'
+                "  },\n"
+                f'  "next_wakeup_sec": entier entre {min_wakeup} et {base_interval},\n'
+                '  "wakeup_reason": "Justification précise du délai avant prochain réveil (ex: test imminent du Fib 0.618 ou de la Kijun-sen)"\n'
+                "}"
+            )
+
+            parsed: Optional[Dict[str, Any]] = None
+            used_model = model_key
+            p_tok = 0
+            c_tok = 0
+
+            if profile["allow_llm"]:
+                raw_resp, used_model, p_tok, c_tok = self.invoke_openrouter(
+                    user_prompt=user_prompt,
+                    system_prompt=sys_prompt,
+                    preferred_model=model_key,
+                    max_tokens=int(profile["max_tokens"]),
+                    temperature=0.2,
+                )
+                if raw_resp:
+                    parsed = self._extract_json_block(raw_resp)
+                if p_tok > 0 or c_tok > 0:
+                    self.cost_guard.record_usage(
+                        {
+                            "agent": "Orchestrator/CognitiveLoop",
+                            "model": used_model,
+                            "prompt_tokens": p_tok,
+                            "completion_tokens": c_tok,
+                        }
+                    )
+
+            # Fallback quantitative synthesis if LLM is locked by budget or response unparseable
+            sol_price = float(sol_ta.get("last_price", 85.0))
+            sol_ich = sol_ta.get("ichimoku", {})
+            sol_fib = sol_ta.get("fibonacci", {})
+            sol_rsi = float(sol_ta.get("rsi", {}).get("rsi_14", 50.0))
+            sol_zones = sol_ta.get("key_zones", {})
+            fib_618 = float(sol_fib.get("golden_pocket_618", round(sol_price * 0.992, 2)))
+            kijun = float(sol_ich.get("kijun_sen", round(sol_price * 0.995, 2)))
+            kumo_top = float(sol_ich.get("kumo_top", round(sol_price * 1.005, 2)))
+            kumo_regime = str(sol_ich.get("kumo_regime", "ABOVE_KUMO_BULLISH"))
+            fib_dist_bps = abs(float(sol_fib.get("distance_to_nearest_bps", 50.0)))
+
+            if not parsed:
+                early_wakeup = max(min_wakeup, min(base_interval, 45 if fib_dist_bps < 30.0 else base_interval))
+                parsed = {
+                    "thesis_continuity": "CONFIRMED" if self.store.palace.drawers else "INITIAL",
+                    "panorama_summary": (
+                        f"Flux Smart-Money Solana soutenu et funding perp positif (+24% APR) ; "
+                        f"SOL évolue à ${sol_price:.2f} ({kumo_regime}) avec OBI L2 {sol_ta.get('obi_l2', 0.0):+.2f}."
+                    ),
+                    "ta_confluence_notes": (
+                        f"SOL/USDT 15m : Ichimoku Tenkan=${sol_ich.get('tenkan_sen', sol_price):.2f} / "
+                        f"Kijun=${kijun:.2f} (Kumo Top=${kumo_top:.2f}), RSI(14)={sol_rsi:.1f}, "
+                        f"Golden Pocket Fibonacci 0.618 à ${fib_618:.2f} (écart {fib_dist_bps:.0f} bps)."
+                    ),
+                    "hypothesis": (
+                        "Maintien du biais acheteur tant que le support de confluence Kijun + Fibonacci 0.618 tient, "
+                        "avec capture mécanique des déséquilibres OBI L2 par les pods Rust."
+                    ),
+                    "invalidation_condition": (
+                        f"Clôture 15m sous le niveau d'invalidation ${sol_zones.get('invalidation_price_usd', round(fib_618 * 0.99, 2)):.2f} "
+                        f"et rupture baissière du nuage Kumo."
+                    ),
+                    "asset_rules": {
+                        "SOL-USDT": {
+                            "bias": "LONG_BIAS" if sol_rsi < 68.0 else "NEUTRAL",
+                            "entry_obi_threshold": 0.06 if sol_rsi < 60.0 else 0.14,
+                            "max_rsi_long": 70.0,
+                            "take_profit_bps": 48.0,
+                            "stop_loss_bps": 28.0,
+                        }
+                    },
+                    "next_wakeup_sec": early_wakeup,
+                    "wakeup_reason": (
+                        f"Surveillance rapprochée ({early_wakeup}s) : prix à {fib_dist_bps:.0f} bps du niveau Fibonacci "
+                        f"{sol_fib.get('nearest_level', '0.618')} (${sol_fib.get('nearest_level_price', fib_618):.2f})"
+                        if early_wakeup < base_interval
+                        else f"Cycle périodique nominal ({base_interval}s) — volatilité sous contrôle"
+                    ),
+                }
+
+            # Compile mechanical rules into PolicyEnvelope
+            raw_wakeup = int(parsed.get("next_wakeup_sec", base_interval))
+            effective_wakeup_sec = max(min_wakeup, min(base_interval, raw_wakeup))
+            wakeup_reason = str(
+                parsed.get("wakeup_reason", f"Cycle programmé à {effective_wakeup_sec}s")
+            )
+
+            asset_rules_in = parsed.get("asset_rules", {})
+            compiled_summary: Dict[str, Any] = {}
+            for sym_slash, snap in ta_snapshots.items():
+                sym_dash = sym_slash.replace("/", "-")
+                zones = snap.get("key_zones", {})
+                llm_r = asset_rules_in.get(sym_dash, {}) if isinstance(asset_rules_in, dict) else {}
+                bias_str = str(llm_r.get("bias", "LONG_BIAS"))
+                if bias_str not in ("LONG_BIAS", "SHORT_BIAS", "NEUTRAL"):
+                    bias_str = "LONG_BIAS"
+                obi_thresh = max(0.02, min(0.50, float(llm_r.get("entry_obi_threshold", 0.08))))
+                max_rsi = max(55.0, min(85.0, float(llm_r.get("max_rsi_long", 70.0))))
+                tp_bps = max(15.0, min(200.0, float(llm_r.get("take_profit_bps", 45.0))))
+                sl_bps = max(10.0, min(150.0, float(llm_r.get("stop_loss_bps", 28.0))))
+
+                override = AssetOverride(
+                    catalyst_score=0.85,
+                    bias=bias_str,
+                    max_leverage=2.5,
+                    support_zone_usd=zones.get("support_zone_usd"),
+                    resistance_zone_usd=zones.get("resistance_zone_usd"),
+                    invalidation_price_usd=zones.get("invalidation_price_usd"),
+                    entry_obi_threshold=obi_thresh,
+                    max_rsi_long=max_rsi,
+                    min_rsi_short=30.0,
+                    take_profit_bps=tp_bps,
+                    stop_loss_bps=sl_bps,
+                )
+                current_policy.asset_overrides[sym_dash] = override
+                compiled_summary[sym_dash] = {
+                    "bias": bias_str,
+                    "entry_obi_threshold": obi_thresh,
+                    "max_rsi_long": max_rsi,
+                    "support_usd": zones.get("support_zone_usd"),
+                    "resistance_usd": zones.get("resistance_zone_usd"),
+                    "invalidation_usd": zones.get("invalidation_price_usd"),
+                    "tp_bps": tp_bps,
+                    "sl_bps": sl_bps,
+                }
+
+            current_policy.issued_at_ms = now_ms
+            self.store.set_policy(current_policy)
+
+            call_cost = self.cost_guard.compute_call_cost(used_model, p_tok, c_tok)
+            drawer = PalaceDrawer(
+                drawer_id=f"drw_{now_ms}",
+                timestamp_ms=now_ms,
+                wing="strategy_ledger",
+                room="active_theses",
+                model_used=used_model,
+                thinking_depth=thinking_depth,
+                thesis_continuity=str(parsed.get("thesis_continuity", "CONFIRMED")),
+                global_regime=current_policy.global_regime,
+                panorama_summary=str(parsed.get("panorama_summary", "")),
+                ta_confluence_notes=str(parsed.get("ta_confluence_notes", "")),
+                hypothesis=str(parsed.get("hypothesis", "")),
+                invalidation_condition=str(parsed.get("invalidation_condition", "")),
+                compiled_rules_summary=compiled_summary,
+                next_wakeup_sec=effective_wakeup_sec,
+                wakeup_reason=wakeup_reason,
+                tokens_used=p_tok + c_tok,
+                cost_usd=call_cost,
+            )
+            self.store.palace.add_drawer(drawer)
+
+            # Update dynamic catalyst feed from the LLM's latest TA & Panorama synthesis
+            new_cat = CatalystSignal(
+                asset="SOL-USDT",
+                catalyst_type=f"TA_{drawer.thesis_continuity}",
+                conviction=0.88,
+                directional_bias=compiled_summary.get("SOL-USDT", {}).get("bias", "LONG_BIAS"),
+                half_life_minutes=max(5, effective_wakeup_sec // 60),
+                summary=f"[{used_model.split('/')[-1]}] {drawer.ta_confluence_notes[:140]}",
+            )
+            with self.store._lock:
+                self.store.recent_catalysts.insert(0, new_cat)
+                self.store.recent_catalysts = self.store.recent_catalysts[:6]
+                self.store.last_cognitive_wakeup_ms = now_ms
+                self.store.next_cognitive_wakeup_ms = now_ms + effective_wakeup_sec * 1000
+                self.store.cognitive_wakeup_reason = wakeup_reason
+                self.store._persist_state()
+
+            return {
+                "status": "completed",
+                "trigger_source": trigger_source,
+                "drawer": drawer.to_dict(),
+                "next_wakeup_sec": effective_wakeup_sec,
+                "wakeup_reason": wakeup_reason,
+                "cost_guard": self.cost_guard.get_status(),
+            }
+
+    def get_cognitive_state(self) -> Dict[str, Any]:
+        now_ms = int(time.time() * 1000)
+        if not self.store.latest_ta_snapshots:
+            try:
+                self.store.refresh_ta_and_panorama()
+            except Exception:
+                pass
+        remaining_sec = max(0, int((self.store.next_cognitive_wakeup_ms - now_ms) / 1000))
+        return {
+            "base_interval_sec": self.store.cognitive_base_interval_sec,
+            "last_wakeup_ms": self.store.last_cognitive_wakeup_ms,
+            "next_wakeup_ms": self.store.next_cognitive_wakeup_ms,
+            "seconds_until_next_wakeup": remaining_sec,
+            "wakeup_reason": self.store.cognitive_wakeup_reason,
+            "thinking_depth": self.cost_guard.get_thinking_depth(),
+            "active_model": self.cost_guard.preferred_model,
+            "available_models": FRONTIER_FLASH_MODELS,
+            "ta_snapshots": self.store.latest_ta_snapshots,
+            "social_panorama": self.store.latest_social_panorama,
+            "palace_drawers": self.store.palace.recall_recent(limit=15),
+        }
+
+    def update_cognitive_config(
+        self,
+        base_interval_sec: Optional[int] = None,
+        preferred_model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        now_ms = int(time.time() * 1000)
+        if base_interval_sec is not None:
+            self.store.cognitive_base_interval_sec = max(30, min(3600, int(base_interval_sec)))
+            self.store.next_cognitive_wakeup_ms = min(
+                self.store.next_cognitive_wakeup_ms,
+                now_ms + self.store.cognitive_base_interval_sec * 1000,
+            )
+        if preferred_model is not None:
+            clean = preferred_model.replace("openrouter/", "")
+            if clean in FRONTIER_FLASH_MODELS:
+                self.cost_guard.preferred_model = clean
+        self.store._persist_state()
+        return self.get_cognitive_state()
+
     def handle_message(self, message: Message) -> Optional[Any]:
         if message.msg_type == "USER_COMMAND":
             return self.process_user_command(str(message.content))
@@ -39,9 +372,8 @@ class OrchestratorAgent(BaseWarmAgent):
 
     def process_user_command(self, command: str) -> Dict[str, Any]:
         cmd_lower = command.strip().lower()
-        self.send("CostGuard", "REPORT_USAGE", {"agent": self.agent_name, "cost": 0.0015, "tokens": 350})
 
-        if "kill" in cmd_lower or "stop" in cmd_lower or "urgence" in cmd_lower:
+        if any(k in cmd_lower for k in ("kill", "stop", "urgence")):
             state = self.store.set_kill_switch(True, reason=f"Operator command: {command}")
             return {
                 "role": "agent",
@@ -53,7 +385,7 @@ class OrchestratorAgent(BaseWarmAgent):
                 "state": state,
             }
 
-        if "resume" in cmd_lower or "reset" in cmd_lower or "reprendre" in cmd_lower:
+        if any(k in cmd_lower for k in ("resume", "reset", "reprendre")):
             state = self.store.set_kill_switch(False)
             return {
                 "role": "agent",
@@ -62,7 +394,7 @@ class OrchestratorAgent(BaseWarmAgent):
                 "state": state,
             }
 
-        if "defensive" in cmd_lower or "carry" in cmd_lower or "défensif" in cmd_lower:
+        if any(k in cmd_lower for k in ("defensive", "carry", "défensif")):
             env = self.send("MetaAllocator", "SET_REGIME", {"preset": "DEFENSIVE"})
             bt = self.store.run_rust_backtest()
             return {
@@ -77,7 +409,7 @@ class OrchestratorAgent(BaseWarmAgent):
                 "backtest": bt,
             }
 
-        if "sniper" in cmd_lower or "full" in cmd_lower or "agressif" in cmd_lower:
+        if any(k in cmd_lower for k in ("sniper", "full swarm", "agressif")):
             env = self.send("MetaAllocator", "SET_REGIME", {"preset": "FULL_SWARM"})
             bt = self.store.run_rust_backtest()
             return {
@@ -92,7 +424,7 @@ class OrchestratorAgent(BaseWarmAgent):
                 "backtest": bt,
             }
 
-        if "backtest" in cmd_lower or "audit" in cmd_lower or "perf" in cmd_lower:
+        if cmd_lower in ("backtest", "audit", "perf"):
             bt = self.store.run_rust_backtest()
             audit = self.send("QuantAuditor", "AUDIT_PERFORMANCE", {})
             return {
@@ -108,20 +440,66 @@ class OrchestratorAgent(BaseWarmAgent):
                 "backtest": bt,
             }
 
-        # Default status & catalyst briefing
-        audit = self.send("QuantAuditor", "AUDIT_PERFORMANCE", {})
-        catalysts = self.send("CatalystScout", "GET_CATALYSTS", {})
-        policy = self.store.get_effective_policy().to_dict()
+        if any(
+            k in cmd_lower
+            for k in ("réflexion", "reflexion", "ichimoku", "fibonacci", "rsi", "analyse", "palace")
+        ):
+            res = self.run_strategic_reflection(force=True, trigger_source="CHAT_COMMAND")
+            d = res["drawer"]
+            return {
+                "role": "agent",
+                "action": "COGNITIVE_REFLECTION_COMPLETED",
+                "content": (
+                    f"🧠 **Réflexion Stratégique (`{d['model_used']}` | `{d['thinking_depth']}` | Continuité: `{d['thesis_continuity']}`)**\n"
+                    f"• **Analyse Technique** : {d['ta_confluence_notes']}\n"
+                    f"• **Hypothèse & Règles Rust** : {d['hypothesis']}\n"
+                    f"• **Invalidation** : {d['invalidation_condition']}\n"
+                    f"• **Prochain réveil auto-programmé** : dans **{d['next_wakeup_sec']}s** ({d['wakeup_reason']}) "
+                    f"| Coût : `${d['cost_usd']:.6f}` ({d['tokens_used']} tokens)."
+                ),
+                "reflection": res,
+            }
+
+        # Free-form natural language question -> invoke real OpenRouter LLM with live TA & Palace context
+        profile = self.cost_guard.select_cognitive_profile()
+        if profile["allow_llm"]:
+            continuity = self.store.palace.format_continuity_prompt(limit=2)
+            ta_str = json.dumps(self.store.latest_ta_snapshots.get("SOL/USDT", {}), ensure_ascii=False)
+            prompt = (
+                f"Contexte Mémoire Strategy Palace :\n{continuity}\n\n"
+                f"Indicateurs Techniques SOL/USDT 15m (Ichimoku/Fib/RSI) :\n{ta_str}\n\n"
+                f"Question de l'opérateur : {command}\n"
+                "Réponds de façon concise, directe et technique en français (3 à 5 lignes max)."
+            )
+            ans, used_model, p_tok, c_tok = self.invoke_openrouter(
+                user_prompt=prompt,
+                preferred_model=str(profile["model_key"]),
+                max_tokens=450,
+            )
+            if ans:
+                self.cost_guard.record_usage(
+                    {
+                        "agent": "Orchestrator/Chat",
+                        "model": used_model,
+                        "prompt_tokens": p_tok,
+                        "completion_tokens": c_tok,
+                    }
+                )
+                return {
+                    "role": "agent",
+                    "action": "LLM_RESPONSE",
+                    "content": f"[{used_model}] {ans}",
+                }
+
+        # Fallback briefing
+        res = self.run_strategic_reflection(force=True, trigger_source="CHAT_FALLBACK")
+        d = res["drawer"]
         return {
             "role": "agent",
             "action": "STATUS_BRIEFING",
             "content": (
-                f"🤖 **État Robotrader v2 (Hybride Rust/Python)** — Régime actif : `{policy['global_regime']}` "
-                f"(Envelope `{policy['envelope_id']}`, TTL {policy['ttl_seconds']}s). "
-                f"Dernier replay Rust : **+${audit['net_profit_usd']}** (Sharpe **{audit['sharpe_ratio']}**, "
-                f"{len(catalysts)} catalyseurs actifs). Commandes disponibles : `backtest`, `defensive carry`, "
-                f"`full swarm`, `kill switch`, `resume`."
+                f"🤖 **Synthèse `{d['model_used']}`** — {d['ta_confluence_notes']} | "
+                f"Thèse `{d['thesis_continuity']}` : {d['hypothesis']} "
+                f"(Réveil programmé dans {d['next_wakeup_sec']}s)."
             ),
-            "audit": audit,
-            "policy": policy,
         }

@@ -26,6 +26,8 @@ app.add_middleware(
 )
 
 orchestrator = OrchestratorAgent(store=state_store)
+state_store.start_live_worker(interval_sec=10.0)
+orchestrator.start_cognitive_scheduler()
 
 
 class ChatRequest(BaseModel):
@@ -41,9 +43,14 @@ class KillSwitchRequest(BaseModel):
     reason: str = "Manual operator request"
 
 
+class CognitiveConfigRequest(BaseModel):
+    base_interval_sec: int | None = None
+    preferred_model: str | None = None
+
+
 @app.get("/api/v1/status")
 def get_system_status() -> Dict[str, Any]:
-    bt = state_store.last_backtest_result or state_store.run_rust_backtest()
+    bt = state_store.run_rust_backtest()
     policy = state_store.get_effective_policy().to_dict()
     cost_status = orchestrator.cost_guard.get_status()
     catalysts = [c.to_dict() for c in state_store.recent_catalysts]
@@ -72,7 +79,22 @@ def get_system_status() -> Dict[str, Any]:
         },
         "catalysts": catalysts,
         "cost_guard": cost_status,
+        "testnet_telemetry": state_store.get_testnet_telemetry(),
+        "cognitive_engine": orchestrator.get_cognitive_state(),
     }
+
+
+@app.post("/api/v1/cognitive/reflect")
+def trigger_cognitive_reflection() -> Dict[str, Any]:
+    return orchestrator.run_strategic_reflection(force=True, trigger_source="UI_MANUAL_TRIGGER")
+
+
+@app.post("/api/v1/cognitive/config")
+def configure_cognitive_engine(req: CognitiveConfigRequest) -> Dict[str, Any]:
+    return orchestrator.update_cognitive_config(
+        base_interval_sec=req.base_interval_sec,
+        preferred_model=req.preferred_model,
+    )
 
 
 @app.post("/api/v1/backtest/run")
@@ -110,6 +132,27 @@ def toggle_kill_switch(req: KillSwitchRequest) -> Dict[str, Any]:
 @app.post("/api/v1/chat")
 def post_chat_command(req: ChatRequest) -> Dict[str, Any]:
     return orchestrator.process_user_command(req.command)
+
+
+@app.get("/api/v1/testnet/verify")
+def verify_testnet_connectivity() -> Dict[str, Any]:
+    from .tools.exchange_tools import BinanceTool
+    from .tools.solana_tools import SolanaWalletTool
+
+    binance = BinanceTool()
+    solana = SolanaWalletTool()
+    return {
+        "binance_testnet": {
+            "authenticated": binance.authenticated,
+            "sol_usdt_price": binance.get_price("SOL/USDT"),
+            "balance": binance.get_usdt_balance(),
+        },
+        "solana_wallet": {
+            "rpc_url": solana.rpc_url,
+            "public_key": str(solana.keypair.pubkey()) if solana.keypair else None,
+            "balance_sol": solana.get_balance(),
+        },
+    }
 
 
 @app.websocket("/ws/chat")
