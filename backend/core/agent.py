@@ -11,6 +11,16 @@ from typing import Any, Dict, List, Optional
 from .schemas import Message
 
 
+# A completion cut by the token cap is a wasted cycle: the JSON contract is
+# truncated mid-object, parsing fails, and the deterministic fallback takes over
+# with paid tokens already spent. One bounded retry at a larger budget costs far
+# less than that lost cycle (measured 2026-10-20: DEEP_THESIS hit max_tokens=1200
+# exactly, missing asset_rules, next_wakeup_sec and wakeup_reason).
+TRUNCATION_ESCALATION_FACTOR = 2
+TRUNCATION_ESCALATION_FLOOR = 1800
+MAX_OUTPUT_TOKENS = 3200
+
+
 @dataclass
 class CallResult:
     """Structured result of one OpenRouter invocation with per-attempt failover telemetry."""
@@ -21,8 +31,14 @@ class CallResult:
     completion_tokens: int
     latency_ms: int
     attempts: List[Dict[str, Any]] = field(default_factory=list)
-    #  attempt = {"model", "latency_ms", "ok", "prompt_tokens", "completion_tokens", "error"}
+    #  attempt = {"model", "latency_ms", "ok", "prompt_tokens", "completion_tokens",
+    #             "finish_reason", "max_tokens", "phase", "error"}
     error: str = ""  # "" | "no_api_key" | "fallback_exhausted"
+    finish_reason: str = ""  # "stop" | "length" | ... of the returned attempt
+    truncated: bool = False  # returned attempt still hit the token cap
+    #  `prompt_tokens` / `completion_tokens` are cumulative over every billed
+    #  attempt (the discarded truncated one included), so cost accounting stays
+    #  truthful when an escalation retry runs.
 
 
 class BaseWarmAgent:
@@ -82,6 +98,11 @@ class BaseWarmAgent:
         or `z-ai/glm-5.3-flash`) and automatic failover across FALLBACK_CHAIN.
         Returns a `CallResult`: raw response (or None), model actually used, token usage,
         wall-clock latency, per-attempt failover telemetry and transport error.
+
+        A completion whose `finish_reason` is `length` is retried once on the same
+        model with an escalated budget, capped by `MAX_OUTPUT_TOKENS`. A truncated
+        completion is never accepted silently: `truncated`/`finish_reason` carry the
+        signal back to the caller and the transcript.
         """
         api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
         clean_pref = preferred_model.replace("openrouter/", "")
@@ -93,7 +114,8 @@ class BaseWarmAgent:
         attempts: List[Dict[str, Any]] = []
         total_start = time.perf_counter()
 
-        for model_slug in candidates:
+        def attempt(model_slug: str, budget: int, phase: str) -> Optional[CallResult]:
+            """One HTTP round-trip; telemetry is appended to `attempts` either way."""
             attempt_start = time.perf_counter()
             try:
                 payload = json.dumps(
@@ -103,7 +125,7 @@ class BaseWarmAgent:
                             {"role": "system", "content": sys_msg},
                             {"role": "user", "content": user_prompt},
                         ],
-                        "max_tokens": max_tokens,
+                        "max_tokens": budget,
                         "temperature": temperature,
                     }
                 ).encode("utf-8")
@@ -129,11 +151,16 @@ class BaseWarmAgent:
                             "ok": False,
                             "prompt_tokens": 0,
                             "completion_tokens": 0,
+                            "finish_reason": "",
+                            "max_tokens": budget,
+                            "phase": phase,
                             "error": "empty_choices",
                         }
                     )
-                    continue
-                content = choices[0].get("message", {}).get("content", "")
+                    return None
+                choice = choices[0]
+                content = choice.get("message", {}).get("content", "") or ""
+                finish_reason = str(choice.get("finish_reason") or "")
                 usage = body.get("usage", {})
                 p_tok = int(usage.get("prompt_tokens", 0))
                 c_tok = int(usage.get("completion_tokens", 0))
@@ -144,19 +171,24 @@ class BaseWarmAgent:
                         "ok": bool(content),
                         "prompt_tokens": p_tok,
                         "completion_tokens": c_tok,
+                        "finish_reason": finish_reason,
+                        "max_tokens": budget,
+                        "phase": phase,
                         "error": "" if content else "empty_content",
                     }
                 )
-                if content:
-                    return CallResult(
-                        str(content).strip(),
-                        model_slug,
-                        p_tok,
-                        c_tok,
-                        int((time.perf_counter() - total_start) * 1000),
-                        attempts=attempts,
-                        error="",
-                    )
+                if not content:
+                    return None
+                return CallResult(
+                    str(content).strip(),
+                    model_slug,
+                    p_tok,
+                    c_tok,
+                    int((time.perf_counter() - total_start) * 1000),
+                    error="",
+                    finish_reason=finish_reason,
+                    truncated=finish_reason == "length",
+                )
             except Exception as exc:
                 attempts.append(
                     {
@@ -165,12 +197,47 @@ class BaseWarmAgent:
                         "ok": False,
                         "prompt_tokens": 0,
                         "completion_tokens": 0,
+                        "finish_reason": "",
+                        "max_tokens": budget,
+                        "phase": phase,
                         "error": str(exc)[-200:],
                     }
                 )
                 print(f"[{self.agent_name}] OpenRouter model {model_slug} warning: {exc}")
+                return None
+
+        def finish(result: CallResult) -> CallResult:
+            """Attach cumulative usage and the full attempt trail to the returned call."""
+            result.prompt_tokens = sum(int(a.get("prompt_tokens", 0)) for a in attempts)
+            result.completion_tokens = sum(int(a.get("completion_tokens", 0)) for a in attempts)
+            result.latency_ms = int((time.perf_counter() - total_start) * 1000)
+            result.attempts = list(attempts)
+            return result
+
+        for model_slug in candidates:
+            result = attempt(model_slug, max_tokens, "initial")
+            if result is None:
                 continue
+            if not result.truncated:
+                return finish(result)
+
+            escalated = min(
+                MAX_OUTPUT_TOKENS,
+                max(max_tokens * TRUNCATION_ESCALATION_FACTOR, TRUNCATION_ESCALATION_FLOOR),
+            )
+            if escalated <= max_tokens:
+                return finish(result)
+            retry = attempt(model_slug, escalated, "escalated")
+            # Keep the retry even when still truncated: it is at least as complete
+            # as the first attempt, and `truncated` stays visible to the caller.
+            return finish(retry or result)
 
         return CallResult(
-            None, clean_pref, 0, 0, int((time.perf_counter() - total_start) * 1000), attempts=attempts, error="fallback_exhausted"
+            None,
+            clean_pref,
+            0,
+            0,
+            int((time.perf_counter() - total_start) * 1000),
+            attempts=list(attempts),
+            error="fallback_exhausted",
         )

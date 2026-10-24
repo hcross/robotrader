@@ -135,14 +135,16 @@ class LLMMonitorAgent(BaseWarmAgent):
                 "recall_limit": 2,
             }
 
-        # DEEP_THESIS (> 50% budget remaining)
+        # DEEP_THESIS (> 50% budget remaining). The reflective JSON contract
+        # (7 fields, French prose) needs ~1500 completion tokens; 1200 truncated
+        # it in production, so the cap is sized to the contract, not to the tier.
         model_key = self.preferred_model
         return {
             "thinking_depth": depth,
             "allow_llm": True,
             "model_key": model_key,
             "litellm_model": FRONTIER_FLASH_MODELS[model_key]["litellm_model"],
-            "max_tokens": 1200 if urgency_level == "HIGH_INFLECTION" else 900,
+            "max_tokens": 2200 if urgency_level == "HIGH_INFLECTION" else 1800,
             "min_wakeup_sec": 30,
             "recall_limit": 4,
         }

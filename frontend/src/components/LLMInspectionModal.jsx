@@ -13,6 +13,13 @@ const statusBadge = (call) => {
   if (call.status === 'llm_skipped_budget') {
     return <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">budget</span>;
   }
+  if (call.status === 'truncated_output' || call.truncated) {
+    return (
+      <span className="px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-300" title="Complétion coupée par la limite de jetons">
+        truncated
+      </span>
+    );
+  }
   if (call.parsed_ok) {
     return <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">parsed</span>;
   }
@@ -40,13 +47,26 @@ const PromptBlock = ({ label, text }) => (
 
 const AttemptRow = ({ attempt }) => (
   <tr className="border-b border-gray-800">
-    <td className="py-0.5 pr-2 font-mono text-gray-300">{attempt.model}</td>
+    <td className="py-0.5 pr-2 font-mono text-gray-300">
+      {attempt.model}
+      {attempt.phase === 'escalated' && (
+        <span className="ml-1 text-orange-400" title={`Relance après troncature (max_tokens=${attempt.max_tokens})`}>
+          ↻
+        </span>
+      )}
+    </td>
     <td className="py-0.5 pr-2 text-gray-400">{attempt.latency_ms} ms</td>
     <td className={`py-0.5 pr-2 ${attempt.ok ? 'text-emerald-400' : 'text-red-400'}`}>
       {attempt.ok ? 'OK' : 'KO'}
     </td>
     <td className="py-0.5 pr-2 text-gray-400">{attempt.prompt_tokens}</td>
     <td className="py-0.5 pr-2 text-gray-400">{attempt.completion_tokens}</td>
+    <td
+      className={`py-0.5 pr-2 ${attempt.finish_reason === 'length' ? 'text-orange-400' : 'text-gray-500'}`}
+      title={`max_tokens=${attempt.max_tokens ?? '—'}`}
+    >
+      {attempt.finish_reason || '—'}
+    </td>
     <td className="py-0.5 text-gray-500 break-words max-w-[16rem]">{attempt.error || '—'}</td>
   </tr>
 );
@@ -290,6 +310,7 @@ const LLMInspectionModal = ({ apiBase = 'http://localhost:8000', open, onClose }
                               <th className="text-left py-0.5 pr-2">état</th>
                               <th className="text-left py-0.5 pr-2">tok in</th>
                               <th className="text-left py-0.5 pr-2">tok out</th>
+                              <th className="text-left py-0.5 pr-2">finish</th>
                               <th className="text-left py-0.5">erreur</th>
                             </tr>
                           </thead>

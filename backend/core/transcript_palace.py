@@ -44,6 +44,8 @@ class TranscriptEntry:
     cost_usd: float = 0.0
     latency_ms: int = 0
     error: str = ""
+    finish_reason: str = ""  # "stop" | "length" | ... of the accepted attempt
+    truncated: bool = False  # completion still hit the token cap after escalation
     meta: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -72,6 +74,8 @@ class TranscriptEntry:
             cost_usd=float(data.get("cost_usd", 0.0)),
             latency_ms=int(data.get("latency_ms", 0)),
             error=str(data.get("error", "")),
+            finish_reason=str(data.get("finish_reason", "")),
+            truncated=bool(data.get("truncated", False)),
             meta=dict(data.get("meta", {})),
         )
 
@@ -254,6 +258,11 @@ def record_llm_call(
         resolved_status = "ok"
         if result.error:
             resolved_status = "no_api_key" if result.error == "no_api_key" else "fallback_failed"
+        elif result.truncated:
+            # The escalation retry did not fit the contract either: the cycle falls
+            # back to deterministic synthesis, and this status is what makes the
+            # token-cap misfit visible instead of a silent empty completion.
+            resolved_status = "truncated_output"
     return TranscriptEntry(
         entry_id=f"tsc_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}",
         timestamp_ms=int(time.time() * 1000),
@@ -274,6 +283,8 @@ def record_llm_call(
         cost_usd=float(cost_usd),
         latency_ms=int(result.latency_ms),
         error=(result.error or "")[-200:],
+        finish_reason=result.finish_reason,
+        truncated=bool(result.truncated),
         meta=dict(meta or {}),
     )
 
