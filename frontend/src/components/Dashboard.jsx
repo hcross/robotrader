@@ -517,11 +517,14 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
 
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <select
-              value={cognitive.active_model || 'deepseek/deepseek-v4.1-flash'}
+              value={cognitive.active_model || 'deepseek/deepseek-v4.1-flash-1017'}
               onChange={(e) => handleCognitiveConfigChange({ preferred_model: e.target.value })}
               className="bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 focus:outline-none focus:border-purple-500"
-              title="Modèle Frontier Ultra-Low-Cost"
+              title="Modèle Frontier Ultra-Low-Cost (Agent Feuille Solana)"
             >
+              <option value="deepseek/deepseek-v4.1-flash-1017">
+                DeepSeek v4.1 Flash 1017 ($0.028/M in • $0.080/M out)
+              </option>
               <option value="deepseek/deepseek-v4.1-flash">
                 DeepSeek v4.1 Flash ($0.028/M in • $0.080/M out)
               </option>
@@ -573,13 +576,13 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
           </div>
         </div>
 
-        {/* Multi-Asset Technical Analysis (Ichimoku, Fibonacci 0.618, RSI 14) & Compiled Rust Rules */}
+        {/* Solana Ecosystem Technical Analysis (Ichimoku, Fibonacci 0.618, RSI 14) & Compiled Rust Rules */}
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
-            Confluences Techniques 15m (Ichimoku Kinko Hyo • Fibonacci • RSI 14) &amp; Règles Mécaniques Rust
+            Confluences Techniques Écosystème Solana 15m (SOL • JUP • RAY — Ichimoku • Fibonacci 0.618 • RSI 14)
           </h4>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-            {['SOL/USDT', 'ETH/USDT', 'BTC/USDT'].map((sym) => {
+            {['SOL/USDT', 'JUP/USDT', 'RAY/USDT'].map((sym) => {
               const snap = taSnapshots[sym] || {};
               const ich = snap.ichimoku || {};
               const fib = snap.fibonacci || {};
@@ -689,30 +692,48 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
         </div>
       </div>
 
-      {/* Warm-Path Catalyst Feed */}
-      <div className="bg-gray-900 p-5 rounded-lg border border-gray-800">
-        <h3 className="text-base font-semibold text-white mb-3 flex items-center gap-2">
-          <Zap className="w-4 h-4 text-amber-400" />
-          Flux Catalyseurs &amp; Panorama Social (`CatalystScout` -&gt; `MetaAllocator`)
-        </h3>
-        <div className="space-y-2">
-          {catalysts.map((cat, idx) => (
-            <div
-              key={idx}
-              className="flex flex-wrap items-center justify-between gap-2 p-3 rounded bg-gray-800/60 border border-gray-700/70 text-xs"
-            >
-              <div>
-                <span className="font-bold text-white mr-2">{cat.asset}</span>
-                <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 mr-2">
-                  {cat.catalyst_type}
+      {/* Warm-Path Catalyst & Solana Exclusive RSS Feed */}
+      <div className="bg-gray-900 p-5 rounded-lg border border-gray-800 space-y-4">
+        <div>
+          <h3 className="text-base font-semibold text-white mb-3 flex items-center gap-2">
+            <Zap className="w-4 h-4 text-amber-400" />
+            Flux RSS &amp; Catalyseurs Exclusifs Écosystème Solana (`leaf-solana`)
+          </h3>
+          <div className="space-y-2">
+            {(statusData?.solana_rss?.items || []).map((rss, idx) => (
+              <div
+                key={`rss-${idx}`}
+                className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded bg-purple-950/30 border border-purple-500/30 text-xs"
+              >
+                <div>
+                  <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold mr-2">
+                    RSS • {rss.source}
+                  </span>
+                  <span className="text-gray-200">{rss.title}</span>
+                </div>
+                <span className="text-emerald-400 font-mono text-[11px]">
+                  Sentiment {(Number(rss.sentiment || 0.5) * 100).toFixed(0)}% ({rss.impact || 'HIGH'})
                 </span>
-                <span className="text-gray-300">{cat.summary}</span>
               </div>
-              <span className="text-emerald-400 font-semibold">
-                Conviction {(Number(cat.conviction || 0) * 100).toFixed(0)}% ({cat.directional_bias})
-              </span>
-            </div>
-          ))}
+            ))}
+            {catalysts.map((cat, idx) => (
+              <div
+                key={idx}
+                className="flex flex-wrap items-center justify-between gap-2 p-3 rounded bg-gray-800/60 border border-gray-700/70 text-xs"
+              >
+                <div>
+                  <span className="font-bold text-white mr-2">{cat.asset}</span>
+                  <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 mr-2">
+                    {cat.catalyst_type}
+                  </span>
+                  <span className="text-gray-300">{cat.summary}</span>
+                </div>
+                <span className="text-emerald-400 font-semibold">
+                  Conviction {(Number(cat.conviction || 0) * 100).toFixed(0)}% ({cat.directional_bias})
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
       <LLMInspectionModal
