@@ -1,6 +1,10 @@
-# Robotrader v2 Architecture: Hybrid Quant + Agentic Meta-Controller
+# Robotrader v3 Architecture: Hierarchical Multi-Ecosystem Quant + Agentic Meta-Controller
 
-> **Reference Decision**: [ADR-0001: Hybrid Rust/Python Event-Driven Quant & Agentic Meta-Controller Architecture](adr/0001-hybrid-quant-agentic-architecture.md)
+> **Reference Decisions**:
+> - [ADR-0001: Hybrid Rust/Python Event-Driven Quant & Agentic Meta-Controller Architecture](adr/0001-hybrid-quant-agentic-architecture.md)
+> - [ADR-0002: Autonomous Cognitive Warm-Path, Pro TA & Strategy Palace](adr/0002-autonomous-cognitive-warm-path-and-ta-memory.md)
+> - [ADR-0003: Hierarchical Multi-Ecosystem Architecture, Master Treasury & Cross-Wing MemPalace](adr/0003-hierarchical-multi-ecosystem-architecture.md)
+> - [Quantitative Performance & LLM Inference Cost Audit](PERFORMANCE_AND_COST_AUDIT.md)
 
 ## 1. Architectural Philosophy
 

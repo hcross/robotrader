@@ -1,60 +1,63 @@
 from __future__ import annotations
 
+import json
 import os
+import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..core.agent import BaseWarmAgent
 from ..core.schemas import Message
 
-# OpenRouter Frontier-Efficiency Model Catalog (Prices in USD per 1M tokens)
+# OpenRouter Frontier-Efficiency Model Catalog (Realistic effective prices in USD per 1M tokens)
 FRONTIER_FLASH_MODELS: Dict[str, Dict[str, Any]] = {
     "moonshotai/kimi-k3.1-pro": {
         "litellm_model": "openrouter/moonshotai/kimi-k3.1-pro",
         "label": "Kimi K3.1 Pro (Master Orchestrator)",
-        "input_usd_per_m": 0.140,
-        "output_usd_per_m": 0.420,
+        "input_usd_per_m": 0.600,
+        "output_usd_per_m": 2.500,
         "tier": "MASTER_ORCHESTRATOR_PRO",
     },
     "deepseek/deepseek-v4.1-flash-1017": {
         "litellm_model": "openrouter/deepseek/deepseek-v4.1-flash-1017",
         "label": "DeepSeek v4.1 Flash 1017 (Leaf Agent)",
-        "input_usd_per_m": 0.028,
-        "output_usd_per_m": 0.080,
+        "input_usd_per_m": 0.300,
+        "output_usd_per_m": 1.100,
         "tier": "LEAF_AGENT_FLASH_PRIMARY",
     },
     "deepseek/deepseek-v4.1-flash": {
         "litellm_model": "openrouter/deepseek/deepseek-v4.1-flash",
         "label": "DeepSeek v4.1 Flash",
-        "input_usd_per_m": 0.028,
-        "output_usd_per_m": 0.080,
+        "input_usd_per_m": 0.300,
+        "output_usd_per_m": 1.100,
         "tier": "FRONTIER_FLASH_PRIMARY",
     },
     "z-ai/glm-5.3-flash": {
         "litellm_model": "openrouter/z-ai/glm-5.3-flash",
         "label": "GLM 5.3 Flash (Z-AI)",
-        "input_usd_per_m": 0.048,
-        "output_usd_per_m": 0.160,
+        "input_usd_per_m": 0.150,
+        "output_usd_per_m": 0.600,
         "tier": "FRONTIER_FLASH_COPRIMARY",
     },
     "qwen/qwen3.7-flash": {
         "litellm_model": "openrouter/qwen/qwen3.7-flash",
         "label": "Qwen 3.7 Flash",
-        "input_usd_per_m": 0.030,
-        "output_usd_per_m": 0.130,
+        "input_usd_per_m": 0.150,
+        "output_usd_per_m": 0.600,
         "tier": "FRONTIER_FLASH_FALLBACK",
     },
     "z-ai/glm-5.3": {
         "litellm_model": "openrouter/z-ai/glm-5.3",
         "label": "GLM 5.3 Frontier Reasoning",
-        "input_usd_per_m": 0.079,
+        "input_usd_per_m": 0.350,
         "output_usd_per_m": 1.400,
         "tier": "FRONTIER_DEEP_INFLECTION",
     },
     "deepseek/deepseek-v4-pro": {
         "litellm_model": "openrouter/deepseek/deepseek-v4-pro",
         "label": "DeepSeek v4 Pro",
-        "input_usd_per_m": 0.372,
-        "output_usd_per_m": 0.743,
+        "input_usd_per_m": 0.600,
+        "output_usd_per_m": 1.800,
         "tier": "FRONTIER_DEEP_INFLECTION",
     },
 }
@@ -90,6 +93,11 @@ class LLMMonitorAgent(BaseWarmAgent):
         self.total_calls: int = 0
         self.usage_log: List[Dict[str, Any]] = []
 
+        # Default to paused auto-scheduler ($0.00/h at boot) unless explicitly enabled
+        self.auto_scheduler_enabled: bool = os.getenv(
+            "ENABLE_AUTO_LLM_SCHEDULER", "false"
+        ).lower() in ("true", "1", "yes")
+
         # ADR-0003: Profit-Gated & Epoch-Capped OpenRouter Credit Treasury
         self.openrouter_balance_usd: float = float(
             os.getenv("OPENROUTER_INITIAL_BALANCE_USD", "8.50")
@@ -106,6 +114,70 @@ class LLMMonitorAgent(BaseWarmAgent):
         self.epoch_refilled_usd: float = 0.0
         self.auto_refill_enabled: bool = True
         self.refill_history: List[Dict[str, Any]] = []
+
+        if os.getenv("REDIS_URL", "").strip():
+            self.hydrate_from_ledger()
+
+    def hydrate_from_ledger(self, storage_path: Optional[Path] = None) -> Dict[str, Any]:
+        """
+        Reconstructs rolling 24h LLM spend from `backend/data/transcript_ledger.jsonl`
+        using realistic OpenRouter pricing so container restarts never reset the daily budget counter.
+        """
+        path = storage_path or (
+            Path(__file__).resolve().parents[1] / "data" / "transcript_ledger.jsonl"
+        )
+        if not path.exists():
+            return {"hydrated_calls": 0, "hydrated_cost_usd": 0.0}
+
+        cutoff_ms = int(time.time() * 1000) - 86_400_000
+        cost_sum = 0.0
+        tok_sum = 0
+        calls_cnt = 0
+        recent: List[Dict[str, Any]] = []
+
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                ts = int(entry.get("timestamp_ms", 0))
+                if ts < cutoff_ms:
+                    continue
+                p_tok = int(entry.get("prompt_tokens", 0))
+                c_tok = int(entry.get("completion_tokens", 0))
+                if p_tok <= 0 and c_tok <= 0:
+                    continue
+                model_used = str(
+                    entry.get("model_used")
+                    or entry.get("model_requested")
+                    or self.preferred_model
+                )
+                real_cost = max(
+                    float(entry.get("cost_usd", 0.0)),
+                    self.compute_call_cost(model_used, p_tok, c_tok),
+                )
+                cost_sum += real_cost
+                tok_sum += p_tok + c_tok
+                calls_cnt += 1
+                recent.append(
+                    {
+                        "agent": str(entry.get("agent", "unknown")),
+                        "model": model_used,
+                        "cost": round(real_cost, 6),
+                        "tokens": p_tok + c_tok,
+                    }
+                )
+        except Exception:
+            pass
+
+        self.total_cost_usd = round(cost_sum, 6)
+        self.total_tokens = tok_sum
+        self.total_calls = calls_cnt
+        self.usage_log = list(reversed(recent[-50:]))
+        return {"hydrated_calls": calls_cnt, "hydrated_cost_usd": self.total_cost_usd}
 
     @property
     def remaining_budget_usd(self) -> float:
@@ -142,7 +214,7 @@ class LLMMonitorAgent(BaseWarmAgent):
                 "max_tokens": 0,
                 "escalation_floor": 0,
                 "max_escalation_tokens": 0,
-                "min_wakeup_sec": 600,
+                "min_wakeup_sec": 3600,
                 "recall_limit": 0,
             }
 
@@ -159,7 +231,7 @@ class LLMMonitorAgent(BaseWarmAgent):
                 "max_tokens": 350,
                 "escalation_floor": 500,
                 "max_escalation_tokens": 650,
-                "min_wakeup_sec": 300,
+                "min_wakeup_sec": 1800,
                 "recall_limit": 1,
             }
 
@@ -186,12 +258,12 @@ class LLMMonitorAgent(BaseWarmAgent):
                 "max_tokens": 700,
                 "escalation_floor": 950,
                 "max_escalation_tokens": 1200,
-                "min_wakeup_sec": 90,
+                "min_wakeup_sec": 900,
                 "recall_limit": 2,
             }
 
-        # DEEP_THESIS (> 50% budget remaining). The full reflective JSON contract
-        # (7 fields, detailed French prose across 3 pairs) needs ~1500-2100 tokens.
+        # DEEP_THESIS (> 50% budget remaining): aligned on 15m candle closes (min_wakeup_sec=900s)
+        # with compact TA digest and lean output ceiling to avoid token bloat.
         model_key = self.preferred_model
         return {
             "thinking_depth": depth,
@@ -199,11 +271,11 @@ class LLMMonitorAgent(BaseWarmAgent):
             "allow_llm": True,
             "model_key": model_key,
             "litellm_model": FRONTIER_FLASH_MODELS[model_key]["litellm_model"],
-            "max_tokens": 2200 if urgency_level == "HIGH_INFLECTION" else 1800,
-            "escalation_floor": 1800,
-            "max_escalation_tokens": 3200,
-            "min_wakeup_sec": 30,
-            "recall_limit": 4,
+            "max_tokens": 950,
+            "escalation_floor": 1250,
+            "max_escalation_tokens": 1600,
+            "min_wakeup_sec": 900,
+            "recall_limit": 2,
         }
 
     def compute_call_cost(self, model_key: str, prompt_tokens: int, completion_tokens: int) -> float:
@@ -357,6 +429,7 @@ class LLMMonitorAgent(BaseWarmAgent):
             "remaining_ratio_pct": round(self.remaining_budget_ratio * 100.0, 1),
             "utilization_pct": round(utilization_pct, 3),
             "budget_exhausted": self.budget_exhausted,
+            "auto_scheduler_enabled": self.auto_scheduler_enabled,
             "thinking_depth": self.get_thinking_depth(),
             "master_model": self.master_model,
             "master_model_meta": FRONTIER_FLASH_MODELS.get(self.master_model),

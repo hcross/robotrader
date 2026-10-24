@@ -90,11 +90,17 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
   const [bridgeExpectedBps, setBridgeExpectedBps] = useState('95');
   const [bridgeEvalResult, setBridgeEvalResult] = useState(null);
   const [masterReflecting, setMasterReflecting] = useState(false);
+  const [togglingScheduler, setTogglingScheduler] = useState(false);
   const [refillingOr, setRefillingOr] = useState(false);
   const [showLLMModal, setShowLLMModal] = useState(false);
   const [llmModalAgentFilter, setLlmModalAgentFilter] = useState('MasterOrchestrator/MacroLoop');
   const [tierFilter, setTierFilter] = useState('ALL');
   const masterDrawers = master.palace_drawers || [];
+  const autoSchedulerEnabled = Boolean(
+    statusData?.cost_guard?.auto_scheduler_enabled ??
+      statusData?.cognitive_engine?.auto_scheduler_enabled ??
+      false
+  );
 
   const handleDeposit = async (e) => {
     e.preventDefault();
@@ -179,6 +185,20 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
     }
   };
 
+  const handleToggleAutoScheduler = async () => {
+    setTogglingScheduler(true);
+    try {
+      await fetch(`${apiBase}/api/v1/cognitive/scheduler`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !autoSchedulerEnabled }),
+      });
+      if (onRefresh) await onRefresh();
+    } finally {
+      setTogglingScheduler(false);
+    }
+  };
+
   const handleOpenRouterRefill = async () => {
     setRefillingOr(true);
     try {
@@ -257,6 +277,22 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleToggleAutoScheduler}
+              disabled={togglingScheduler}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition ${
+                autoSchedulerEnabled
+                  ? 'bg-emerald-950/70 hover:bg-emerald-900/70 text-emerald-300 border-emerald-500/40'
+                  : 'bg-amber-950/70 hover:bg-amber-900/70 text-amber-300 border-amber-500/40'
+              }`}
+              title="Active ou met en pause les réveils périodiques automatiques LLM en arrière-plan (15m feuilles / 1h maître)"
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              {autoSchedulerEnabled
+                ? 'Auto-Scheduler LLM : ACTIF (15m / 1h)'
+                : 'Auto-Scheduler LLM : PAUSE ($0.00/h)'}
+            </button>
             <button
               type="button"
               onClick={handleMasterReflect}

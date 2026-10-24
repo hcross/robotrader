@@ -1,8 +1,11 @@
-# Robotrader v2 🤖📈⚡
+# Robotrader v3 🤖📈⚡
 
-**Robotrader v2** is a **Hybrid Quantitative & Autonomous Cognitive Cryptocurrency Trading Platform**.
+**Robotrader v3** is a **Hierarchical Multi-Ecosystem Hybrid Rust/Python Quantitative & Autonomous Cognitive Cryptocurrency Trading Platform**.
 
-It combines **deterministic sub-millisecond Rust execution (`engine-rs`)** with an **asynchronous AI Cognitive Loop (`backend`)** equipped with a professional Technical Analysis toolbelt, an infinite Strategy Memory Palace, self-scheduling wakeups, and budget-governed frontier model routing.
+It combines:
+- **Tier 1 — Master Orchestrator & Cross-Chain Treasury (`moonshotai/kimi-k3.1-pro`)**: Manages the Master Portfolio, enforces a permanent `>= 20%` `Dry Powder` safety reserve, prices cross-chain transfer viability (`2.5x` round-trip bridge hurdle rate), executes multi-chain/multi-token operator `Checkout` requests, reads across all 26 leaf agents' MemPalace wings (`wing="master_orchestrator"`), and governs profit-gated OpenRouter credit auto-refill on a `1h` (`3600s`) macro cadence.
+- **Tier 2 — 26 Specialized Blockchain & Venue Leaf Robots (`deepseek/deepseek-v4.1-flash-1017`)**: Each leaf robot is strictly isolated to **one single blockchain** (Solana, Bitcoin, Ethereum, Sui, Hyperliquid, BNB, XRP, TON, TRON, Avalanche, Cosmos, Aptos, Chainlink, Stacks, NEAR, Cardano, Polkadot, Dogecoin, ICP, Canton, Celo, Tezos, Flow, Vaulta/EOS, plus Binance CEX Multi-Pair and Paper Sandbox) with its own RSS feed, specific TA/on-chain metrics, dedicated MemPalace wing (`wing="leaf_<slug>"`), and **`1..=4` ecosystem-adapted Rust Strategy Pods** in `engine-rs`.
+- **Tier 3 — Sub-Millisecond Deterministic Rust Execution (`engine-rs`, `<50µs`)**: Synchronous `HardRiskGate`, Kelly position sizer, Solana SPL anti-rug filter, and per-blockchain Rust strategy pods with zero LLM latency in the hot path.
 
 ---
 
@@ -95,9 +98,10 @@ The warm-path LLM translates abstract market theses into concrete numerical rule
 - `invalidation_price_usd`
 - `take_profit_bps` & `stop_loss_bps`
 
-### 5. Configurable Scheduler & Self-Scheduling Wakeups
-- Runs periodic strategic evaluations at a configurable base interval (`cognitive_base_interval_sec`, default `120s`).
-- The LLM can autonomously schedule an **earlier wakeup** (`next_wakeup_sec` + `wakeup_reason`) when critical Fibonacci levels or Ichimoku cloud boundaries are being tested.
+### 5. Candle-Aligned Scheduler & Default-Paused LLM Spend (`$0.00/h` at Boot)
+- Background LLM scheduling is **paused by default at startup** (`ENABLE_AUTO_LLM_SCHEDULER=false`, `$0.00/h`) so starting the stack never incurs unexpected OpenRouter spend. It can be toggled live from the Command Center header (`Auto-Scheduler LLM : PAUSE ($0.00/h)` / `ACTIF`) or via `POST /api/v1/cognitive/scheduler`.
+- When enabled, active leaf agents evaluate on **15-minute candle closes (`900s`)** using a compact TA digest (`~1,150` input tokens instead of `~8,300`), while the Master Orchestrator evaluates on a **1-hour macro cadence (`3600s`)**.
+- **`CostGuard`** tracks realistic OpenRouter pricing and hydrates rolling 24h spend from `backend/data/transcript_ledger.jsonl` on container startup. See the full [Performance & Cost Audit](docs/PERFORMANCE_AND_COST_AUDIT.md).
 
 ### 6. Budget-Driven Cognitive Routing & Ultra-Low-Cost Frontier Models
 - **CostGuard** enforces a daily hard USD spend limit (`MAX_DAILY_LLM_BUDGET_USD`).
@@ -204,12 +208,16 @@ cd frontend && npm run build
 
 ---
 
-## 📖 Architecture Decision Records (ADRs)
+## 📖 Architecture Decision Records (ADRs) & Audits
 
 - [**ADR-0001: Hybrid Quant & Agentic Architecture**](docs/adr/0001-hybrid-quant-agentic-architecture.md)  
   *Establishment of the hot-path Rust workspace, synchronous HardRiskGate, Kelly position sizing, and warm-path Python meta-allocation.*
 - [**ADR-0002: Autonomous Cognitive Warm-Path, Pro TA & Strategy Palace**](docs/adr/0002-autonomous-cognitive-warm-path-and-ta-memory.md)  
   *Integration of real mathematical TA indicators (Ichimoku, Fibonacci 0.618, RSI, ATR, Bollinger), infinite strategy memory, compiled mechanical rules, self-scheduling wakeups, and budget-driven frontier flash model routing.*
+- [**ADR-0003: Hierarchical Multi-Ecosystem Architecture, Master Treasury & Cross-Wing MemPalace**](docs/adr/0003-hierarchical-multi-ecosystem-architecture.md)  
+  *Master Orchestrator (`moonshotai/kimi-k3.1-pro`) + 26 isolated blockchain/venue leaf agents (`deepseek/deepseek-v4.1-flash-1017`), `<= 4` ecosystem-adapted Rust pods per blockchain, Cross-Chain Bridge Hurdle Pricer (`2.5x`), Dry Powder floor (`>= 20%`), and multi-token Checkout.*
+- [**Performance & LLM Cost Post-Mortem Audit (`docs/PERFORMANCE_AND_COST_AUDIT.md`)**](docs/PERFORMANCE_AND_COST_AUDIT.md)  
+  *Full quantitative audit of the 325 LLM cycles / 4.41M tokens (`~$2.00` OpenRouter spend), breakdown of the 3 trading populations (`backtest_fixture` 100% win rate / Sharpe 28.22, `paper_model` `+$1,155.52` over 1,500 trades, `live_testnet`), and the 4 structural remediations reducing LLM OpEx by 25x–40x.*
 
 ---
 

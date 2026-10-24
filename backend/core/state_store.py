@@ -127,11 +127,13 @@ class HybridStateStore:
         )
         self.latest_ta_snapshots: Dict[str, Dict[str, Any]] = {}
         self.latest_social_panorama: Dict[str, Any] = {}
-        self.cognitive_base_interval_sec: int = int(os.getenv("COGNITIVE_BASE_INTERVAL_SEC", "120"))
+        self.cognitive_base_interval_sec: int = int(os.getenv("COGNITIVE_BASE_INTERVAL_SEC", "900"))
         now_ms = int(time.time() * 1000)
         self.last_cognitive_wakeup_ms: int = now_ms
-        self.next_cognitive_wakeup_ms: int = now_ms + 15_000
-        self.cognitive_wakeup_reason: str = "Initialisation de la boucle cognitive Warm-Path (Branche Solana)"
+        self.next_cognitive_wakeup_ms: int = now_ms + self.cognitive_base_interval_sec * 1000
+        self.cognitive_wakeup_reason: str = (
+            "Auto-scheduler LLM en pause par défaut ($0.00/h) — cadence 15m (900s) alignée sur la clôture des bougies"
+        )
 
         self._load_persisted_state()
 
@@ -223,7 +225,7 @@ class HybridStateStore:
             if isinstance(data.get("testnet_wallet_snapshot"), dict):
                 self.testnet_wallet_snapshot.update(data["testnet_wallet_snapshot"])
             if "cognitive_base_interval_sec" in data:
-                self.cognitive_base_interval_sec = max(30, int(data["cognitive_base_interval_sec"]))
+                self.cognitive_base_interval_sec = max(900, int(data["cognitive_base_interval_sec"]))
             if "cognitive_wakeup_reason" in data:
                 self.cognitive_wakeup_reason = str(data["cognitive_wakeup_reason"])
         except Exception as exc:

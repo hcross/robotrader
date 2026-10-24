@@ -19,7 +19,7 @@ We evolve Robotrader into a **Two-Tier Hierarchical Multi-Ecosystem System (Robo
 
 ### 1. Tier 1 — Master Orchestrator & Treasury Controller (`moonshotai/kimi-k3.1-pro`)
 - **Role**: Chief Investment Officer (CIO) and holder of the **Master Portfolio (`Master Treasury`)**.
-- **Long-Term Horizon**: Operates on a macro reflection cycle (default `900s` / 15m) fed by **multi-channel macro RSS feeds** (institutional ETF flows, central bank liquidity, regulatory catalysts, cross-chain TVL flows).
+- **Long-Term Horizon**: Operates on a macro reflection cycle (default `3600s` / 1h) fed by **multi-channel macro RSS feeds** (institutional ETF flows, central bank liquidity, regulatory catalysts, cross-chain TVL flows).
 - **Dry Powder Reserve**: Always maintains a liquid safety and opportunity reserve (`Dry Powder >= 20%` of total capital, target `22%`) to absorb drawdowns, fund high-conviction dislocations, or serve operator withdrawals immediately.
 - **Capital Allocation & Risk Mandates**: Allocates capital according to total portfolio scale (`< $5k` concentrated P0, `$5k-$50k` P0+P1+CEX, `> $50k` full multi-chain deployment) and assigns a dynamic risk posture (`AGGRESSIVE`, `BALANCED`, `DEFENSIVE`, `HIBERNATION`) to each leaf robot.
 - **Emergency Liquidation & Repatriation**: Can immediately close a leaf robot's positions and repatriate 100% of its capital into Dry Powder (`POST /api/v1/leaf/{leaf_id}/liquidate`) if its blockchain experiences security/bridge distress or notable underperformance.
@@ -31,6 +31,8 @@ We evolve Robotrader into a **Two-Tier Hierarchical Multi-Ecosystem System (Robo
 
 ### 2. Tier 2 — 26 Specialized Blockchain & Venue Leaf Robots (`deepseek/deepseek-v4.1-flash-1017`)
 - **Strict Single-Ecosystem Isolation**: Each leaf agent monitors and trades **exclusively** its assigned blockchain (or dedicated multi-crypto/paper venue), reads **only** its ecosystem-scoped RSS feeds (`EcosystemRSSAggregator`), computes ecosystem-specific TA/on-chain metrics, and writes to its dedicated MemPalace wing (`wing="leaf_<slug>"`).
+- **Ecosystem-Adapted Rust Strategy Pods (`<= 4` per Blockchain)**: Each of the 26 blockchains has its own tailored Rust execution pods in `engine-rs` (`crates/strategies/src/lib.rs`, `build_pods_for_leaf(leaf_id)`, hard-capped at `1..=4` pods per ecosystem) and can run deterministic Rust backtests (`POST /api/v1/leaf/{leaf_id}/backtest`).
+- **15m Candle-Aligned Cadence & Default-Paused Scheduler**: Active leaf agents align their cognitive wakeup floor with 15-minute candle closes (`900s`), hibernating leaves use `3600s`, and the automatic background LLM scheduler defaults to paused (`ENABLE_AUTO_LLM_SCHEDULER=false`, `$0.00/h`) until explicitly enabled via the UI/API (`POST /api/v1/cognitive/scheduler`). See [Performance & Cost Audit](../PERFORMANCE_AND_COST_AUDIT.md).
 - **Purification of `leaf-solana`**: All non-Solana trading (`BTC/USDT`, `ETH/USDT`) is stripped from the Solana branch (`state_store.py`, `orchestrator.py`, `engine-rs/crates/backtest`, `Dashboard.jsx`). `leaf-solana` now exclusively trades Solana ecosystem pairs (`SOL/USDT`, `JUP/USDT`, `RAY/USDT`, `SOL-DEVNET`).
 - **26-Agent Fleet Taxonomy**:
   - **P0 Core High-Velocity L1s**: `leaf-solana` (SOL/JUP/RAY), `leaf-bitcoin` (BTC), `leaf-ethereum` (ETH), `leaf-sui` (SUI), `leaf-hyperliquid` (HYPE).

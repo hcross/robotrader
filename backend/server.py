@@ -49,6 +49,11 @@ class KillSwitchRequest(BaseModel):
 class CognitiveConfigRequest(BaseModel):
     base_interval_sec: int | None = None
     preferred_model: str | None = None
+    auto_scheduler_enabled: bool | None = None
+
+
+class SchedulerToggleRequest(BaseModel):
+    enabled: bool
 
 
 class TreasuryDepositRequest(BaseModel):
@@ -274,10 +279,22 @@ def trigger_cognitive_reflection() -> Dict[str, Any]:
 
 @app.post("/api/v1/cognitive/config")
 def configure_cognitive_engine(req: CognitiveConfigRequest) -> Dict[str, Any]:
+    if req.auto_scheduler_enabled is not None:
+        orchestrator.cost_guard.auto_scheduler_enabled = bool(req.auto_scheduler_enabled)
     return orchestrator.update_cognitive_config(
         base_interval_sec=req.base_interval_sec,
         preferred_model=req.preferred_model,
     )
+
+
+@app.post("/api/v1/cognitive/scheduler")
+def toggle_cognitive_scheduler(req: SchedulerToggleRequest) -> Dict[str, Any]:
+    orchestrator.cost_guard.auto_scheduler_enabled = bool(req.enabled)
+    return {
+        "status": "updated",
+        "auto_scheduler_enabled": orchestrator.cost_guard.auto_scheduler_enabled,
+        "cost_guard": orchestrator.cost_guard.get_status(),
+    }
 
 
 @app.post("/api/v1/backtest/run")

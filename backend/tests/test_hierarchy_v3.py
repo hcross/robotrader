@@ -268,6 +268,56 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertEqual(ok["refilled_usd"], 12.0)
         self.assertAlmostEqual(cg.openrouter_credit_balance_usd, 13.80, places=2)
 
+    def test_cost_and_cadence_optimizations(self) -> None:
+        """
+        Verifies the 4 cost & cadence adjustments:
+        1. Auto-scheduler paused by default ($0.00/h at startup)
+        2. 15m (900s) leaf cadence & 1h (3600s) Master Orchestrator cadence
+        3. Compact TA digest in FULL_THESIS (~1,150 tokens instead of ~8,300 tokens)
+        4. Realistic OpenRouter pricing + rolling 24h ledger hydration in CostGuard
+        """
+        import json
+        import time
+        from pathlib import Path
+
+        cg = self.orchestrator.cost_guard
+        self.assertFalse(cg.auto_scheduler_enabled)
+        self.assertEqual(self.store.cognitive_base_interval_sec, 900)
+        self.assertEqual(self.store.hierarchy.master_interval_sec, 3600)
+
+        profile = cg.select_cognitive_profile(urgency_level="HIGH_INFLECTION")
+        self.assertGreaterEqual(profile["min_wakeup_sec"], 900)
+
+        data = self.store.refresh_ta_and_panorama()
+        _, user_prompt = self.orchestrator._build_reflection_prompts(
+            thinking_depth="DEEP_THESIS",
+            output_contract="FULL_THESIS",
+            ta_snapshots=data["ta_snapshots"],
+            panorama=data["social_panorama"],
+            continuity_ctx="Continuité nominale.",
+            min_wakeup=900,
+            base_interval=900,
+        )
+        # Compact TA digest keeps user_prompt well under 4,500 chars (~1,100 tokens)
+        self.assertLess(len(user_prompt), 4500)
+        self.assertIn("fib_382", user_prompt)
+        self.assertIn("fib_618", user_prompt)
+
+        # Verify ledger hydration with realistic OpenRouter pricing
+        ledger_file = Path(self._tmpdir.name) / "sample_ledger.jsonl"
+        sample_entry = {
+            "timestamp_ms": int(time.time() * 1000),
+            "agent": "Leaf/leaf-solana",
+            "model_used": "deepseek/deepseek-v4.1-flash-1017",
+            "prompt_tokens": 100_000,
+            "completion_tokens": 20_000,
+        }
+        ledger_file.write_text(json.dumps(sample_entry) + "\n", encoding="utf-8")
+        hydrated = cg.hydrate_from_ledger(storage_path=ledger_file)
+        self.assertEqual(hydrated["hydrated_calls"], 1)
+        # 0.1M * $0.30 + 0.02M * $1.10 = $0.03 + $0.022 = $0.052
+        self.assertAlmostEqual(hydrated["hydrated_cost_usd"], 0.052, places=4)
+
 
 if __name__ == "__main__":
     unittest.main()

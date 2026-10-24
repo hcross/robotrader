@@ -59,7 +59,10 @@ class OrchestratorAgent(BaseWarmAgent):
             while True:
                 try:
                     now_ms = int(time.time() * 1000)
-                    if not self.store.kill_switch_active:
+                    if (
+                        not self.store.kill_switch_active
+                        and self.cost_guard.auto_scheduler_enabled
+                    ):
                         if now_ms >= self.store.next_cognitive_wakeup_ms:
                             self.run_strategic_reflection(trigger_source="AUTO_SCHEDULER")
                         master_next = int(
@@ -94,25 +97,34 @@ class OrchestratorAgent(BaseWarmAgent):
 
     @staticmethod
     def _compact_ta_digest(ta_snapshots: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-        """Extracts essential scalar indicators so TACTICAL/ECO prompts stay light."""
+        """Extracts essential scalar indicators (~300 tokens total instead of ~6,000 raw JSON tokens)."""
         digest: Dict[str, Dict[str, Any]] = {}
         for sym, snap in ta_snapshots.items():
             if not isinstance(snap, dict):
                 continue
             ich = snap.get("ichimoku", {})
             fib = snap.get("fibonacci", {})
+            levels = fib.get("levels", {}) if isinstance(fib.get("levels"), dict) else {}
             rsi = snap.get("rsi", {})
+            vol = snap.get("volatility", {})
             zones = snap.get("key_zones", {})
             digest[sym] = {
                 "last_price": snap.get("last_price"),
                 "obi_l2": snap.get("obi_l2"),
+                "confluence_score": snap.get("confluence_score"),
                 "kumo_regime": ich.get("kumo_regime"),
+                "tk_cross": ich.get("tk_cross"),
                 "tenkan": ich.get("tenkan_sen"),
                 "kijun": ich.get("kijun_sen"),
                 "kumo_top": ich.get("kumo_top"),
+                "kumo_bottom": ich.get("kumo_bottom"),
+                "fib_382": levels.get("0.382"),
                 "fib_618": fib.get("golden_pocket_618"),
+                "fib_786": levels.get("0.786"),
                 "fib_dist_bps": fib.get("distance_to_nearest_bps"),
                 "rsi_14": rsi.get("rsi_14"),
+                "rsi_slope": rsi.get("slope"),
+                "atr_bps": vol.get("atr_bps"),
                 "support_usd": zones.get("support_zone_usd"),
                 "resistance_usd": zones.get("resistance_zone_usd"),
                 "invalidation_usd": zones.get("invalidation_price_usd"),
@@ -199,17 +211,20 @@ class OrchestratorAgent(BaseWarmAgent):
             )
             return sys_prompt, user_prompt
 
-        sol_ta = ta_snapshots.get("SOL/USDT", {})
-        jup_ta = ta_snapshots.get("JUP/USDT", {})
-        ray_ta = ta_snapshots.get("RAY/USDT", {})
+        digest = self._compact_ta_digest(ta_snapshots)
+        pano_compact = {
+            "urgency_level": panorama.get("urgency_level"),
+            "composite_sentiment": panorama.get("composite_sentiment"),
+            "solana_rss": rss_headlines,
+        }
 
         sys_prompt = (
             "Tu es le Robot Feuille Solana (`leaf-solana`) de l'architecture hiérarchique Robotrader v3.\n"
             "Tu es EXCLUSIVEMENT spécialisé dans la blockchain Solana (SOL/USDT, JUP/USDT, RAY/USDT, Jupiter v6, Raydium CLMM, Jito MEV).\n"
-            "Tu analyses les flux RSS Solana dédiés et les indicateurs techniques précis "
-            "(Ichimoku Kinko Hyo, Retracements de Fibonacci 0.618 Golden Pocket, RSI 14, ATR/Bollinger, OBI L2).\n"
+            "Tu analyses les flux RSS Solana dédiés et le digest d'analyse technique 15m "
+            "(Ichimoku Kinko Hyo, Retracements de Fibonacci 0.382/0.618/0.786, RSI 14, ATR, OBI L2).\n"
             "Tu maintiens une continuité logique stricte avec tes thèses précédentes stockées dans ton MemPalace (`wing=leaf_solana`).\n"
-            "Tu déclines ta stratégie en règles mécaniques exécutées en <50µs par les pods Rust Solana, "
+            "Tu déclines ta stratégie en règles mécaniques exécutées en <50µs par les 4 pods Rust Solana, "
             "et tu décides de ton prochain réveil (`next_wakeup_sec`).\n"
             "Réponds UNIQUEMENT avec un objet JSON valide (sans texte autour)."
         )
@@ -217,13 +232,8 @@ class OrchestratorAgent(BaseWarmAgent):
         user_prompt = (
             f"=== MODE COGNITIF : {thinking_depth} (Budget restant: ${rem_usd:.4f}) ===\n"
             f"=== MÉMOIRE CONTINUE (MEMPALACE SOLANA) ===\n{continuity_ctx}\n\n"
-            f"=== FLUX RSS DÉDIÉS ÉCOSYSTÈME SOLANA ===\n{json.dumps(rss_headlines, ensure_ascii=False)}\n\n"
-            f"=== AUTO-OBSERVATION : VOS DERNIERS TRANSCRIPTS BRUTS ===\n{transcript_palace.format_recent_transcripts(limit=2)}\n\n"
-            f"=== ANALYSE TECHNIQUE SOLANA 15m EN DIRECT ===\n"
-            f"- SOL/USDT : {json.dumps(sol_ta, ensure_ascii=False)}\n"
-            f"- JUP/USDT : {json.dumps(jup_ta, ensure_ascii=False)}\n"
-            f"- RAY/USDT : {json.dumps(ray_ta, ensure_ascii=False)}\n\n"
-            f"=== PANORAMA SOCIAL & ON-CHAIN SOLANA ===\n{json.dumps(panorama, ensure_ascii=False)}\n\n"
+            f"=== DIGEST ANALYSE TECHNIQUE SOLANA 15m ===\n{json.dumps(digest, ensure_ascii=False)}\n\n"
+            f"=== PANORAMA & FLUX RSS SOLANA ===\n{json.dumps(pano_compact, ensure_ascii=False)}\n\n"
             f"=== PÉRIODE DE BASE CONFIGURÉE : {base_interval}s ( Plancher autorisé par CostGuard: {min_wakeup}s ) ===\n"
             "Produis ta décision stratégique Solana au format JSON strict suivant :\n"
             "{\n"
@@ -238,7 +248,7 @@ class OrchestratorAgent(BaseWarmAgent):
             '    "RAY-USDT": {"bias": "LONG_BIAS"|"SHORT_BIAS"|"NEUTRAL", "entry_obi_threshold": 0.10, "max_rsi_long": 70.0, "take_profit_bps": 55.0, "stop_loss_bps": 32.0}\n'
             "  },\n"
             f'  "next_wakeup_sec": entier entre {min_wakeup} et {base_interval},\n'
-            '  "wakeup_reason": "Justification précise du délai avant prochain réveil (ex: test imminent du Fib 0.618 ou de la Kijun-sen sur SOL)"\n'
+            '  "wakeup_reason": "Justification précise du délai avant prochain réveil (ex: clôture 15m ou test du Fib 0.618 sur SOL)"\n'
             "}"
         )
         return sys_prompt, user_prompt
@@ -613,8 +623,8 @@ class OrchestratorAgent(BaseWarmAgent):
                 '  "capital_allocation_rationale": "Justification de la répartition actuelle et des éventuels arbitrages cross-chain",\n'
                 '  "invalidation_condition": "Condition macro ou drawdown déclenchant un rapatriement d\'urgence vers Dry Powder",\n'
                 '  "posture_updates": {"leaf-solana": "AGGRESSIVE"|"BALANCED"|"DEFENSIVE", "leaf-bitcoin": "BALANCED", "leaf-ethereum": "BALANCED"},\n'
-                '  "next_wakeup_sec": 900,\n'
-                '  "wakeup_reason": "Prochain audit macro 15m et surveillance des rendements ajustés du risque"\n'
+                '  "next_wakeup_sec": 3600,\n'
+                '  "wakeup_reason": "Prochain audit macro 1h (3600s) et surveillance des rendements ajustés du risque"\n'
                 "}"
             )
 
@@ -629,10 +639,10 @@ class OrchestratorAgent(BaseWarmAgent):
                     user_prompt=user_prompt,
                     system_prompt=sys_prompt,
                     preferred_model=master_model,
-                    max_tokens=2200,
+                    max_tokens=1400,
                     temperature=0.2,
-                    escalation_floor=2800,
-                    max_escalation_tokens=3600,
+                    escalation_floor=1800,
+                    max_escalation_tokens=2200,
                 )
                 used_model = result.model_used
                 p_tok = result.prompt_tokens
@@ -711,8 +721,8 @@ class OrchestratorAgent(BaseWarmAgent):
                         "leaf-bitcoin": "BALANCED",
                         "leaf-ethereum": "BALANCED",
                     },
-                    "next_wakeup_sec": 900,
-                    "wakeup_reason": "Cycle macro périodique 15m (900s) — surveillance multi-chaînes et réserve Dry Powder",
+                    "next_wakeup_sec": 3600,
+                    "wakeup_reason": "Cycle macro périodique 1h (3600s) — surveillance multi-chaînes et réserve Dry Powder",
                 }
 
             posture_updates = parsed.get("posture_updates", {})
@@ -726,8 +736,8 @@ class OrchestratorAgent(BaseWarmAgent):
                     ):
                         self.store.hierarchy.leaves[lid]["risk_posture"] = str(post).upper()
 
-            next_sec = max(180, min(3600, int(parsed.get("next_wakeup_sec", 900))))
-            wakeup_reason = str(parsed.get("wakeup_reason", "Cycle macro 15m"))
+            next_sec = max(900, min(14400, int(parsed.get("next_wakeup_sec", 3600))))
+            wakeup_reason = str(parsed.get("wakeup_reason", "Cycle macro 1h (3600s)"))
             call_cost = self.cost_guard.compute_call_cost(used_model, p_tok, c_tok)
 
             drawer = PalaceDrawer(
@@ -950,6 +960,7 @@ class OrchestratorAgent(BaseWarmAgent):
             "next_wakeup_ms": self.store.next_cognitive_wakeup_ms,
             "seconds_until_next_wakeup": remaining_sec,
             "wakeup_reason": self.store.cognitive_wakeup_reason,
+            "auto_scheduler_enabled": self.cost_guard.auto_scheduler_enabled,
             "thinking_depth": self.cost_guard.get_thinking_depth(),
             "active_model": self.cost_guard.preferred_model,
             "available_models": FRONTIER_FLASH_MODELS,

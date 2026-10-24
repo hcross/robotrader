@@ -947,11 +947,10 @@ class HierarchicalFleetManager:
 
         self.master_model = "moonshotai/kimi-k3.1-pro"
         self.leaf_default_model = "deepseek/deepseek-v4.1-flash-1017"
-        self.master_interval_sec = 900  # 15-min macro reflection cadence (longer than leaf agents)
+        self.master_interval_sec = 3600  # 1-hour macro reflection cadence (longer than 15m leaf agents)
         now_ms = int(time.time() * 1000)
         self.last_master_reflection_ms = now_ms
-        # Run initial Master Orchestrator reflection 8s after boot so its transcript is immediately available
-        self.next_master_reflection_ms = now_ms + 8_000
+        self.next_master_reflection_ms = now_ms + self.master_interval_sec * 1000
 
         self.total_capital_usd: float = 25_000.0
         self.min_dry_powder_ratio: float = 0.20  # Keep >= 20% dry powder for safety & opportunities
@@ -971,7 +970,7 @@ class HierarchicalFleetManager:
             "capital_allocation_rationale": "Concentration P0/P1 avec plancher Dry Powder >= 20% et hurdle rate bridge 2.5x.",
             "last_reflection_ms": self.last_master_reflection_ms,
             "next_wakeup_ms": self.next_master_reflection_ms,
-            "wakeup_reason": "Cycle macro périodique 15m (900s)",
+            "wakeup_reason": "Cycle macro périodique 1h (3600s) — Auto-scheduler en pause par défaut ($0.00/h)",
         }
 
         self.leaves: Dict[str, Dict[str, Any]] = {}
@@ -1286,7 +1285,7 @@ class HierarchicalFleetManager:
                 "ta_metrics": dict(spec.get("ta_specific_metrics", {})),
                 "sharpe_ratio": 2.45 if alloc_usd > 0 else 1.65,
                 "win_rate_pct": 64.5 if alloc_usd > 0 else 58.0,
-                "base_interval_sec": 120 if alloc_usd > 0 else 600,
+                "base_interval_sec": 900 if alloc_usd > 0 else 3600,
                 "target_annual_return_pct": 35.0 if posture == "AGGRESSIVE" else (18.0 if posture == "BALANCED" else 8.0),
                 "max_drawdown_limit_pct": 4.0 if posture == "AGGRESSIVE" else 2.5,
                 "realized_pnl_usd": round(alloc_usd * 0.018, 2) if alloc_usd > 0 else 0.0,
