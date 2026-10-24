@@ -99,27 +99,37 @@ class LLMMonitorAgent(BaseWarmAgent):
         if depth == "DETERMINISTIC_LOCK":
             return {
                 "thinking_depth": depth,
+                "output_contract": "NONE",
                 "allow_llm": False,
                 "model_key": self.preferred_model,
                 "litellm_model": FRONTIER_FLASH_MODELS[self.preferred_model]["litellm_model"],
                 "max_tokens": 0,
+                "escalation_floor": 0,
+                "max_escalation_tokens": 0,
                 "min_wakeup_sec": 600,
                 "recall_limit": 0,
             }
 
         if depth == "ECO_CONSERVATION":
+            # Mechanical envelope contract (~140-220 tokens): omits prose-heavy
+            # panorama_summary & ta_confluence_notes so 350 max_tokens never truncates.
             model_key = "deepseek/deepseek-v4.1-flash"
             return {
                 "thinking_depth": depth,
+                "output_contract": "MECHANICAL_ENVELOPE",
                 "allow_llm": True,
                 "model_key": model_key,
                 "litellm_model": FRONTIER_FLASH_MODELS[model_key]["litellm_model"],
                 "max_tokens": 350,
+                "escalation_floor": 500,
+                "max_escalation_tokens": 650,
                 "min_wakeup_sec": 300,
                 "recall_limit": 1,
             }
 
         if depth == "TACTICAL_FOCUS":
+            # Compact single-sentence tactical contract (~320-480 tokens): fits
+            # comfortably within 700 max_tokens without triggering escalation retries.
             model_key = (
                 self.preferred_model
                 if self.preferred_model in ("deepseek/deepseek-v4.1-flash", "z-ai/glm-5.3-flash", "qwen/qwen3.7-flash")
@@ -127,24 +137,29 @@ class LLMMonitorAgent(BaseWarmAgent):
             )
             return {
                 "thinking_depth": depth,
+                "output_contract": "COMPACT_TACTICAL",
                 "allow_llm": True,
                 "model_key": model_key,
                 "litellm_model": FRONTIER_FLASH_MODELS[model_key]["litellm_model"],
                 "max_tokens": 700,
+                "escalation_floor": 950,
+                "max_escalation_tokens": 1200,
                 "min_wakeup_sec": 90,
                 "recall_limit": 2,
             }
 
-        # DEEP_THESIS (> 50% budget remaining). The reflective JSON contract
-        # (7 fields, French prose) needs ~1500 completion tokens; 1200 truncated
-        # it in production, so the cap is sized to the contract, not to the tier.
+        # DEEP_THESIS (> 50% budget remaining). The full reflective JSON contract
+        # (7 fields, detailed French prose across 3 pairs) needs ~1500-2100 tokens.
         model_key = self.preferred_model
         return {
             "thinking_depth": depth,
+            "output_contract": "FULL_THESIS",
             "allow_llm": True,
             "model_key": model_key,
             "litellm_model": FRONTIER_FLASH_MODELS[model_key]["litellm_model"],
             "max_tokens": 2200 if urgency_level == "HIGH_INFLECTION" else 1800,
+            "escalation_floor": 1800,
+            "max_escalation_tokens": 3200,
             "min_wakeup_sec": 30,
             "recall_limit": 4,
         }

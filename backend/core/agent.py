@@ -92,6 +92,8 @@ class BaseWarmAgent:
         preferred_model: str = "deepseek/deepseek-v4.1-flash",
         max_tokens: int = 900,
         temperature: float = 0.2,
+        escalation_floor: Optional[int] = None,
+        max_escalation_tokens: Optional[int] = None,
     ) -> CallResult:
         """
         Calls OpenRouter with the preferred near-frontier low-cost model (`deepseek/deepseek-v4.1-flash`
@@ -100,9 +102,9 @@ class BaseWarmAgent:
         wall-clock latency, per-attempt failover telemetry and transport error.
 
         A completion whose `finish_reason` is `length` is retried once on the same
-        model with an escalated budget, capped by `MAX_OUTPUT_TOKENS`. A truncated
-        completion is never accepted silently: `truncated`/`finish_reason` carry the
-        signal back to the caller and the transcript.
+        model with an escalated budget, capped by `max_escalation_tokens` (or
+        `MAX_OUTPUT_TOKENS`). A truncated completion is never accepted silently:
+        `truncated`/`finish_reason` carry the signal back to the caller and the transcript.
         """
         api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
         clean_pref = preferred_model.replace("openrouter/", "")
@@ -113,6 +115,16 @@ class BaseWarmAgent:
         sys_msg = system_prompt or self.system_prompt
         attempts: List[Dict[str, Any]] = []
         total_start = time.perf_counter()
+        eff_floor = (
+            TRUNCATION_ESCALATION_FLOOR
+            if escalation_floor is None
+            else max(1, int(escalation_floor))
+        )
+        eff_ceiling = (
+            MAX_OUTPUT_TOKENS
+            if max_escalation_tokens is None
+            else min(MAX_OUTPUT_TOKENS, max(1, int(max_escalation_tokens)))
+        )
 
         def attempt(model_slug: str, budget: int, phase: str) -> Optional[CallResult]:
             """One HTTP round-trip; telemetry is appended to `attempts` either way."""
@@ -222,8 +234,8 @@ class BaseWarmAgent:
                 return finish(result)
 
             escalated = min(
-                MAX_OUTPUT_TOKENS,
-                max(max_tokens * TRUNCATION_ESCALATION_FACTOR, TRUNCATION_ESCALATION_FLOOR),
+                eff_ceiling,
+                max(max_tokens * TRUNCATION_ESCALATION_FACTOR, eff_floor),
             )
             if escalated <= max_tokens:
                 return finish(result)

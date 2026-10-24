@@ -151,6 +151,52 @@ class TestTruncationRecovery(unittest.TestCase):
         self.assertFalse(result.truncated)
         self.assertEqual(result.finish_reason, "stop")
 
+    def test_tiered_output_contracts_fit_their_token_budgets_without_escalation(self) -> None:
+        from backend.agents.orchestrator import OrchestratorAgent
+        from backend.core.state_store import HybridStateStore
+
+        with patch.dict(os.environ, {"REDIS_URL": ""}, clear=False):
+            store = HybridStateStore()
+            orch = OrchestratorAgent(store=store)
+
+        # Force ECO_CONSERVATION (10% budget remaining -> max_tokens=350, MECHANICAL_ENVELOPE)
+        orch.cost_guard.record_usage({"agent": "test", "cost": 4.5, "tokens": 1000})
+        profile_eco = orch.cost_guard.select_cognitive_profile()
+        self.assertEqual(profile_eco["thinking_depth"], "ECO_CONSERVATION")
+        self.assertEqual(profile_eco["output_contract"], "MECHANICAL_ENVELOPE")
+        self.assertEqual(profile_eco["max_tokens"], 350)
+        self.assertEqual(profile_eco["max_escalation_tokens"], 650)
+
+        sys_p, usr_p = orch._build_reflection_prompts(
+            thinking_depth="ECO_CONSERVATION",
+            output_contract="MECHANICAL_ENVELOPE",
+            ta_snapshots={"SOL/USDT": {"last_price": 101.5, "ichimoku": {"kumo_regime": "ABOVE_KUMO_BULLISH"}}},
+            panorama={"urgency_level": "NORMAL_FLOW"},
+            continuity_ctx="1. [CONFIRMED]",
+            min_wakeup=300,
+            base_interval=300,
+        )
+        self.assertIn("ECO_CONSERVATION", sys_p)
+        self.assertIn("omets panorama_summary et ta_confluence_notes", usr_p)
+
+        # Verify bounded escalation floor/ceiling when custom bounds are passed
+        opener, sent = _opener(
+            [
+                {"content": '{"thesis_continuity": "CONF', "finish_reason": "length", "completion_tokens": 350},
+                {"content": '{"thesis_continuity": "CONFIRMED"}', "finish_reason": "stop", "completion_tokens": 120},
+            ]
+        )
+        with patch("urllib.request.urlopen", side_effect=opener):
+            res = self.agent.invoke_openrouter(
+                "prompt",
+                max_tokens=350,
+                escalation_floor=500,
+                max_escalation_tokens=650,
+            )
+        self.assertEqual(sent[0]["max_tokens"], 350)
+        self.assertEqual(sent[1]["max_tokens"], 650)
+        self.assertFalse(res.truncated)
+
 
 if __name__ == "__main__":
     unittest.main()

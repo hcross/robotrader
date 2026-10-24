@@ -86,6 +86,150 @@ class OrchestratorAgent(BaseWarmAgent):
                 return None
         return None
 
+    @staticmethod
+    def _compact_ta_digest(ta_snapshots: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """Extracts essential scalar indicators so TACTICAL/ECO prompts stay light."""
+        digest: Dict[str, Dict[str, Any]] = {}
+        for sym, snap in ta_snapshots.items():
+            if not isinstance(snap, dict):
+                continue
+            ich = snap.get("ichimoku", {})
+            fib = snap.get("fibonacci", {})
+            rsi = snap.get("rsi", {})
+            zones = snap.get("key_zones", {})
+            digest[sym] = {
+                "last_price": snap.get("last_price"),
+                "obi_l2": snap.get("obi_l2"),
+                "kumo_regime": ich.get("kumo_regime"),
+                "tenkan": ich.get("tenkan_sen"),
+                "kijun": ich.get("kijun_sen"),
+                "kumo_top": ich.get("kumo_top"),
+                "fib_618": fib.get("golden_pocket_618"),
+                "fib_dist_bps": fib.get("distance_to_nearest_bps"),
+                "rsi_14": rsi.get("rsi_14"),
+                "support_usd": zones.get("support_zone_usd"),
+                "resistance_usd": zones.get("resistance_zone_usd"),
+                "invalidation_usd": zones.get("invalidation_price_usd"),
+            }
+        return digest
+
+    def _build_reflection_prompts(
+        self,
+        thinking_depth: str,
+        output_contract: str,
+        ta_snapshots: Dict[str, Dict[str, Any]],
+        panorama: Dict[str, Any],
+        continuity_ctx: str,
+        min_wakeup: int,
+        base_interval: int,
+    ) -> tuple[str, str]:
+        """
+        Builds tier-appropriate (sys_prompt, user_prompt) so that:
+        - FULL_THESIS (DEEP_THESIS, 1800-2200 tokens): full 7-field narrative + 3-asset rules
+        - COMPACT_TACTICAL (TACTICAL_FOCUS, 700 tokens): single-sentence fields (<=160 chars) + rules
+        - MECHANICAL_ENVELOPE (ECO_CONSERVATION, 350 tokens): mechanical envelope + ultra-short thesis
+          (omits panorama_summary & ta_confluence_notes, which Python fills deterministically)
+        """
+        rem_usd = self.cost_guard.remaining_budget_usd
+        if output_contract == "MECHANICAL_ENVELOPE":
+            digest = self._compact_ta_digest(ta_snapshots)
+            sys_prompt = (
+                "Tu es le Stratège Quantitatif de Robotrader v2 en mode ECO_CONSERVATION (budget de jetons strict <= 350).\n"
+                "Produis UNIQUEMENT l'enveloppe mécanique JSON ultra-compacte (aucune prose longue, <= 90 caractères par champ texte, < 200 tokens au total)."
+            )
+            user_prompt = (
+                f"=== MODE : {thinking_depth} (Contrat: {output_contract} | Budget restant: ${rem_usd:.4f}) ===\n"
+                f"=== MÉMOIRE RÉCENTE ===\n{continuity_ctx}\n\n"
+                f"=== INDICATEURS CLÉS 15m ===\n{json.dumps(digest, ensure_ascii=False)}\n\n"
+                f"=== PÉRIODE : {min_wakeup}s à {base_interval}s ===\n"
+                "Réponds UNIQUEMENT avec ce JSON compact (omets panorama_summary et ta_confluence_notes) :\n"
+                "{\n"
+                '  "thesis_continuity": "CONFIRMED" | "REFINED" | "INVALIDATED",\n'
+                '  "hypothesis": "1 phrase <= 90 caractères",\n'
+                '  "invalidation_condition": "Prix/condition <= 80 caractères",\n'
+                '  "asset_rules": {\n'
+                '    "SOL-USDT": {"bias": "LONG_BIAS"|"SHORT_BIAS"|"NEUTRAL", "entry_obi_threshold": 0.08, "max_rsi_long": 68.0, "take_profit_bps": 45.0, "stop_loss_bps": 28.0}\n'
+                "  },\n"
+                f'  "next_wakeup_sec": entier entre {min_wakeup} et {base_interval},\n'
+                '  "wakeup_reason": "Raison <= 60 caractères"\n'
+                "}"
+            )
+            return sys_prompt, user_prompt
+
+        if output_contract == "COMPACT_TACTICAL":
+            digest = self._compact_ta_digest(ta_snapshots)
+            pano_compact = {
+                "urgency_level": panorama.get("urgency_level"),
+                "composite_sentiment": panorama.get("composite_sentiment"),
+                "headline_summary": panorama.get("headline_summary"),
+            }
+            sys_prompt = (
+                "Tu es le Stratège Quantitatif Senior de Robotrader v2 en mode TACTICAL_FOCUS (plafond strict 700 tokens).\n"
+                "Chaque champ narratif DOIT tenir en 1 seule phrase concise (<= 150 caractères maximum).\n"
+                "Réponds UNIQUEMENT avec un objet JSON valide (< 450 tokens au total)."
+            )
+            user_prompt = (
+                f"=== MODE : {thinking_depth} (Contrat: {output_contract} | Budget restant: ${rem_usd:.4f}) ===\n"
+                f"=== MÉMOIRE CONTINUE ===\n{continuity_ctx}\n\n"
+                f"=== DIGEST TA 15m ===\n{json.dumps(digest, ensure_ascii=False)}\n\n"
+                f"=== PANORAMA ===\n{json.dumps(pano_compact, ensure_ascii=False)}\n\n"
+                f"=== PÉRIODE : {min_wakeup}s à {base_interval}s ===\n"
+                "Produis ta décision au format JSON compact (1 phrase <= 150 car. par champ texte) :\n"
+                "{\n"
+                '  "thesis_continuity": "CONFIRMED" | "REFINED" | "INVALIDATED",\n'
+                '  "panorama_summary": "1 phrase <= 140 car. sur le flux L2 et macro",\n'
+                '  "ta_confluence_notes": "1 phrase <= 160 car. sur Ichimoku/Fib/RSI SOL & BTC",\n'
+                '  "hypothesis": "1 phrase <= 150 car. sur la thèse directionnelle",\n'
+                '  "invalidation_condition": "1 phrase <= 120 car. avec prix d\'invalidation",\n'
+                '  "asset_rules": {\n'
+                '    "SOL-USDT": {"bias": "LONG_BIAS"|"SHORT_BIAS"|"NEUTRAL", "entry_obi_threshold": 0.08, "max_rsi_long": 68.0, "take_profit_bps": 45.0, "stop_loss_bps": 28.0}\n'
+                "  },\n"
+                f'  "next_wakeup_sec": entier entre {min_wakeup} et {base_interval},\n'
+                '  "wakeup_reason": "1 phrase <= 80 car."\n'
+                "}"
+            )
+            return sys_prompt, user_prompt
+
+        sol_ta = ta_snapshots.get("SOL/USDT", {})
+        eth_ta = ta_snapshots.get("ETH/USDT", {})
+        btc_ta = ta_snapshots.get("BTC/USDT", {})
+
+        sys_prompt = (
+            "Tu es le Stratège Quantitatif Senior (CIO & Chartiste Pro) de Robotrader v2.\n"
+            "Tu analyses le Panorama Macro/Social et les indicateurs techniques précis "
+            "(Ichimoku Kinko Hyo, Retracements de Fibonacci 0.618 Golden Pocket, RSI 14, ATR/Bollinger, OBI L2).\n"
+            "Tu maintiens une continuité logique stricte avec tes thèses précédentes stockées dans le Strategy Palace.\n"
+            "Tu déclines ta stratégie en règles mécaniques exécutées en <50µs par les robots Rust, "
+            "et tu décides de ton prochain réveil (`next_wakeup_sec`).\n"
+            "Réponds UNIQUEMENT avec un objet JSON valide (sans texte autour)."
+        )
+
+        user_prompt = (
+            f"=== MODE COGNITIF : {thinking_depth} (Budget restant: ${rem_usd:.4f}) ===\n"
+            f"=== MÉMOIRE CONTINUE (STRATEGY PALACE) ===\n{continuity_ctx}\n\n"
+            f"=== AUTO-OBSERVATION : VOS DERNIERS TRANSCRIPTS BRUTS ===\n{transcript_palace.format_recent_transcripts(limit=2)}\n\n"
+            f"=== ANALYSE TECHNIQUE 15m EN DIRECT ===\n"
+            f"- SOL/USDT : {json.dumps(sol_ta, ensure_ascii=False)}\n"
+            f"- ETH/USDT : {json.dumps(eth_ta, ensure_ascii=False)}\n"
+            f"- BTC/USDT : {json.dumps(btc_ta, ensure_ascii=False)}\n\n"
+            f"=== PANORAMA SOCIAL & ON-CHAIN ===\n{json.dumps(panorama, ensure_ascii=False)}\n\n"
+            f"=== PÉRIODE DE BASE CONFIGURÉE : {base_interval}s ( Plancher autorisé par CostGuard: {min_wakeup}s ) ===\n"
+            "Produis ta décision stratégique au format JSON strict suivant :\n"
+            "{\n"
+            '  "thesis_continuity": "CONFIRMED" | "REFINED" | "INVALIDATED",\n'
+            '  "panorama_summary": "Synthèse pro (2 phrases en français) du contexte macro/social et flux L2",\n'
+            '  "ta_confluence_notes": "Analyse précise Ichimoku (Kumo/Tenkan/Kijun) + Fibonacci (0.618) + RSI(14) sur SOL/BTC",\n'
+            '  "hypothesis": "Intuition et thèse directionnelle actuelle",\n'
+            '  "invalidation_condition": "Condition et prix précis invalidant cette thèse",\n'
+            '  "asset_rules": {\n'
+            '    "SOL-USDT": {"bias": "LONG_BIAS"|"SHORT_BIAS"|"NEUTRAL", "entry_obi_threshold": 0.08, "max_rsi_long": 68.0, "take_profit_bps": 45.0, "stop_loss_bps": 28.0}\n'
+            "  },\n"
+            f'  "next_wakeup_sec": entier entre {min_wakeup} et {base_interval},\n'
+            '  "wakeup_reason": "Justification précise du délai avant prochain réveil (ex: test imminent du Fib 0.618 ou de la Kijun-sen)"\n'
+            "}"
+        )
+        return sys_prompt, user_prompt
+
     def run_strategic_reflection(
         self, force: bool = False, trigger_source: str = "MANUAL_OPERATOR"
     ) -> Dict[str, Any]:
@@ -93,7 +237,7 @@ class OrchestratorAgent(BaseWarmAgent):
         Executes a full Warm-Path cognitive cycle:
         1. Computes live Ichimoku, RSI(14), Fibonacci, Bollinger/ATR & Social Panorama
         2. Recalls recent theses from StrategyMemoryPalace for logical continuity
-        3. Adjusts thinking depth & token cap according to CostGuard remaining budget
+        3. Adjusts thinking depth, output contract & token cap according to CostGuard remaining budget
         4. Queries near-frontier Flash LLM (`deepseek/deepseek-v4.1-flash` or `z-ai/glm-5.3-flash`)
         5. Compiles mechanical rules into PolicyEnvelope and schedules next wakeup
         """
@@ -107,6 +251,7 @@ class OrchestratorAgent(BaseWarmAgent):
 
             profile = self.cost_guard.select_cognitive_profile(urgency_level=urgency)
             thinking_depth = str(profile["thinking_depth"])
+            output_contract = str(profile.get("output_contract", "FULL_THESIS"))
             model_key = str(profile["model_key"])
             min_wakeup = int(profile["min_wakeup_sec"])
             base_interval = int(self.store.cognitive_base_interval_sec)
@@ -117,42 +262,14 @@ class OrchestratorAgent(BaseWarmAgent):
             current_policy = self.store.get_effective_policy()
 
             sol_ta = ta_snapshots.get("SOL/USDT", {})
-            eth_ta = ta_snapshots.get("ETH/USDT", {})
-            btc_ta = ta_snapshots.get("BTC/USDT", {})
-
-            sys_prompt = (
-                "Tu es le Stratège Quantitatif Senior (CIO & Chartiste Pro) de Robotrader v2.\n"
-                "Tu analyses le Panorama Macro/Social et les indicateurs techniques précis "
-                "(Ichimoku Kinko Hyo, Retracements de Fibonacci 0.618 Golden Pocket, RSI 14, ATR/Bollinger, OBI L2).\n"
-                "Tu maintiens une continuité logique stricte avec tes thèses précédentes stockées dans le Strategy Palace.\n"
-                "Tu déclines ta stratégie en règles mécaniques exécutées en <50µs par les robots Rust, "
-                "et tu décides de ton prochain réveil (`next_wakeup_sec`).\n"
-                "Réponds UNIQUEMENT avec un objet JSON valide (sans texte autour)."
-            )
-
-            user_prompt = (
-                f"=== MODE COGNITIF : {thinking_depth} (Budget restant: ${self.cost_guard.remaining_budget_usd:.4f}) ===\n"
-                f"=== MÉMOIRE CONTINUE (STRATEGY PALACE) ===\n{continuity_ctx}\n\n"
-                f"=== AUTO-OBSERVATION : VOS DERNIERS TRANSCRIPTS BRUTS ===\n{transcript_palace.format_recent_transcripts(limit=2)}\n\n"
-                f"=== ANALYSE TECHNIQUE 15m EN DIRECT ===\n"
-                f"- SOL/USDT : {json.dumps(sol_ta, ensure_ascii=False)}\n"
-                f"- ETH/USDT : {json.dumps(eth_ta, ensure_ascii=False)}\n"
-                f"- BTC/USDT : {json.dumps(btc_ta, ensure_ascii=False)}\n\n"
-                f"=== PANORAMA SOCIAL & ON-CHAIN ===\n{json.dumps(panorama, ensure_ascii=False)}\n\n"
-                f"=== PÉRIODE DE BASE CONFIGURÉE : {base_interval}s ( Plancher autorisé par CostGuard: {min_wakeup}s ) ===\n"
-                "Produis ta décision stratégique au format JSON strict suivant :\n"
-                "{\n"
-                '  "thesis_continuity": "CONFIRMED" | "REFINED" | "INVALIDATED",\n'
-                '  "panorama_summary": "Synthèse pro (2 phrases en français) du contexte macro/social et flux L2",\n'
-                '  "ta_confluence_notes": "Analyse précise Ichimoku (Kumo/Tenkan/Kijun) + Fibonacci (0.618) + RSI(14) sur SOL/BTC",\n'
-                '  "hypothesis": "Intuition et thèse directionnelle actuelle",\n'
-                '  "invalidation_condition": "Condition et prix précis invalidant cette thèse",\n'
-                '  "asset_rules": {\n'
-                '    "SOL-USDT": {"bias": "LONG_BIAS"|"SHORT_BIAS"|"NEUTRAL", "entry_obi_threshold": 0.08, "max_rsi_long": 68.0, "take_profit_bps": 45.0, "stop_loss_bps": 28.0}\n'
-                "  },\n"
-                f'  "next_wakeup_sec": entier entre {min_wakeup} et {base_interval},\n'
-                '  "wakeup_reason": "Justification précise du délai avant prochain réveil (ex: test imminent du Fib 0.618 ou de la Kijun-sen)"\n'
-                "}"
+            sys_prompt, user_prompt = self._build_reflection_prompts(
+                thinking_depth=thinking_depth,
+                output_contract=output_contract,
+                ta_snapshots=ta_snapshots,
+                panorama=panorama,
+                continuity_ctx=continuity_ctx,
+                min_wakeup=min_wakeup,
+                base_interval=base_interval,
             )
 
             parsed: Optional[Dict[str, Any]] = None
@@ -164,6 +281,7 @@ class OrchestratorAgent(BaseWarmAgent):
                 "trigger_source": trigger_source,
                 "base_interval_sec": base_interval,
                 "urgency_level": urgency,
+                "output_contract": output_contract,
             }
 
             if profile["allow_llm"]:
@@ -173,6 +291,8 @@ class OrchestratorAgent(BaseWarmAgent):
                     preferred_model=model_key,
                     max_tokens=int(profile["max_tokens"]),
                     temperature=0.2,
+                    escalation_floor=profile.get("escalation_floor"),
+                    max_escalation_tokens=profile.get("max_escalation_tokens"),
                 )
                 used_model = result.model_used
                 p_tok = result.prompt_tokens
@@ -234,20 +354,22 @@ class OrchestratorAgent(BaseWarmAgent):
             kumo_top = float(sol_ich.get("kumo_top", round(sol_price * 1.005, 2)))
             kumo_regime = str(sol_ich.get("kumo_regime", "ABOVE_KUMO_BULLISH"))
             fib_dist_bps = abs(float(sol_fib.get("distance_to_nearest_bps", 50.0)))
+            default_panorama = (
+                f"Flux Smart-Money Solana soutenu et funding perp positif (+24% APR) ; "
+                f"SOL évolue à ${sol_price:.2f} ({kumo_regime}) avec OBI L2 {sol_ta.get('obi_l2', 0.0):+.2f}."
+            )
+            default_ta_notes = (
+                f"SOL/USDT 15m : Ichimoku Tenkan=${sol_ich.get('tenkan_sen', sol_price):.2f} / "
+                f"Kijun=${kijun:.2f} (Kumo Top=${kumo_top:.2f}), RSI(14)={sol_rsi:.1f}, "
+                f"Golden Pocket Fibonacci 0.618 à ${fib_618:.2f} (écart {fib_dist_bps:.0f} bps)."
+            )
 
             if not parsed:
                 early_wakeup = max(min_wakeup, min(base_interval, 45 if fib_dist_bps < 30.0 else base_interval))
                 parsed = {
                     "thesis_continuity": "CONFIRMED" if self.store.palace.drawers else "INITIAL",
-                    "panorama_summary": (
-                        f"Flux Smart-Money Solana soutenu et funding perp positif (+24% APR) ; "
-                        f"SOL évolue à ${sol_price:.2f} ({kumo_regime}) avec OBI L2 {sol_ta.get('obi_l2', 0.0):+.2f}."
-                    ),
-                    "ta_confluence_notes": (
-                        f"SOL/USDT 15m : Ichimoku Tenkan=${sol_ich.get('tenkan_sen', sol_price):.2f} / "
-                        f"Kijun=${kijun:.2f} (Kumo Top=${kumo_top:.2f}), RSI(14)={sol_rsi:.1f}, "
-                        f"Golden Pocket Fibonacci 0.618 à ${fib_618:.2f} (écart {fib_dist_bps:.0f} bps)."
-                    ),
+                    "panorama_summary": default_panorama,
+                    "ta_confluence_notes": default_ta_notes,
                     "hypothesis": (
                         "Maintien du biais acheteur tant que le support de confluence Kijun + Fibonacci 0.618 tient, "
                         "avec capture mécanique des déséquilibres OBI L2 par les pods Rust."
@@ -273,6 +395,11 @@ class OrchestratorAgent(BaseWarmAgent):
                         else f"Cycle périodique nominal ({base_interval}s) — volatilité sous contrôle"
                     ),
                 }
+            else:
+                if not parsed.get("panorama_summary"):
+                    parsed["panorama_summary"] = default_panorama
+                if not parsed.get("ta_confluence_notes"):
+                    parsed["ta_confluence_notes"] = default_ta_notes
 
             # Compile mechanical rules into PolicyEnvelope
             raw_wakeup = int(parsed.get("next_wakeup_sec", base_interval))
@@ -511,17 +638,26 @@ class OrchestratorAgent(BaseWarmAgent):
         profile = self.cost_guard.select_cognitive_profile()
         if profile["allow_llm"]:
             continuity = self.store.palace.format_continuity_prompt(limit=2)
-            ta_str = json.dumps(self.store.latest_ta_snapshots.get("SOL/USDT", {}), ensure_ascii=False)
+            ta_digest = self._compact_ta_digest(self.store.latest_ta_snapshots).get("SOL/USDT", {})
+            ta_str = json.dumps(ta_digest, ensure_ascii=False)
+            chat_sys_prompt = (
+                f"{self.system_prompt}\n"
+                "CONTRAT DE SORTIE CHAT : Réponds en français en 3 phrases concises maximum (<= 80 mots au total, < 250 tokens). "
+                "Pas de préambule ni de liste interminable."
+            )
             prompt = (
                 f"Contexte Mémoire Strategy Palace :\n{continuity}\n\n"
                 f"Indicateurs Techniques SOL/USDT 15m (Ichimoku/Fib/RSI) :\n{ta_str}\n\n"
                 f"Question de l'opérateur : {command}\n"
-                "Réponds de façon concise, directe et technique en français (3 à 5 lignes max)."
+                "Réponds de façon concise, directe et technique en français (3 phrases max, <= 80 mots)."
             )
             result = self.invoke_openrouter(
                 user_prompt=prompt,
+                system_prompt=chat_sys_prompt,
                 preferred_model=str(profile["model_key"]),
                 max_tokens=450,
+                escalation_floor=600,
+                max_escalation_tokens=750,
             )
             ans = result.raw_resp
             if result.prompt_tokens > 0 or result.completion_tokens > 0:
