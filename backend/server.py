@@ -52,9 +52,14 @@ class CognitiveConfigRequest(BaseModel):
 @app.get("/api/v1/status")
 def get_system_status() -> Dict[str, Any]:
     bt = state_store.run_rust_backtest()
+    populations = state_store.get_population_metrics(bt)
+    live_window = list(state_store.live_executions[:200])
     policy = state_store.get_effective_policy().to_dict()
     cost_status = orchestrator.cost_guard.get_status()
     catalysts = [c.to_dict() for c in state_store.recent_catalysts]
+
+    # One ledger, one declared source: never interleave fixture rows with live ones.
+    executions = live_window if live_window else list(bt.get("executions", []))
 
     return {
         "architecture": "hybrid_rust_python_v2",
@@ -65,18 +70,13 @@ def get_system_status() -> Dict[str, Any]:
         },
         "policy_envelope": policy,
         "engine_metrics": {
-            "initial_equity_usd": bt.get("initial_equity_usd", 10000.0),
-            "final_equity_usd": round(float(bt.get("final_equity_usd", 10000.0)), 2),
-            "net_profit_usd": round(float(bt.get("net_profit_usd", 0.0)), 2),
-            "total_return_pct": round(float(bt.get("total_return_pct", 0.0)), 3),
-            "max_drawdown_pct": round(float(bt.get("max_drawdown_pct", 0.0)), 2),
-            "sharpe_ratio": round(float(bt.get("sharpe_ratio", 0.0)), 2),
-            "win_rate_pct": round(float(bt.get("win_rate_pct", 0.0)), 1),
-            "total_trades": bt.get("total_trades", 0),
-            "rejected_orders": bt.get("rejected_orders", 0),
-            "total_fees_usd": round(float(bt.get("total_fees_usd", 0.0)), 2),
-            "pod_pnl_attribution": bt.get("pod_pnl_attribution", {}),
-            "executions": bt.get("executions", []),
+            # Three populations, each measured on its own PnL column. See
+            # HybridStateStore.get_population_metrics for the contract.
+            "backtest_fixture": populations["backtest_fixture"],
+            "paper_model": populations["paper_model"],
+            "live_testnet": populations["live_testnet"],
+            "executions": executions,
+            "executions_source": "live_testnet" if live_window else "backtest_fixture",
         },
         "catalysts": catalysts,
         "cost_guard": cost_status,

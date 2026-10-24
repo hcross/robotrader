@@ -11,92 +11,27 @@ const resolveApiBase = () => {
 
 const API_BASE = resolveApiBase();
 
+// Offline skeleton — deliberately carries no performance numbers. A hardcoded
+// "100% win rate" demo payload used to be rendered before the first successful
+// poll and was indistinguishable from live telemetry.
 const FALLBACK_STATUS = {
   architecture: 'hybrid_rust_python_v2',
   kill_switch: { active: false, reason: null, max_daily_drawdown_limit_pct: 3.0 },
   policy_envelope: {
-    envelope_id: 'env_benchmark_all_pods',
-    global_regime: 'RISK_ON_HIGH_VOL',
-    ttl_seconds: 900,
-    pod_allocations: {
-      pod_carry: { enabled: true, capital_weight: 0.40, directional_bias: 'NEUTRAL' },
-      pod_momentum: { enabled: true, capital_weight: 0.35, directional_bias: 'LONG_BIAS' },
-      pod_solana_alpha: { enabled: true, capital_weight: 0.15, directional_bias: 'LONG_BIAS' },
-      pod_sniper: { enabled: false, capital_weight: 0.00, directional_bias: 'NEUTRAL' },
-    },
+    envelope_id: 'offline',
+    global_regime: 'OFFLINE',
+    ttl_seconds: 0,
+    pod_allocations: {},
   },
   engine_metrics: {
-    initial_equity_usd: 10000.0,
-    final_equity_usd: 10025.66,
-    net_profit_usd: 25.66,
-    total_return_pct: 0.257,
-    max_drawdown_pct: 0.0,
-    sharpe_ratio: 26.88,
-    win_rate_pct: 100.0,
-    total_trades: 6,
-    rejected_orders: 1,
-    total_fees_usd: 1.78,
-    pod_pnl_attribution: {
-      pod_carry: 13.61,
-      pod_momentum: 11.11,
-      pod_solana_alpha: 0.69,
-      pod_sniper: 0.24,
-    },
-    executions: [
-      {
-        symbol: 'SOL-USDT',
-        pod_id: 'pod_carry',
-        venue: 'BINANCE_PERP',
-        side: 'SELL',
-        fill_price: 152.34,
-        notional_usd: 1578.14,
-        realized_pnl_usd: 6.89,
-        rationale: 'Delta-Neutral Carry: APR 32.0%, Basis +23.0 bps',
-      },
-      {
-        symbol: 'SOL-USDT',
-        pod_id: 'pod_momentum',
-        venue: 'HYPERLIQUID_PERP',
-        side: 'BUY',
-        fill_price: 152.41,
-        notional_usd: 1419.16,
-        realized_pnl_usd: 8.68,
-        rationale: 'Momentum Long: OBI +0.43, z=2.45, catalyst=0.85',
-      },
-      {
-        symbol: 'JUP-SOL',
-        pod_id: 'pod_solana_alpha',
-        venue: 'SOLANA_JUPITER_JITO',
-        side: 'BUY',
-        fill_price: 1.24,
-        notional_usd: 137.76,
-        realized_pnl_usd: 0.69,
-        rationale: 'Solana Smart-Money inflow $48k (wallet winrate 74%)',
-      },
-    ],
+    backtest_fixture: null,
+    paper_model: null,
+    live_testnet: null,
+    executions: [],
+    executions_source: null,
   },
-  catalysts: [
-    {
-      asset: 'SOL-USDT',
-      catalyst_type: 'WHALE_ACCUMULATION',
-      conviction: 0.85,
-      directional_bias: 'LONG_BIAS',
-      summary: 'Smart-money inflow +$4.8M on Solana perps & spot; funding APR 32%',
-    },
-    {
-      asset: 'JUP-USDT',
-      catalyst_type: 'GOVERNANCE_CATALYST',
-      conviction: 0.78,
-      directional_bias: 'LONG_BIAS',
-      summary: 'ASR staking fee distribution vote passed; strong L2 bid absorption',
-    },
-  ],
-  cost_guard: {
-    daily_budget_usd: 5.0,
-    total_spent_usd: 0.042,
-    remaining_usd: 4.958,
-    utilization_pct: 0.84,
-  },
+  catalysts: [],
+  cost_guard: {},
 };
 
 function App() {
@@ -240,7 +175,7 @@ function App() {
                 : 'border-amber-500/40 bg-amber-500/10 text-amber-300'
             }`}
           >
-            {backendConnected ? 'IPC Live' : 'Replay Snapshot'}
+            {backendConnected ? 'IPC Live' : 'Backend hors ligne'}
           </span>
         </div>
       </header>

@@ -53,8 +53,15 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
   const metrics = statusData?.engine_metrics || {};
   const allocations = statusData?.policy_envelope?.pod_allocations || {};
   const assetOverrides = statusData?.policy_envelope?.asset_overrides || {};
-  const attribution = metrics.pod_pnl_attribution || {};
+  // Three declared populations — never blend them (see /api/v1/status contract).
+  const bt = metrics.backtest_fixture || {};
+  const paper = metrics.paper_model || {};
+  const livePop = metrics.live_testnet || {};
+  const paperRecent = paper.recent || {};
+  const liveRecent = livePop.recent || {};
+  const attribution = paper.pod_pnl_attribution || {};
   const executions = metrics.executions || [];
+  const executionsSource = metrics.executions_source || 'backtest_fixture';
   const catalysts = statusData?.catalysts || [];
   const costGuard = statusData?.cost_guard || {};
   const testnetTelemetry = statusData?.testnet_telemetry;
@@ -69,6 +76,19 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
   const startIndex = (safePage - 1) * pageSize;
   const endIndex = Math.min(startIndex + pageSize, totalExecutions);
   const paginatedExecutions = executions.slice(startIndex, endIndex);
+
+  // A missing metric renders as "—", never as a plausible-looking zero.
+  const fmtMoney = (v) =>
+    v === null || v === undefined
+      ? '—'
+      : `$${Number(v).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtSignedMoney = (v) =>
+    v === null || v === undefined
+      ? '—'
+      : `${Number(v) >= 0 ? '+' : '-'}$${Math.abs(Number(v)).toFixed(2)}`;
+  const fmtPct = (v) =>
+    v === null || v === undefined ? '—' : `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(2)}%`;
+  const fmtRate = (v) => (v === null || v === undefined ? '—' : `${Number(v).toFixed(1)}%`);
 
   const handlePageSizeChange = (e) => {
     const newSize = Number(e.target.value);
@@ -107,25 +127,32 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
         <StatCard
-          title={isTestnetMode ? 'Equity Modèle (Paper + Replay)' : 'Equity Actuelle'}
-          value={`$${Number(metrics.final_equity_usd || 10000).toLocaleString()}`}
-          subtitle={`PnL Modèle: +$${Number(metrics.net_profit_usd || 0).toFixed(2)} (+${Number(metrics.total_return_pct || 0).toFixed(2)}%)`}
+          title="Equity Modèle Paper (cumul)"
+          value={fmtMoney(paper.final_equity_usd)}
+          subtitle={`PnL paper: ${fmtSignedMoney(paper.cumulative_pnl_usd)} (${fmtPct(paper.total_return_pct)}) · Edge simulé ${fmtRate(paperRecent.positive_edge_share_pct)} sur ${paperRecent.trades ?? 0} cycles (déterministe)`}
           icon={DollarSign}
           color="text-emerald-400"
         />
         <StatCard
-          title="Ratio de Sharpe"
-          value={Number(metrics.sharpe_ratio || 0).toFixed(2)}
-          subtitle={`Win Rate: ${Number(metrics.win_rate_pct || 0).toFixed(0)}% (${metrics.total_trades || 0} trades)`}
+          title="Live Testnet (réel)"
+          value={fmtSignedMoney(liveRecent.pnl_usd)}
+          subtitle={`Win rate ${fmtRate(liveRecent.win_rate_pct)} (${liveRecent.wins ?? 0} gains / ${liveRecent.losses ?? 0} pertes / ${liveRecent.flat ?? 0} nuls) · PnL réalisé`}
+          icon={Activity}
+          color="text-cyan-400"
+        />
+        <StatCard
+          title="Fixture Backtest Rust"
+          value={Number(bt.sharpe_ratio || 0).toFixed(2)}
+          subtitle={`Sharpe · Win rate ${fmtRate(bt.win_rate_pct)} (${bt.trades ?? 0} trades) · Net ${fmtSignedMoney(bt.cumulative_pnl_usd)}`}
           icon={TrendingUp}
           color="text-blue-400"
         />
         <StatCard
           title="HardRiskGate (&lt;50µs)"
-          value={`${metrics.rejected_orders || 0} Rug Bloqué`}
-          subtitle={`Max DD: ${Number(metrics.max_drawdown_pct || 0).toFixed(2)}% / Limite 3.0%`}
+          value={`${bt.rejected_orders || 0} Rug Bloqué`}
+          subtitle={`Max DD fixture: ${Number(bt.max_drawdown_pct || 0).toFixed(2)}% / Limite 3.0%`}
           icon={Shield}
           color="text-amber-400"
         />
@@ -210,6 +237,23 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
               </div>
             </div>
           </div>
+
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px]">
+            <div className="bg-gray-900/90 px-3 py-2 rounded border border-gray-800">
+              <div className="text-gray-500">PnL réalisé (fenêtre {liveRecent.trades ?? 0})</div>
+              <div className="font-mono font-bold text-sm text-gray-100">{fmtSignedMoney(liveRecent.pnl_usd)}</div>
+            </div>
+            <div className="bg-gray-900/90 px-3 py-2 rounded border border-gray-800">
+              <div className="text-gray-500">Win rate réel (sur PnL réalisé)</div>
+              <div className="font-mono font-bold text-sm text-gray-100">
+                {fmtRate(liveRecent.win_rate_pct)} · {liveRecent.wins ?? 0}/{liveRecent.trades ?? 0}
+              </div>
+            </div>
+            <div className="bg-gray-900/90 px-3 py-2 rounded border border-gray-800">
+              <div className="text-gray-500">PnL paper cumulé (autre population)</div>
+              <div className="font-mono font-bold text-sm text-amber-300">{fmtSignedMoney(paper.cumulative_pnl_usd)}</div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -271,12 +315,14 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <div>
             <h3 className="text-base font-semibold text-white">
-              Journal d&apos;Exécution Déterministe (`engine-rs`)
+              {executionsSource === 'live_testnet'
+                ? 'Journal d’Exécution Live (Testnet / Devnet)'
+                : 'Replay Déterministe (`engine-rs`)'}
             </h3>
             <p className="text-xs text-gray-400 mt-0.5">
-              {totalExecutions > 0
-                ? `Affichage ${startIndex + 1}–${endIndex} sur ${totalExecutions} ordres`
-                : 'Aucun ordre enregistré'}
+              {executionsSource === 'live_testnet'
+                ? `${totalExecutions > 0 ? `Affichage ${startIndex + 1}–${endIndex} sur ${totalExecutions} ordres` : 'Aucun ordre enregistré'} — colonne PnL : realized_pnl_usd`
+                : `${totalExecutions > 0 ? `Affichage ${startIndex + 1}–${endIndex} sur ${totalExecutions} ordres` : 'Aucun ordre enregistré'} — fixture synthétique, aucun ordre live`}
             </p>
           </div>
 

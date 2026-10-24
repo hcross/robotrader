@@ -554,8 +554,13 @@ class HybridStateStore:
     def run_rust_backtest(self, policy: Optional[PolicyEnvelope] = None) -> Dict[str, Any]:
         """
         Invokes the compiled Rust `robotrader-node` binary with the active PolicyEnvelope
-        to run a deterministic multi-pod backtest & anti-rug verification, and merges
-        any live Testnet executions collected by the background worker.
+        to run a deterministic multi-pod backtest & anti-rug verification.
+
+        Returns the **fixture** summary exactly as the Rust engine computed it. Live
+        testnet executions and paper-model PnL are deliberately NOT merged here: doing so
+        used to add `len(live_executions)` to `total_trades` while leaving `win_rate_pct`
+        from the fixture, so the displayed ratio had a fixture numerator and a live
+        denominator. Callers that want the live populations use `get_population_metrics`.
         """
         effective_policy = policy or self.get_effective_policy()
         repo_root = Path(__file__).resolve().parents[2]
@@ -587,24 +592,99 @@ class HybridStateStore:
             timeout=30,
         )
         result: Dict[str, Any] = json.loads(proc.stdout)
+        result["executions_source"] = "backtest_fixture"
 
         with self._lock:
-            if self.live_executions:
-                merged_execs = list(self.live_executions) + result.get("executions", [])
-                result["executions"] = merged_execs[:200]
-                result["total_trades"] = int(result.get("total_trades", 0)) + len(self.live_executions)
-                result["net_profit_usd"] = float(result.get("net_profit_usd", 0.0)) + self.live_pnl_usd
-                result["final_equity_usd"] = float(result.get("initial_equity_usd", 10000.0)) + result["net_profit_usd"]
-                result["total_return_pct"] = (result["net_profit_usd"] / float(result.get("initial_equity_usd", 10000.0))) * 100.0
-                result["total_fees_usd"] = float(result.get("total_fees_usd", 0.0)) + self.live_fees_usd
-                pod_attr = dict(result.get("pod_pnl_attribution", {}))
-                for k, v in self.live_pod_pnl.items():
-                    if v != 0.0:
-                        pod_attr[k] = float(pod_attr.get(k, 0.0)) + v
-                result["pod_pnl_attribution"] = pod_attr
-
             self.last_backtest_result = result
         return result
+
+    @staticmethod
+    def _sample_stats(executions: List[Dict[str, Any]], pnl_key: str) -> Dict[str, Any]:
+        """Win/loss/flat breakdown of one explicitly named population."""
+        pnls = [float(e.get(pnl_key, 0.0) or 0.0) for e in executions]
+        trades = len(pnls)
+        wins = sum(1 for p in pnls if p > 0)
+        losses = sum(1 for p in pnls if p < 0)
+        flat = trades - wins - losses
+        stamps = [int(e.get("timestamp_ms", 0)) for e in executions if e.get("timestamp_ms")]
+        return {
+            "pnl_key": pnl_key,
+            "trades": trades,
+            "wins": wins,
+            "losses": losses,
+            "flat": flat,
+            "win_rate_pct": round(100.0 * wins / trades, 1) if trades else None,
+            "pnl_usd": round(sum(pnls), 4),
+            "from_ms": min(stamps) if stamps else None,
+            "to_ms": max(stamps) if stamps else None,
+        }
+
+    def get_population_metrics(self, backtest: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Three performance populations, each measured on its own PnL column and never
+        mixed:
+
+        - `backtest_fixture`  : the deterministic `engine-rs` replay (synthetic scenario).
+        - `paper_model`       : cumulative PnL of the paper simulation (`simulated_pnl_usd`).
+        - `live_testnet`      : what the testnet/devnet orders actually realised
+                                (`realized_pnl_usd`).
+
+        `cumulative_*` fields cover the worker's whole life; `recent` fields cover the
+        retained window (the newest 200 executions), whose bounds are returned so a
+        reader can see what the win rate was computed on.
+        """
+        bt = backtest or self.run_rust_backtest()
+        with self._lock:
+            live = list(self.live_executions)
+            paper_pnl = float(self.live_pnl_usd)
+            paper_fees = float(self.live_fees_usd)
+            pod_pnl = dict(self.live_pod_pnl)
+            cex_realized = float(self.testnet_cex_realized_pnl_usd)
+
+        initial = float(bt.get("initial_equity_usd", 10000.0))
+        paper_return_pct = (paper_pnl / initial) * 100.0 if initial else 0.0
+
+        # `simulated_pnl_usd` is not an outcome: the worker computes
+        # `notional * (edge_bps / 10_000) - fee` with `edge_bps >= 24`, so it is
+        # strictly positive on every cycle. A "win rate" over that column would
+        # be 100% by construction, not by performance — it is reported as an
+        # edge-capture share, and only the live column carries a win rate.
+        paper_recent = self._sample_stats(live, "simulated_pnl_usd")
+        paper_recent["positive_edge_share_pct"] = paper_recent.pop("win_rate_pct")
+        paper_recent["deterministic"] = True
+
+        return {
+            "backtest_fixture": {
+                "source": "engine-rs deterministic replay (synthetic scenario)",
+                "initial_equity_usd": initial,
+                "final_equity_usd": round(float(bt.get("final_equity_usd", initial)), 2),
+                "cumulative_pnl_usd": round(float(bt.get("net_profit_usd", 0.0)), 2),
+                "total_return_pct": round(float(bt.get("total_return_pct", 0.0)), 3),
+                "max_drawdown_pct": round(float(bt.get("max_drawdown_pct", 0.0)), 2),
+                "sharpe_ratio": round(float(bt.get("sharpe_ratio", 0.0)), 2),
+                "win_rate_pct": round(float(bt.get("win_rate_pct", 0.0)), 1),
+                "trades": int(bt.get("total_trades", 0)),
+                "rejected_orders": int(bt.get("rejected_orders", 0)),
+                "fees_usd": round(float(bt.get("total_fees_usd", 0.0)), 2),
+                "pod_pnl_attribution": dict(bt.get("pod_pnl_attribution", {})),
+            },
+            "paper_model": {
+                "source": "simulated_pnl_usd (paper simulation)",
+                "note": "simulated_pnl_usd = notional × edge_bps − fee with edge_bps ≥ 24 → positive by construction; the share below measures edge capture, not a win rate",
+                "initial_equity_usd": initial,
+                "final_equity_usd": round(initial + paper_pnl, 2),
+                "cumulative_pnl_usd": round(paper_pnl, 2),
+                "total_return_pct": round(paper_return_pct, 3),
+                "cumulative_fees_usd": round(paper_fees, 2),
+                "pod_pnl_attribution": {k: round(v, 2) for k, v in pod_pnl.items()},
+                "recent": paper_recent,
+            },
+            "live_testnet": {
+                "source": "realized_pnl_usd (testnet/devnet orders)",
+                "cumulative_cex_pnl_usd": round(cex_realized, 4),
+                "recent": self._sample_stats(live, "realized_pnl_usd"),
+            },
+        }
 
 
 state_store = HybridStateStore()
