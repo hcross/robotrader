@@ -58,6 +58,7 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
   const paper = metrics.paper_model || {};
   const livePop = metrics.live_testnet || {};
   const paperRecent = paper.recent || {};
+  const paperLifetime = paper.lifetime || {};
   const liveRecent = livePop.recent || {};
   const attribution = paper.pod_pnl_attribution || {};
   const executions = metrics.executions || [];
@@ -131,7 +132,7 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
         <StatCard
           title="Equity Modèle Paper (cumul)"
           value={fmtMoney(paper.final_equity_usd)}
-          subtitle={`PnL paper: ${fmtSignedMoney(paper.cumulative_pnl_usd)} (${fmtPct(paper.total_return_pct)}) · Edge simulé ${fmtRate(paperRecent.positive_edge_share_pct)} sur ${paperRecent.trades ?? 0} cycles (déterministe)`}
+          subtitle={`PnL paper: ${fmtSignedMoney(paper.cumulative_pnl_usd)} (${fmtPct(paper.total_return_pct)}) · Win rate ${fmtRate(paperRecent.win_rate_pct ?? paperRecent.positive_edge_share_pct)} (${paperRecent.wins ?? 0}G/${paperRecent.losses ?? 0}P sur ${paperRecent.trades ?? 0} · Vie: ${paperLifetime.trades ?? paperRecent.trades ?? 0} trades)`}
           icon={DollarSign}
           color="text-emerald-400"
         />
@@ -401,8 +402,8 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
                           <span className="text-gray-300 font-medium">
                             0.00 SOL <span className="text-[10px] text-amber-400">(Gas -0.000005)</span>
                           </span>
-                          <span className="text-[10px] text-purple-300">
-                            Modèle Paper : +${simPnl.toFixed(2)}
+                          <span className={`text-[10px] ${simPnl >= 0 ? 'text-purple-300' : 'text-red-400'}`}>
+                            Modèle Paper : {simPnl >= 0 ? `+$${simPnl.toFixed(2)}` : `-$${Math.abs(simPnl).toFixed(2)}`}
                           </span>
                         </div>
                       ) : isBinanceTestnet ? (
@@ -416,8 +417,8 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
                           ) : (
                             <span className="text-gray-300 font-medium">Ordre exécuté (Spot)</span>
                           )}
-                          <span className="text-[10px] text-purple-300">
-                            Modèle Paper : +${simPnl.toFixed(2)}
+                          <span className={`text-[10px] ${simPnl >= 0 ? 'text-purple-300' : 'text-red-400'}`}>
+                            Modèle Paper : {simPnl >= 0 ? `+$${simPnl.toFixed(2)}` : `-$${Math.abs(simPnl).toFixed(2)}`}
                           </span>
                         </div>
                       ) : (

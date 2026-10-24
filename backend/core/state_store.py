@@ -87,6 +87,10 @@ class HybridStateStore:
         self.live_executions: List[Dict[str, Any]] = []
         self.live_pnl_usd: float = 0.0
         self.live_fees_usd: float = 0.0
+        self.paper_lifetime_trades: int = 0
+        self.paper_lifetime_wins: int = 0
+        self.paper_lifetime_losses: int = 0
+        self.paper_lifetime_flat: int = 0
         self.live_pod_pnl: Dict[str, float] = {
             "pod_carry": 0.0,
             "pod_momentum": 0.0,
@@ -159,6 +163,19 @@ class HybridStateStore:
             self.live_executions = [self._normalize_legacy_execution(e) for e in raw_execs]
             self.live_pnl_usd = float(data.get("live_pnl_usd", 0.0))
             self.live_fees_usd = float(data.get("live_fees_usd", 0.0))
+            window_stats = self._sample_stats(self.live_executions, "simulated_pnl_usd")
+            self.paper_lifetime_trades = int(
+                data.get("paper_lifetime_trades", window_stats["trades"])
+            )
+            self.paper_lifetime_wins = int(
+                data.get("paper_lifetime_wins", window_stats["wins"])
+            )
+            self.paper_lifetime_losses = int(
+                data.get("paper_lifetime_losses", window_stats["losses"])
+            )
+            self.paper_lifetime_flat = int(
+                data.get("paper_lifetime_flat", window_stats["flat"])
+            )
             if isinstance(data.get("live_pod_pnl"), dict):
                 for k, v in data["live_pod_pnl"].items():
                     self.live_pod_pnl[str(k)] = float(v)
@@ -196,6 +213,10 @@ class HybridStateStore:
                     "live_executions": self.live_executions[:200],
                     "live_pnl_usd": self.live_pnl_usd,
                     "live_fees_usd": self.live_fees_usd,
+                    "paper_lifetime_trades": self.paper_lifetime_trades,
+                    "paper_lifetime_wins": self.paper_lifetime_wins,
+                    "paper_lifetime_losses": self.paper_lifetime_losses,
+                    "paper_lifetime_flat": self.paper_lifetime_flat,
                     "live_pod_pnl": self.live_pod_pnl,
                     "testnet_positions": self.testnet_positions,
                     "testnet_cex_realized_pnl_usd": self.testnet_cex_realized_pnl_usd,
@@ -340,6 +361,64 @@ class HybridStateStore:
             "effective_policy": self.get_effective_policy().to_dict(),
         }
 
+    @staticmethod
+    def compute_paper_execution_pnl(
+        notional_usd: float,
+        fee_usd: float,
+        side: str,
+        obi: float,
+        price_change_bps: float,
+        rsi_val: float = 50.0,
+        spread_bps: float = 2.5,
+        entry_obi_threshold: float = 0.08,
+        max_rsi_long: float = 68.0,
+        venue: str = "BINANCE_TESTNET_LIVE",
+        pod_id: str = "pod_momentum",
+    ) -> Dict[str, float]:
+        """
+        Microstructure-aware Paper execution model with L2 spread/volatility slippage
+        and adverse selection. Can produce both wins and losses depending on orderbook
+        alignment (`signed_obi`), short-term price impulse (`signed_momentum_bps`),
+        and RSI exhaustion.
+        """
+        direction = 1.0 if str(side).upper() == "BUY" else -1.0
+        signed_obi = float(obi) * direction
+        signed_momentum_bps = float(price_change_bps) * direction
+
+        # 1. Realized slippage: half-spread + volatility impact
+        is_dex = "SOLANA" in venue.upper() or pod_id in ("pod_solana_alpha", "pod_sniper")
+        base_slip_bps = max(4.5 if is_dex else 1.5, float(spread_bps) * 0.5)
+        vol_slip_bps = min(18.0, abs(float(price_change_bps)) * 0.35)
+        realized_slippage_bps = round(base_slip_bps + vol_slip_bps, 2)
+
+        # 2. Adverse selection penalty when trading against orderflow, momentum, or RSI extremes
+        obi_deficit = max(0.0, float(entry_obi_threshold) - signed_obi)
+        adverse_obi_bps = obi_deficit * (48.0 if is_dex else 42.0)
+        adverse_mom_bps = abs(min(0.0, signed_momentum_bps)) * 0.85
+        rsi_exhaustion_bps = 0.0
+        if direction > 0 and rsi_val > max_rsi_long:
+            rsi_exhaustion_bps = min(22.0, (rsi_val - max_rsi_long) * 1.6 + 8.0)
+        elif direction < 0 and rsi_val < (100.0 - max_rsi_long):
+            rsi_exhaustion_bps = min(22.0, ((100.0 - max_rsi_long) - rsi_val) * 1.6 + 8.0)
+        adverse_selection_bps = round(adverse_obi_bps + adverse_mom_bps + rsi_exhaustion_bps, 2)
+
+        # 3. Gross directional/maker alpha
+        base_alpha_bps = 24.0 if pod_id == "pod_sniper" else (20.0 if is_dex else 15.0)
+        flow_alpha_bps = max(0.0, signed_obi) * 38.0 + max(0.0, signed_momentum_bps) * 0.55
+        gross_alpha_bps = round(base_alpha_bps + flow_alpha_bps, 2)
+
+        # 4. Net edge and paper PnL (can be negative when friction + adverse selection > alpha)
+        net_edge_bps = round(gross_alpha_bps - realized_slippage_bps - adverse_selection_bps, 2)
+        sim_pnl_usd = round(float(notional_usd) * (net_edge_bps / 10_000.0) - float(fee_usd), 2)
+
+        return {
+            "simulated_pnl_usd": sim_pnl_usd,
+            "net_edge_bps": net_edge_bps,
+            "expected_edge_bps": gross_alpha_bps,
+            "realized_slippage_bps": realized_slippage_bps,
+            "adverse_selection_bps": adverse_selection_bps,
+        }
+
     def run_live_testnet_tick(self) -> Optional[Dict[str, Any]]:
         """
         Polls real live orderbook & ticker data from Binance Testnet and executes
@@ -413,11 +492,6 @@ class HybridStateStore:
 
                 notional_usd = round(sol_price * 1.5, 2)
                 fee_usd = round(0.000005 * sol_price, 6)
-                sim_pnl_usd = round(
-                    notional_usd * (0.0038 if chosen_pod == "pod_solana_alpha" else 0.0062)
-                    - round(notional_usd * 0.0008, 4),
-                    2,
-                )
                 with self._lock:
                     self.solana_devnet_tx_count += 1
                     self.solana_devnet_gas_sol = round(self.solana_devnet_gas_sol + 0.000005, 6)
@@ -427,7 +501,23 @@ class HybridStateStore:
 
                 sol_ta = self.latest_ta_snapshots.get("SOL/USDT", {})
                 sol_fib = sol_ta.get("fibonacci", {}).get("golden_pocket_618", round(sol_price * 0.99, 2))
-                sol_rsi = sol_ta.get("rsi", {}).get("rsi_14", 50.0)
+                sol_rsi = float(sol_ta.get("rsi", {}).get("rsi_14", 50.0))
+                sol_obi = float(self._last_obi.get("SOL/USDT", obi))
+                sol_rule = policy.asset_overrides.get("SOL-USDT")
+                paper_eval = self.compute_paper_execution_pnl(
+                    notional_usd=notional_usd,
+                    fee_usd=round(notional_usd * 0.0008, 4),
+                    side="BUY",
+                    obi=sol_obi,
+                    price_change_bps=price_change_bps,
+                    rsi_val=sol_rsi,
+                    spread_bps=6.0,
+                    entry_obi_threshold=sol_rule.entry_obi_threshold if sol_rule else 0.08,
+                    max_rsi_long=sol_rule.max_rsi_long if sol_rule else 68.0,
+                    venue="SOLANA_DEVNET_ONCHAIN",
+                    pod_id=chosen_pod,
+                )
+                sim_pnl_usd = paper_eval["simulated_pnl_usd"]
                 report = {
                     "timestamp_ms": now_ms,
                     "pod_id": chosen_pod,
@@ -440,15 +530,17 @@ class HybridStateStore:
                     "fee_usd": fee_usd,
                     "gas_fee_sol": 0.000005,
                     "tx_signature": sig,
-                    "realized_slippage_bps": 1.2,
-                    "expected_edge_bps": 46.0,
+                    "realized_slippage_bps": paper_eval["realized_slippage_bps"],
+                    "adverse_selection_bps": paper_eval["adverse_selection_bps"],
+                    "expected_edge_bps": paper_eval["net_edge_bps"],
                     "realized_pnl_usd": 0.0,
                     "simulated_pnl_usd": sim_pnl_usd,
                     "pnl_type": "DEVNET_SELF_TX",
                     "is_testnet_devnet": True,
                     "rationale": (
-                        f"Règle Rust [{chosen_pod}] : RSI={sol_rsi} | Fib 0.618=${sol_fib} | "
-                        f"Auto-TX Devnet {short_sig}"
+                        f"Règle Rust [{chosen_pod}] : RSI={sol_rsi:.1f} | OBI={sol_obi:+.2f} | "
+                        f"Edge net={paper_eval['net_edge_bps']:+.1f}bps (Adv -{paper_eval['adverse_selection_bps']:.1f}bps) | "
+                        f"Fib 0.618=${sol_fib} | Auto-TX Devnet {short_sig}"
                     ),
                 }
                 self._record_live_execution(report)
@@ -479,9 +571,23 @@ class HybridStateStore:
         notional_usd = round(fill_price * filled_qty, 2)
         fee_usd = round(notional_usd * 0.00036, 4)
 
-        edge_bps = 24.0 + abs(obi) * 35.0 + abs(price_change_bps) * 0.5
-        sim_pnl_usd = round(notional_usd * (edge_bps / 10_000.0) - fee_usd, 2)
+        spread_bps = ((best_ask - best_bid) / mid_price) * 10_000.0 if mid_price > 0 else 2.5
         pod_Key = chosen_pod if chosen_pod in ("pod_carry", "pod_momentum") else "pod_momentum"
+        paper_eval = self.compute_paper_execution_pnl(
+            notional_usd=notional_usd,
+            fee_usd=fee_usd,
+            side=side,
+            obi=obi,
+            price_change_bps=price_change_bps,
+            rsi_val=rsi_val,
+            spread_bps=spread_bps,
+            entry_obi_threshold=rule.entry_obi_threshold if rule else 0.08,
+            max_rsi_long=rule.max_rsi_long if rule else 68.0,
+            venue="BINANCE_TESTNET_LIVE",
+            pod_id=pod_Key,
+        )
+        edge_bps = paper_eval["net_edge_bps"]
+        sim_pnl_usd = paper_eval["simulated_pnl_usd"]
 
         rule_tag = (
             f"Ichimoku={kumo_state.split('_')[0]} | RSI={rsi_val:.1f}"
@@ -528,7 +634,8 @@ class HybridStateStore:
             "fill_price": round(fill_price, 2),
             "notional_usd": notional_usd,
             "fee_usd": fee_usd,
-            "realized_slippage_bps": 0.5,
+            "realized_slippage_bps": paper_eval["realized_slippage_bps"],
+            "adverse_selection_bps": paper_eval["adverse_selection_bps"],
             "expected_edge_bps": round(edge_bps, 1),
             "realized_pnl_usd": real_pnl_usd,
             "simulated_pnl_usd": sim_pnl_usd,
@@ -548,6 +655,13 @@ class HybridStateStore:
             pod_id = str(report.get("pod_id", "pod_momentum"))
             self.live_pnl_usd += pnl
             self.live_fees_usd += fee
+            self.paper_lifetime_trades += 1
+            if pnl > 0:
+                self.paper_lifetime_wins += 1
+            elif pnl < 0:
+                self.paper_lifetime_losses += 1
+            else:
+                self.paper_lifetime_flat += 1
             self.live_pod_pnl[pod_id] = self.live_pod_pnl.get(pod_id, 0.0) + pnl
             self._persist_state()
 
@@ -640,18 +754,26 @@ class HybridStateStore:
             paper_fees = float(self.live_fees_usd)
             pod_pnl = dict(self.live_pod_pnl)
             cex_realized = float(self.testnet_cex_realized_pnl_usd)
+            lt_trades = int(self.paper_lifetime_trades)
+            lt_wins = int(self.paper_lifetime_wins)
+            lt_losses = int(self.paper_lifetime_losses)
+            lt_flat = int(self.paper_lifetime_flat)
 
         initial = float(bt.get("initial_equity_usd", 10000.0))
         paper_return_pct = (paper_pnl / initial) * 100.0 if initial else 0.0
 
-        # `simulated_pnl_usd` is not an outcome: the worker computes
-        # `notional * (edge_bps / 10_000) - fee` with `edge_bps >= 24`, so it is
-        # strictly positive on every cycle. A "win rate" over that column would
-        # be 100% by construction, not by performance — it is reported as an
-        # edge-capture share, and only the live column carries a win rate.
         paper_recent = self._sample_stats(live, "simulated_pnl_usd")
-        paper_recent["positive_edge_share_pct"] = paper_recent.pop("win_rate_pct")
-        paper_recent["deterministic"] = True
+        paper_recent["positive_edge_share_pct"] = paper_recent["win_rate_pct"]
+        paper_recent["deterministic"] = False
+        paper_recent["adverse_selection_enabled"] = True
+
+        paper_lifetime = {
+            "trades": lt_trades,
+            "wins": lt_wins,
+            "losses": lt_losses,
+            "flat": lt_flat,
+            "win_rate_pct": round(100.0 * lt_wins / lt_trades, 1) if lt_trades else None,
+        }
 
         return {
             "backtest_fixture": {
@@ -669,14 +791,15 @@ class HybridStateStore:
                 "pod_pnl_attribution": dict(bt.get("pod_pnl_attribution", {})),
             },
             "paper_model": {
-                "source": "simulated_pnl_usd (paper simulation)",
-                "note": "simulated_pnl_usd = notional × edge_bps − fee with edge_bps ≥ 24 → positive by construction; the share below measures edge capture, not a win rate",
+                "source": "simulated_pnl_usd (L2 slippage + adverse-selection paper model)",
+                "note": "simulated_pnl_usd deducts half-spread, volatility impact, fees and adverse selection when trading against L2 OBI, momentum or RSI extremes",
                 "initial_equity_usd": initial,
                 "final_equity_usd": round(initial + paper_pnl, 2),
                 "cumulative_pnl_usd": round(paper_pnl, 2),
                 "total_return_pct": round(paper_return_pct, 3),
                 "cumulative_fees_usd": round(paper_fees, 2),
                 "pod_pnl_attribution": {k: round(v, 2) for k, v in pod_pnl.items()},
+                "lifetime": paper_lifetime,
                 "recent": paper_recent,
             },
             "live_testnet": {

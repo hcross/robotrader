@@ -71,25 +71,72 @@ class TestPerformancePopulations(unittest.TestCase):
         self.assertEqual(bt["executions_source"], "backtest_fixture")
 
     def test_paper_and_live_populations_use_their_own_pnl_column(self) -> None:
-        # Both orders lose money for real but win in the paper model.
-        self.store._record_live_execution(_live_report(simulated=0.15, realized=-0.006))
-        self.store._record_live_execution(_live_report(simulated=0.20, realized=-0.002))
+        # Both orders lose money for real; one wins and one loses in the paper model.
+        self.store._record_live_execution(_live_report(simulated=0.25, realized=-0.006))
+        self.store._record_live_execution(_live_report(simulated=-0.10, realized=-0.002))
 
         populations = self.store.get_population_metrics()
 
         paper = populations["paper_model"]
         live = populations["live_testnet"]
-        self.assertEqual(paper["cumulative_pnl_usd"], 0.35)
+        self.assertEqual(paper["cumulative_pnl_usd"], 0.15)
         self.assertEqual(paper["recent"]["trades"], 2)
-        # The paper column has no loss distribution: it reports edge capture, not a rate.
-        self.assertEqual(paper["recent"]["positive_edge_share_pct"], 100.0)
-        self.assertNotIn("win_rate_pct", paper["recent"])
-        self.assertTrue(paper["recent"]["deterministic"])
+        self.assertEqual(paper["recent"]["wins"], 1)
+        self.assertEqual(paper["recent"]["losses"], 1)
+        self.assertEqual(paper["recent"]["win_rate_pct"], 50.0)
+        self.assertEqual(paper["recent"]["positive_edge_share_pct"], 50.0)
+        self.assertFalse(paper["recent"]["deterministic"])
+        self.assertTrue(paper["recent"]["adverse_selection_enabled"])
+        self.assertEqual(paper["lifetime"]["trades"], 2)
+        self.assertEqual(paper["lifetime"]["wins"], 1)
+        self.assertEqual(paper["lifetime"]["losses"], 1)
+        self.assertEqual(paper["lifetime"]["win_rate_pct"], 50.0)
 
         self.assertEqual(live["recent"]["pnl_usd"], -0.008)
         self.assertEqual(live["recent"]["trades"], 2)
         self.assertEqual(live["recent"]["wins"], 0)
         self.assertEqual(live["recent"]["win_rate_pct"], 0.0)
+
+    def test_paper_execution_model_produces_wins_and_adverse_selection_losses(self) -> None:
+        win_eval = HybridStateStore.compute_paper_execution_pnl(
+            notional_usd=100.0,
+            fee_usd=0.036,
+            side="BUY",
+            obi=0.28,
+            price_change_bps=8.0,
+            rsi_val=52.0,
+            spread_bps=2.0,
+            entry_obi_threshold=0.08,
+            max_rsi_long=68.0,
+        )
+        loss_eval = HybridStateStore.compute_paper_execution_pnl(
+            notional_usd=100.0,
+            fee_usd=0.036,
+            side="BUY",
+            obi=-0.22,
+            price_change_bps=-12.0,
+            rsi_val=74.0,
+            spread_bps=4.0,
+            entry_obi_threshold=0.08,
+            max_rsi_long=68.0,
+        )
+        self.assertGreater(win_eval["simulated_pnl_usd"], 0.0)
+        self.assertGreater(win_eval["net_edge_bps"], 0.0)
+        self.assertLess(loss_eval["simulated_pnl_usd"], 0.0)
+        self.assertLess(loss_eval["net_edge_bps"], 0.0)
+        self.assertGreater(loss_eval["adverse_selection_bps"], 20.0)
+
+    def test_paper_lifetime_counters_persist_beyond_200_window(self) -> None:
+        for i in range(205):
+            sim = 0.10 if i % 2 == 0 else -0.05
+            self.store._record_live_execution(_live_report(simulated=sim, realized=0.0))
+
+        populations = self.store.get_population_metrics()
+        paper = populations["paper_model"]
+        self.assertEqual(paper["recent"]["trades"], 200)
+        self.assertEqual(paper["lifetime"]["trades"], 205)
+        self.assertEqual(paper["lifetime"]["wins"], 103)
+        self.assertEqual(paper["lifetime"]["losses"], 102)
 
     def test_fixture_population_reports_its_own_consistency(self) -> None:
         populations = self.store.get_population_metrics()
