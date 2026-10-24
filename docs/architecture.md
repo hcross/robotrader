@@ -42,15 +42,15 @@ flowchart TB
     subgraph HotPath["Hot Path Execution & Replay Engine (Rust / Tokio Workspace)"]
         Feed["Market Data Multiplexer (Binance/Hyperliquid WS + Solana Geyser/RPC)"]
         
-        subgraph Pods["Deterministic Strategy Pods"]
-            P1["Pod 1: pod-carry (Funding Rate & Spot-Perp Basis Arbitrage)"]
-            P2["Pod 2: pod-momentum (Orderbook Imbalance, CVD & Volatility Breakout)"]
-            P3["Pod 3: pod-solana-alpha (Smart-Money Copy & Catalyst Swaps)"]
-            P4["Pod 4: pod-sniper (Atomic Raydium/Pump.fun Pool Sniper)"]
+        subgraph Pods["Deterministic Strategy Pods (1..=4 per Blockchain)"]
+            P1["Pod 1: pod_carry (Funding Rate & Native Yield / Basis Arbitrage)"]
+            P2["Pod 2: pod_momentum (Orderbook Imbalance, CVD & Volatility Breakout)"]
+            P3["Pod 3: pod_onchain_alpha (On-Chain Smart-Money & Catalyst Flow)"]
+            P4["Pod 4: pod_sniper (Atomic DEX Pool & MEV Liquidation Sniper)"]
         end
 
-        Risk["HardRiskGate (Drawdown Kill-Switch, Volatility Sizing, Solana Rug Filter)"]
-        Exec["Smart Execution Router (Post-Only Limit Chaser / Jupiter v6 + Jito Bundles)"]
+        Risk["HardRiskGate (<50µs: Drawdown Kill-Switch, Kelly Sizing, OnChainTokenSafety, RustVaultEnclave)"]
+        Exec["Smart Execution Router (Post-Only CEX Maker / OnchainDexAggregator + MevBundleAtomic)"]
         Replay["Deterministic Backtest & Walk-Forward Runner"]
     end
 
@@ -118,7 +118,7 @@ flowchart TB
 ### 4.1. Rust Hot-Path Engine (`engine-rs`)
 
 1. **`crates/common`**:
-   - Defines canonical types serialized via `serde` (JSON/MessagePack): `MarketEvent` (`L2BookUpdate`, `TradeTick`, `FundingRateUpdate`, `SolanaPoolCreated`, `WhaleSwapDetected`), `OrderIntent`, `ApprovedOrder`, `ExecutionReport`, and `PolicyEnvelope`.
+   - Defines canonical chain-agnostic types serialized via `serde`: `MarketEvent` (`L2BookUpdate`, `TradeTick`, `FundingRateUpdate`, `OnchainPoolLaunch`, `OnchainSmartMoneySwap`), `OrderIntent` (with generic `token_safety: Option<OnChainTokenSafety>`), `ApprovedOrder` (with `mev_priority_tip_bps`), `ExecutionReport`, `PodId` (`PodCarry`, `PodMomentum`, `PodOnchainAlpha`, `PodSniper`), `OrderType` (`PostOnlyMaker`, `LimitIoc`, `Market`, `MevBundleAtomic`), `Venue` (`BinanceSpot`, `BinancePerp`, `HyperliquidPerp`, `OnchainDexAggregator`, `OnchainAtomicPool`), and `PolicyEnvelope`.
 2. **`crates/strategies` (`StrategyPod` Trait)**:
    ```rust
    pub trait StrategyPod: Send + Sync {

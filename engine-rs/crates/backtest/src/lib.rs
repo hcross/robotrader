@@ -1,6 +1,6 @@
 use robotrader_common::{
     AssetOverride, DirectionalBias, EcosystemPodSpec, ExecutionReport, GlobalRegime, MarketEvent,
-    PodAllocation, PodId, PolicyEnvelope, PortfolioState, SolanaTokenSafety,
+    OnChainTokenSafety, PodAllocation, PodId, PolicyEnvelope, PortfolioState,
 };
 use robotrader_exec_router::{ExecutionMode, SmartExecutionRouter};
 use robotrader_risk_gate::{HardRiskGate, RiskLimits};
@@ -177,7 +177,7 @@ pub fn benchmark_market_stream() -> (Vec<MarketEvent>, PolicyEnvelope) {
         },
     );
     pod_allocations.insert(
-        PodId::PodSolanaAlpha.as_str().to_string(),
+        PodId::PodOnchainAlpha.as_str().to_string(),
         PodAllocation {
             enabled: true,
             capital_weight: 0.15,
@@ -224,17 +224,19 @@ pub fn benchmark_market_stream() -> (Vec<MarketEvent>, PolicyEnvelope) {
         asset_overrides,
     };
 
-    let clean_safety = SolanaTokenSafety {
-        mint_authority_revoked: true,
-        freeze_authority_revoked: true,
+    let clean_safety = OnChainTokenSafety {
+        supply_mint_immutable: true,
+        transfer_freeze_disabled: true,
+        no_honeypot_or_transfer_tax: true,
         lp_locked_pct: 96.0,
         top10_holder_pct: 21.0,
         tx_simulation_success: true,
     };
 
-    let rug_safety = SolanaTokenSafety {
-        mint_authority_revoked: false, // RUG TOKEN
-        freeze_authority_revoked: false,
+    let rug_safety = OnChainTokenSafety {
+        supply_mint_immutable: false, // RUG TOKEN
+        transfer_freeze_disabled: false,
+        no_honeypot_or_transfer_tax: false,
         lp_locked_pct: 10.0,
         top10_holder_pct: 82.0,
         tx_simulation_success: true,
@@ -261,30 +263,30 @@ pub fn benchmark_market_stream() -> (Vec<MarketEvent>, PolicyEnvelope) {
             breakout_zscore: 2.45,
         },
         // 3. Pod 3: Verified Smart-Money whale accumulation on JUP
-        MarketEvent::SolanaSmartMoneySwap {
+        MarketEvent::OnchainSmartMoneySwap {
             timestamp_ms: base_ts + 3_000,
             symbol: "JUP-SOL".to_string(),
-            mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN".to_string(),
+            token_address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN".to_string(),
             price_usd: 1.24,
             whale_wallet_winrate: 0.74,
             buy_volume_usd: 48_000.0,
             safety: clean_safety.clone(),
         },
         // 4. Malicious Rug Token (Must be REJECTED by HardRiskGate!)
-        MarketEvent::SolanaSmartMoneySwap {
+        MarketEvent::OnchainSmartMoneySwap {
             timestamp_ms: base_ts + 4_000,
             symbol: "SCAM-SOL".to_string(),
-            mint: "ScamMint11111111111111111111111111111111111".to_string(),
+            token_address: "ScamMint11111111111111111111111111111111111".to_string(),
             price_usd: 0.004,
             whale_wallet_winrate: 0.80,
             buy_volume_usd: 30_000.0,
             safety: rug_safety,
         },
-        // 5. Pod 4: Clean Raydium Pool Launch Snipe
-        MarketEvent::SolanaPoolLaunch {
+        // 5. Pod 4: Clean Atomic Pool Launch Snipe
+        MarketEvent::OnchainPoolLaunch {
             timestamp_ms: base_ts + 5_000,
             symbol: "AIX-SOL".to_string(),
-            mint: "AiXMint111111111111111111111111111111111111".to_string(),
+            token_address: "AiXMint111111111111111111111111111111111111".to_string(),
             initial_liquidity_usd: 65_000.0,
             creator_rug_count: 0,
             price_usd: 0.015,
@@ -397,9 +399,10 @@ pub fn benchmark_market_stream_for_leaf(leaf_id: &str) -> (Vec<MarketEvent>, Pol
         asset_overrides,
     };
 
-    let clean_safety = SolanaTokenSafety {
-        mint_authority_revoked: true,
-        freeze_authority_revoked: true,
+    let clean_safety = OnChainTokenSafety {
+        supply_mint_immutable: true,
+        transfer_freeze_disabled: true,
+        no_honeypot_or_transfer_tax: true,
         lp_locked_pct: 95.0,
         top10_holder_pct: 19.0,
         tx_simulation_success: true,
@@ -426,10 +429,10 @@ pub fn benchmark_market_stream_for_leaf(leaf_id: &str) -> (Vec<MarketEvent>, Pol
             breakout_zscore: 2.35,
         },
         // 3. Pod 3 (On-Chain Whale / Arbitrage): Verified accumulation on secondary pair
-        MarketEvent::SolanaSmartMoneySwap {
+        MarketEvent::OnchainSmartMoneySwap {
             timestamp_ms: base_ts + 3_000,
             symbol: secondary_sym.to_string(),
-            mint: format!("NativePool::{leaf_id}"),
+            token_address: format!("NativePool::{leaf_id}"),
             price_usd: secondary_px,
             whale_wallet_winrate: 0.73,
             buy_volume_usd: 42_000.0,
@@ -446,10 +449,10 @@ pub fn benchmark_market_stream_for_leaf(leaf_id: &str) -> (Vec<MarketEvent>, Pol
     ];
 
     if specs.iter().any(|s| s.slot_id == PodId::PodSniper) {
-        events.push(MarketEvent::SolanaPoolLaunch {
+        events.push(MarketEvent::OnchainPoolLaunch {
             timestamp_ms: base_ts + 5_000,
             symbol: primary_sym.to_string(),
-            mint: format!("AtomicPool::{leaf_id}"),
+            token_address: format!("AtomicPool::{leaf_id}"),
             initial_liquidity_usd: 58_000.0,
             creator_rug_count: 0,
             price_usd: primary_px,

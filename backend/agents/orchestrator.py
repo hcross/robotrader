@@ -1003,7 +1003,7 @@ class OrchestratorAgent(BaseWarmAgent):
                 "action": "KILL_SWITCH_ACTIVATED",
                 "content": (
                     "🛑 Coupe-circuit HardRiskGate activé. Tous les pods Rust (`pod_carry`, `pod_momentum`, "
-                    "`pod_solana_alpha`, `pod_sniper`) sont désactivés et en mode lockdown."
+                    "`pod_onchain_alpha`, `pod_sniper`) sont désactivés et en mode lockdown."
                 ),
                 "state": state,
             }

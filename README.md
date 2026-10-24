@@ -5,7 +5,7 @@
 It combines:
 - **Tier 1 — Master Orchestrator & Cross-Chain Treasury (`moonshotai/kimi-k3.1-pro`)**: Manages the Master Portfolio, enforces a permanent `>= 20%` `Dry Powder` safety reserve, prices cross-chain transfer viability (`2.5x` round-trip bridge hurdle rate), executes multi-chain/multi-token operator `Checkout` requests, reads across all 26 leaf agents' MemPalace wings (`wing="master_orchestrator"`), and governs profit-gated OpenRouter credit auto-refill on a `1h` (`3600s`) macro cadence.
 - **Tier 2 — 26 Specialized Blockchain & Venue Leaf Robots (`deepseek/deepseek-v4.1-flash-1017`)**: Each leaf robot is strictly isolated to **one single blockchain** (Solana, Bitcoin, Ethereum, Sui, Hyperliquid, BNB, XRP, TON, TRON, Avalanche, Cosmos, Aptos, Chainlink, Stacks, NEAR, Cardano, Polkadot, Dogecoin, ICP, Canton, Celo, Tezos, Flow, Vaulta/EOS, plus Binance CEX Multi-Pair and Paper Sandbox) with its own RSS feed, specific TA/on-chain metrics, dedicated MemPalace wing (`wing="leaf_<slug>"`), and **`1..=4` ecosystem-adapted Rust Strategy Pods** in `engine-rs`.
-- **Tier 3 — Sub-Millisecond Deterministic Rust Execution (`engine-rs`, `<50µs`)**: Synchronous `HardRiskGate`, Kelly position sizer, Solana SPL anti-rug filter, and per-blockchain Rust strategy pods with zero LLM latency in the hot path.
+- **Tier 3 — Sub-Millisecond Deterministic Rust Execution & Cryptographic Enclave (`engine-rs`, `<50µs`)**: Synchronous `HardRiskGate`, `RustVaultEnclave` (`BIP-32`/`BIP-44`/`SLIP-0010` HD wallets across all 26 chains with volatile RAM zeroization — see [Cryptographic Vault & Key Management](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)), Kelly position sizer, multi-chain `OnChainTokenSafety` anti-rug/honeypot filter, and per-blockchain Rust strategy pods (`pod_carry`, `pod_momentum`, `pod_onchain_alpha`, `pod_sniper`) with zero LLM latency in the hot path.
 
 ---
 
@@ -46,22 +46,22 @@ Robotrader v2 solves the latency and reliability dilemma of agentic trading by e
 │                                      ▼                                 │
 │               ┌──────────────────────────────────────────┐             │
 │               │ Synchronous HardRiskGate (<50µs)         │             │
-│               │ • Kelly Position Sizer                   │             │
+│               │ • Kelly Position Sizer & Vault Enclave   │             │
 │               │ • Drawdown Kill-Switch                   │             │
-│               │ • Solana Token Anti-Rug / Freeze Check   │             │
+│               │ • Multi-Chain OnChainTokenSafety Check   │             │
 │               └──────────────────────┬───────────────────┘             │
 │                                      │                                 │
 │               ┌──────────────────────┴───────────────────┐             │
 │               │ 4 Autonomous Execution Strategy Pods     │             │
 │               │ • Pod 1: Funding Carry / Basis Arbitrage │             │
 │               │ • Pod 2: Order Book Imbalance (OBI)      │             │
-│               │ • Pod 3: Solana L1 Momentum              │             │
-│               │ • Pod 4: DEX Sniper (Meme / Catalyst)    │             │
+│               │ • Pod 3: On-Chain Smart-Money Alpha      │             │
+│               │ • Pod 4: DEX Atomic Sniper               │             │
 │               └──────────────────────┬───────────────────┘             │
 │                                      ▼                                 │
 │               ┌──────────────────────────────────────────┐             │
-│               │ Execution Router: Binance Post-Only &    │             │
-│               │ Solana Jupiter v6 + Jito MEV Bundles     │             │
+│               │ Execution Router: CEX Post-Only Maker &  │             │
+│               │ On-Chain DEX Aggregator + MEV Bundles    │             │
 │               └──────────────────────────────────────────┘             │
 └────────────────────────────────────────────────────────────────────────┘
 ```

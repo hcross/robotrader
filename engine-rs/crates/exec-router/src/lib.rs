@@ -24,9 +24,9 @@ impl SmartExecutionRouter {
             (Venue::BinanceSpot | Venue::BinancePerp, OrderType::PostOnlyMaker) => 1.8,
             (Venue::HyperliquidPerp, OrderType::PostOnlyMaker) => 1.0,
             (Venue::BinanceSpot | Venue::BinancePerp | Venue::HyperliquidPerp, _) => 5.0,
-            // Solana Jupiter + Jito bundle fee + priority tip
-            (Venue::SolanaJupiterJito, _) => 8.0,
-            (Venue::SolanaRaydiumAtomic, _) => 12.0,
+            // On-chain DEX aggregator + MEV bundle fee + priority tip
+            (Venue::OnchainDexAggregator, _) => 8.0,
+            (Venue::OnchainAtomicPool, _) => 12.0,
         }
     }
 
@@ -35,7 +35,7 @@ impl SmartExecutionRouter {
             OrderType::PostOnlyMaker => 0.5, // Maker fills capture spread
             OrderType::Limit => 2.0,
             OrderType::Market => 8.0,
-            OrderType::JitoBundleAtomic => (order.jito_tip_bps as f64) * 0.6,
+            OrderType::MevBundleAtomic => (order.mev_priority_tip_bps as f64) * 0.6,
         }
     }
 

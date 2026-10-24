@@ -45,7 +45,7 @@ class MetaAllocatorAgent(BaseWarmAgent):
             env.global_regime = "TRENDING_BULL"
             env.pod_allocations["pod_carry"].capital_weight = 0.35
             env.pod_allocations["pod_momentum"].capital_weight = 0.30
-            env.pod_allocations["pod_solana_alpha"].capital_weight = 0.20
+            env.pod_allocations["pod_onchain_alpha"].capital_weight = 0.20
             env.pod_allocations["pod_sniper"] = PodAllocation(
                 enabled=True,
                 capital_weight=0.10,

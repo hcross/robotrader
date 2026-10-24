@@ -23,9 +23,9 @@ const POD_META = {
     label: 'Pod 2 — Intraday Orderflow & Vol',
     desc: 'L2 OBI + CVD + Volatility Breakout (Post-Only Maker)',
   },
-  pod_solana_alpha: {
-    label: 'Pod 3 — Solana Smart-Money',
-    desc: 'Whale Copy & Catalyst Swaps (Jupiter v6 + Jito)',
+  pod_onchain_alpha: {
+    label: 'Pod 3 — On-Chain Smart-Money & Whale Alpha',
+    desc: 'Whale Flow & Catalyst Swaps (DEX Aggregator + MEV Bundle)',
   },
   pod_sniper: {
     label: 'Pod 4 — DEX Atomic Sniper',

@@ -1,7 +1,7 @@
 pub mod vault;
 
 use robotrader_common::{
-    ApprovedOrder, OrderIntent, PolicyEnvelope, PortfolioState, SolanaTokenSafety,
+    ApprovedOrder, OnChainTokenSafety, OrderIntent, PolicyEnvelope, PortfolioState,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -24,8 +24,8 @@ pub enum RiskRejection {
     #[error("Requested slippage {requested_bps} bps exceeds hard ceiling {max_bps} bps")]
     ExcessiveSlippage { requested_bps: u32, max_bps: u32 },
 
-    #[error("Solana anti-rug security check failed: {reason}")]
-    SolanaRugCheckFailed { reason: String },
+    #[error("On-chain token anti-rug security check failed: {reason}")]
+    OnChainRugCheckFailed { reason: String },
 
     #[error("Computed Kelly/volatility size is non-positive")]
     ZeroPositionSize,
@@ -46,8 +46,10 @@ pub struct RiskLimits {
     pub target_annual_volatility_pct: f64,
     pub min_edge_over_cost_bps: f64,
     pub max_slippage_ceiling_bps: u32,
-    pub min_solana_lp_locked_pct: f64,
-    pub max_solana_top10_holder_pct: f64,
+    #[serde(alias = "min_solana_lp_locked_pct")]
+    pub min_onchain_lp_locked_pct: f64,
+    #[serde(alias = "max_solana_top10_holder_pct")]
+    pub max_onchain_top10_holder_pct: f64,
 }
 
 impl Default for RiskLimits {
@@ -60,8 +62,8 @@ impl Default for RiskLimits {
             target_annual_volatility_pct: 25.0,
             min_edge_over_cost_bps: 12.0,
             max_slippage_ceiling_bps: 150,
-            min_solana_lp_locked_pct: 80.0,
-            max_solana_top10_holder_pct: 35.0,
+            min_onchain_lp_locked_pct: 80.0,
+            max_onchain_top10_holder_pct: 35.0,
         }
     }
 }
@@ -131,36 +133,41 @@ impl HardRiskGate {
         Ok(requested_usd)
     }
 
-    pub fn validate_solana_safety(&self, safety: &SolanaTokenSafety) -> Result<(), RiskRejection> {
-        if !safety.mint_authority_revoked {
-            return Err(RiskRejection::SolanaRugCheckFailed {
-                reason: "Mint authority is still active".to_string(),
+    pub fn validate_token_safety(&self, safety: &OnChainTokenSafety) -> Result<(), RiskRejection> {
+        if !safety.supply_mint_immutable {
+            return Err(RiskRejection::OnChainRugCheckFailed {
+                reason: "Token supply / mint authority is still mutable".to_string(),
             });
         }
-        if !safety.freeze_authority_revoked {
-            return Err(RiskRejection::SolanaRugCheckFailed {
-                reason: "Freeze authority is still active".to_string(),
+        if !safety.transfer_freeze_disabled {
+            return Err(RiskRejection::OnChainRugCheckFailed {
+                reason: "Transfer freeze / blacklist authority is still active".to_string(),
             });
         }
-        if safety.lp_locked_pct < self.limits.min_solana_lp_locked_pct {
-            return Err(RiskRejection::SolanaRugCheckFailed {
+        if !safety.no_honeypot_or_transfer_tax {
+            return Err(RiskRejection::OnChainRugCheckFailed {
+                reason: "Honeypot or transfer tax detected on token contract".to_string(),
+            });
+        }
+        if safety.lp_locked_pct < self.limits.min_onchain_lp_locked_pct {
+            return Err(RiskRejection::OnChainRugCheckFailed {
                 reason: format!(
                     "LP locked {:.1}% < {:.1}% minimum",
-                    safety.lp_locked_pct, self.limits.min_solana_lp_locked_pct
+                    safety.lp_locked_pct, self.limits.min_onchain_lp_locked_pct
                 ),
             });
         }
-        if safety.top10_holder_pct > self.limits.max_solana_top10_holder_pct {
-            return Err(RiskRejection::SolanaRugCheckFailed {
+        if safety.top10_holder_pct > self.limits.max_onchain_top10_holder_pct {
+            return Err(RiskRejection::OnChainRugCheckFailed {
                 reason: format!(
                     "Top-10 holders own {:.1}% > {:.1}% maximum",
-                    safety.top10_holder_pct, self.limits.max_solana_top10_holder_pct
+                    safety.top10_holder_pct, self.limits.max_onchain_top10_holder_pct
                 ),
             });
         }
         if !safety.tx_simulation_success {
-            return Err(RiskRejection::SolanaRugCheckFailed {
-                reason: "RPC transaction simulation reverted".to_string(),
+            return Err(RiskRejection::OnChainRugCheckFailed {
+                reason: "RPC pre-flight transaction simulation reverted".to_string(),
             });
         }
         Ok(())
@@ -262,9 +269,9 @@ impl HardRiskGate {
             });
         }
 
-        // 5. On-chain Solana anti-rug gate (mandatory if safety payload is present)
-        if let Some(ref safety) = intent.solana_safety {
-            self.validate_solana_safety(safety)?;
+        // 5. On-chain token anti-rug gate (mandatory if safety payload is present)
+        if let Some(ref safety) = intent.token_safety {
+            self.validate_token_safety(safety)?;
         }
 
         // 6. Clamp leverage against both AI AssetOverride and Hard Ceiling
@@ -293,14 +300,14 @@ impl HardRiskGate {
         }
 
         let approved_quantity = approved_notional_usd / intent.reference_price;
-        let jito_tip_bps = ((intent.expected_edge_bps * 0.10) as u32).clamp(2, 25);
+        let mev_priority_tip_bps = ((intent.expected_edge_bps * 0.10) as u32).clamp(2, 25);
 
         Ok(ApprovedOrder {
             intent: intent.clone(),
             approved_notional_usd,
             approved_quantity,
             clamped_leverage,
-            jito_tip_bps,
+            mev_priority_tip_bps,
         })
     }
 }
@@ -326,7 +333,7 @@ mod tests {
             requested_leverage: 10.0, // Intentionally high to test clamping
             stop_loss_pct: 1.2,
             take_profit_pct: 2.6,
-            solana_safety: None,
+            token_safety: None,
             rationale: "Funding APR 28% carry capture".to_string(),
         }
     }
@@ -364,24 +371,25 @@ mod tests {
     }
 
     #[test]
-    fn test_solana_anti_rug_rejects_unrevoked_mint_authority() {
+    fn test_onchain_anti_rug_rejects_mutable_supply_authority() {
         let mut gate = HardRiskGate::new(RiskLimits::default());
         let portfolio = PortfolioState::new(10_000.0);
         let mut env = PolicyEnvelope::safe_baseline(1_000_000);
         env.pod_allocations
-            .get_mut("pod_solana_alpha")
+            .get_mut("pod_onchain_alpha")
             .unwrap()
             .enabled = true;
         env.pod_allocations
-            .get_mut("pod_solana_alpha")
+            .get_mut("pod_onchain_alpha")
             .unwrap()
             .capital_weight = 0.20;
 
         let mut intent = sample_intent();
-        intent.pod_id = PodId::PodSolanaAlpha;
-        intent.solana_safety = Some(SolanaTokenSafety {
-            mint_authority_revoked: false, // RUG RISK!
-            freeze_authority_revoked: true,
+        intent.pod_id = PodId::PodOnchainAlpha;
+        intent.token_safety = Some(OnChainTokenSafety {
+            supply_mint_immutable: false, // RUG RISK!
+            transfer_freeze_disabled: true,
+            no_honeypot_or_transfer_tax: true,
             lp_locked_pct: 95.0,
             top10_holder_pct: 18.0,
             tx_simulation_success: true,
@@ -390,7 +398,7 @@ mod tests {
         let res = gate.validate(&intent, &portfolio, &env, 1_000_500);
         assert!(matches!(
             res,
-            Err(RiskRejection::SolanaRugCheckFailed { .. })
+            Err(RiskRejection::OnChainRugCheckFailed { .. })
         ));
     }
 

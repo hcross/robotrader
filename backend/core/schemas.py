@@ -61,10 +61,11 @@ class PolicyEnvelope:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> PolicyEnvelope:
         now_ms = int(time.time() * 1000)
-        pod_allocs = {
-            k: PodAllocation(**v) if isinstance(v, dict) else v
-            for k, v in data.get("pod_allocations", {}).items()
-        }
+        raw_allocs = data.get("pod_allocations", {})
+        pod_allocs: Dict[str, PodAllocation] = {}
+        for k, v in raw_allocs.items():
+            canonical_key = "pod_onchain_alpha" if k == "pod_solana_alpha" else k
+            pod_allocs[canonical_key] = PodAllocation(**v) if isinstance(v, dict) else v
         overrides = {
             k: AssetOverride(**v) if isinstance(v, dict) else v
             for k, v in data.get("asset_overrides", {}).items()
@@ -101,7 +102,7 @@ class PolicyEnvelope:
                     min_funding_apr=None,
                     max_slippage_bps=30,
                 ),
-                "pod_solana_alpha": PodAllocation(
+                "pod_onchain_alpha": PodAllocation(
                     enabled=False,
                     capital_weight=0.0,
                     directional_bias="NEUTRAL",
@@ -142,7 +143,7 @@ class PolicyEnvelope:
                     min_funding_apr=None,
                     max_slippage_bps=30,
                 ),
-                "pod_solana_alpha": PodAllocation(
+                "pod_onchain_alpha": PodAllocation(
                     enabled=True,
                     capital_weight=0.15,
                     directional_bias="LONG_BIAS",

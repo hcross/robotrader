@@ -83,7 +83,7 @@ impl StrategyPod for CarryPod {
             requested_leverage: 1.5,
             stop_loss_pct: 0.8,
             take_profit_pct: 2.2,
-            solana_safety: None,
+            token_safety: None,
             rationale: format!(
                 "Delta-Neutral Carry: APR {:.1}%, Basis +{:.1} bps",
                 annualized_funding_apr * 100.0,
@@ -176,7 +176,7 @@ impl StrategyPod for MomentumPod {
                 requested_leverage: 2.0,
                 stop_loss_pct: (*atr_pct * 0.9).clamp(0.8, 3.0),
                 take_profit_pct: (*atr_pct * 2.2).clamp(1.8, 7.5),
-                solana_safety: None,
+                token_safety: None,
                 rationale: format!(
                     "Momentum Long: OBI +{:.2}, z={:.2}, catalyst={:.2}",
                     obi, breakout_zscore, catalyst_boost
@@ -207,7 +207,7 @@ impl StrategyPod for MomentumPod {
                 requested_leverage: 2.0,
                 stop_loss_pct: (*atr_pct * 0.9).clamp(0.8, 3.0),
                 take_profit_pct: (*atr_pct * 2.1).clamp(1.8, 7.0),
-                solana_safety: None,
+                token_safety: None,
                 rationale: format!(
                     "Momentum Short: OBI {:.2}, z={:.2}",
                     obi, breakout_zscore
@@ -221,13 +221,13 @@ impl StrategyPod for MomentumPod {
     fn on_execution_report(&mut self, _report: &ExecutionReport) {}
 }
 
-/// Pod 3: Solana Smart-Money & Catalyst Execution (`pod_solana_alpha`).
-pub struct SolanaAlphaPod {
+/// Pod 3: On-Chain Smart-Money & Catalyst Execution (`pod_onchain_alpha`).
+pub struct OnChainAlphaPod {
     pub min_whale_winrate: f64,
     pub min_buy_volume_usd: f64,
 }
 
-impl Default for SolanaAlphaPod {
+impl Default for OnChainAlphaPod {
     fn default() -> Self {
         Self {
             min_whale_winrate: 0.65,
@@ -236,9 +236,9 @@ impl Default for SolanaAlphaPod {
     }
 }
 
-impl StrategyPod for SolanaAlphaPod {
+impl StrategyPod for OnChainAlphaPod {
     fn id(&self) -> PodId {
-        PodId::PodSolanaAlpha
+        PodId::PodOnchainAlpha
     }
 
     fn on_market_event(
@@ -246,7 +246,7 @@ impl StrategyPod for SolanaAlphaPod {
         event: &MarketEvent,
         _envelope: &PolicyEnvelope,
     ) -> Vec<OrderIntent> {
-        let MarketEvent::SolanaSmartMoneySwap {
+        let MarketEvent::OnchainSmartMoneySwap {
             symbol,
             price_usd,
             whale_wallet_winrate,
@@ -267,11 +267,11 @@ impl StrategyPod for SolanaAlphaPod {
         let expected_edge_bps = 45.0 + (*whale_wallet_winrate - 0.60) * 180.0;
 
         vec![OrderIntent {
-            pod_id: PodId::PodSolanaAlpha,
+            pod_id: PodId::PodOnchainAlpha,
             symbol: symbol.clone(),
-            venue: Venue::SolanaJupiterJito,
+            venue: Venue::OnchainDexAggregator,
             side: Side::Buy,
-            order_type: OrderType::JitoBundleAtomic,
+            order_type: OrderType::MevBundleAtomic,
             reference_price: *price_usd,
             win_probability: (*whale_wallet_winrate).clamp(0.55, 0.78),
             reward_risk_ratio: 2.8,
@@ -281,9 +281,9 @@ impl StrategyPod for SolanaAlphaPod {
             requested_leverage: 1.0,
             stop_loss_pct: 4.0,
             take_profit_pct: 12.0,
-            solana_safety: Some(safety.clone()),
+            token_safety: Some(safety.clone()),
             rationale: format!(
-                "Solana Smart-Money inflow ${:.0}k (wallet winrate {:.0}%)",
+                "On-Chain Smart-Money inflow ${:.0}k (wallet winrate {:.0}%)",
                 buy_volume_usd / 1000.0,
                 whale_wallet_winrate * 100.0
             ),
@@ -316,7 +316,7 @@ impl StrategyPod for DexSniperPod {
         event: &MarketEvent,
         _envelope: &PolicyEnvelope,
     ) -> Vec<OrderIntent> {
-        let MarketEvent::SolanaPoolLaunch {
+        let MarketEvent::OnchainPoolLaunch {
             symbol,
             initial_liquidity_usd,
             creator_rug_count,
@@ -335,9 +335,9 @@ impl StrategyPod for DexSniperPod {
         vec![OrderIntent {
             pod_id: PodId::PodSniper,
             symbol: symbol.clone(),
-            venue: Venue::SolanaRaydiumAtomic,
+            venue: Venue::OnchainAtomicPool,
             side: Side::Buy,
-            order_type: OrderType::JitoBundleAtomic,
+            order_type: OrderType::MevBundleAtomic,
             reference_price: *price_usd,
             win_probability: 0.56,
             reward_risk_ratio: 3.5,
@@ -347,9 +347,9 @@ impl StrategyPod for DexSniperPod {
             requested_leverage: 1.0,
             stop_loss_pct: 6.0,
             take_profit_pct: 22.0,
-            solana_safety: Some(safety.clone()),
+            token_safety: Some(safety.clone()),
             rationale: format!(
-                "Atomic Raydium pool launch: LP ${:.0}k, clean deployer",
+                "Atomic DEX pool launch: LP ${:.0}k, clean deployer",
                 initial_liquidity_usd / 1000.0
             ),
         }]
@@ -362,7 +362,7 @@ pub fn default_strategy_pods() -> Vec<Box<dyn StrategyPod>> {
     vec![
         Box::new(CarryPod::default()),
         Box::new(MomentumPod::default()),
-        Box::new(SolanaAlphaPod::default()),
+        Box::new(OnChainAlphaPod::default()),
         Box::new(DexSniperPod::default()),
     ]
 }
@@ -445,7 +445,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Capture des déséquilibres L2 (OBI + CVD) et cassures de volatilité en <400ms.",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "sol_jito_smart_money",
                 "Jito Bundle Smart-Money Tracker",
                 "ONCHAIN_WHALE_FLOW",
@@ -483,7 +483,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Breakout directionnel filtré par l'expansion Hash Ribbon, les flux ETF et l'OBI L2.",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "btc_thorchain_peg_arb",
                 "ThorChain Native BTC / wBTC / sBTC Arb",
                 "CROSS_WRAPPER_ARB",
@@ -512,7 +512,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Momentum sur paires ETH-USDC, UNI-ETH et AAVE-ETH calibré sur le base-fee EIP-1559.",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "eth_curve_peg_arb",
                 "Curve stETH/ETH Peg & Smart-Money Pod",
                 "LST_PEG_ARBITRAGE",
@@ -550,7 +550,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Exécution Post-Only Maker sur HYPE-USDC et PURR-USDC pilotée par le déséquilibre L2.",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "hype_vault_whale_tracker",
                 "HLP Vault Skew & Top-Trader Flow",
                 "VAULT_POSITION_FLOW",
@@ -588,7 +588,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Breakout sur le carnet d'ordres central natif DeepBook v3 (finalité Mysticeti <400ms).",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "sui_cetus_clmm_alpha",
                 "Cetus CLMM Whale & Range Rebalancer",
                 "CLMM_WHALE_FLOW",
@@ -626,7 +626,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Momentum intraday sur BNB-USDT et CAKE-BNB dans les ticks concentrés PancakeSwap v3.",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "bnb_launchpool_whale_flow",
                 "BNB Launchpool & Smart-Money Catalyst",
                 "CATALYST_WHALE_FLOW",
@@ -655,7 +655,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Suivi des déséquilibres d'ordres sur le carnet natif XRPL (finalité 4s).",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "xrp_xls30_amm_arb",
                 "XRPL XLS-30 AMM vs CLOB Arbitrage",
                 "AMM_CLOB_ARBITRAGE",
@@ -684,7 +684,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Momentum sur TON-USDT et NOT-TON lors des vagues de volume Telegram Mini-Apps.",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "ton_whale_accumulator",
                 "TON Workchain Whale & TVL Flow",
                 "ONCHAIN_WHALE_FLOW",
@@ -713,7 +713,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Exécution directionnelle sur TRX-USDT lors des pics de règlement stablecoin.",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "trx_usdt_mint_tracker",
                 "Tether Treasury Mint & Peg Arbitrage",
                 "TREASURY_FLOW_ARB",
@@ -742,7 +742,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Momentum directionnel à travers les bins de liquidité discrète LFJ v2.2.",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "avax_subnet_icm_flow",
                 "Avalanche9000 Teleporter & Whale Flow",
                 "SUBNET_FLOW_ALPHA",
@@ -771,7 +771,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Capture des mouvements d'expansion sur ATOM-USDC et TIA-USDC.",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "atom_ibc_relayer_arb",
                 "Cross-Zone IBC Packet Dislocation Arb",
                 "IBC_CROSS_ZONE_ARB",
@@ -800,7 +800,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Exécution Post-Only Maker (1.8 bps) sur déséquilibre du carnet L2 et cassure ATR.",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "cex_cross_pair_stat_arb",
                 "CEX Cross-Margin Basis & Liquidation Reversion",
                 "STAT_ARB_REVERSION",
@@ -829,7 +829,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                 "Test de robustesse des signaux Ichimoku/Fibonacci/OBI avec modèle de sélection adverse.",
             ),
             spec(
-                PodId::PodSolanaAlpha,
+                PodId::PodOnchainAlpha,
                 "paper_sim_whale_alpha",
                 "Sandbox Smart-Money Replay Pod",
                 "PAPER_ONCHAIN_ALPHA",
@@ -871,7 +871,7 @@ pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
                     &format!("Breakout de volatilité et déséquilibre de carnet sur {}.", slug.to_uppercase()),
                 ),
                 spec(
-                    PodId::PodSolanaAlpha,
+                    PodId::PodOnchainAlpha,
                     &format!("{slug}_onchain_catalyst_alpha"),
                     &format!("{} On-Chain Whale & Catalyst Pod", slug.to_uppercase()),
                     "ECOSYSTEM_ONCHAIN_ALPHA",
@@ -918,18 +918,18 @@ pub fn strategy_pods_for_leaf(leaf_id: &str) -> Vec<Box<dyn StrategyPod>> {
                     Venue::HyperliquidPerp
                 },
             ),
-            PodId::PodSolanaAlpha => (
-                Box::new(SolanaAlphaPod {
+            PodId::PodOnchainAlpha => (
+                Box::new(OnChainAlphaPod {
                     min_whale_winrate: 0.62,
                     min_buy_volume_usd: 12_000.0,
                 }),
-                Venue::SolanaJupiterJito,
+                Venue::OnchainDexAggregator,
             ),
             PodId::PodSniper => (
                 Box::new(DexSniperPod {
                     min_initial_liquidity_usd: 20_000.0,
                 }),
-                Venue::SolanaRaydiumAtomic,
+                Venue::OnchainAtomicPool,
             ),
         };
 

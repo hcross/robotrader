@@ -1147,7 +1147,7 @@ class HierarchicalFleetManager:
                     "description": "Capture des déséquilibres L2 (OBI + CVD) et cassures de volatilité en <400ms.",
                 },
                 {
-                    "slot_id": "pod_solana_alpha",
+                    "slot_id": "pod_onchain_alpha",
                     "pod_code": "sol_jito_smart_money",
                     "name": "Jito Bundle Smart-Money Tracker",
                     "archetype": "ONCHAIN_WHALE_FLOW",
@@ -1185,7 +1185,7 @@ class HierarchicalFleetManager:
                     "description": "Breakout directionnel filtré par l'expansion Hash Ribbon, les flux ETF et l'OBI L2.",
                 },
                 {
-                    "slot_id": "pod_solana_alpha",
+                    "slot_id": "pod_onchain_alpha",
                     "pod_code": "btc_thorchain_peg_arb",
                     "name": "ThorChain Native BTC / wBTC / sBTC Arb",
                     "archetype": "CROSS_WRAPPER_ARB",
@@ -1214,7 +1214,7 @@ class HierarchicalFleetManager:
                     "description": "Momentum sur paires ETH-USDC, UNI-ETH et AAVE-ETH calibré sur le base-fee EIP-1559.",
                 },
                 {
-                    "slot_id": "pod_solana_alpha",
+                    "slot_id": "pod_onchain_alpha",
                     "pod_code": "eth_curve_peg_arb",
                     "name": "Curve stETH/ETH Peg & Smart-Money Pod",
                     "archetype": "LST_PEG_ARBITRAGE",
@@ -1252,7 +1252,7 @@ class HierarchicalFleetManager:
                     "description": "Exécution Post-Only Maker sur HYPE-USDC et PURR-USDC pilotée par le déséquilibre L2.",
                 },
                 {
-                    "slot_id": "pod_solana_alpha",
+                    "slot_id": "pod_onchain_alpha",
                     "pod_code": "hype_vault_whale_tracker",
                     "name": "HLP Vault Skew & Top-Trader Flow",
                     "archetype": "VAULT_POSITION_FLOW",
@@ -1290,7 +1290,7 @@ class HierarchicalFleetManager:
                     "description": "Breakout sur le carnet d'ordres central natif DeepBook v3 (finalité Mysticeti <400ms).",
                 },
                 {
-                    "slot_id": "pod_solana_alpha",
+                    "slot_id": "pod_onchain_alpha",
                     "pod_code": "sui_cetus_clmm_alpha",
                     "name": "Cetus CLMM Whale & Range Rebalancer",
                     "archetype": "CLMM_WHALE_FLOW",
@@ -1328,7 +1328,7 @@ class HierarchicalFleetManager:
                     "description": "Test de robustesse des signaux Ichimoku/Fibonacci/OBI avec modèle de sélection adverse.",
                 },
                 {
-                    "slot_id": "pod_solana_alpha",
+                    "slot_id": "pod_onchain_alpha",
                     "pod_code": "paper_sim_whale_alpha",
                     "name": "Sandbox Smart-Money Replay Pod",
                     "archetype": "PAPER_ONCHAIN_ALPHA",
@@ -1372,7 +1372,7 @@ class HierarchicalFleetManager:
                 "description": f"Breakout de volatilité et déséquilibre de carnet sur {chain} ({', '.join(spec.get('exclusive_assets', [])[:2])}).",
             },
             {
-                "slot_id": "pod_solana_alpha",
+                "slot_id": "pod_onchain_alpha",
                 "pod_code": f"{slug}_onchain_catalyst_alpha",
                 "name": f"{chain} On-Chain Whale & Catalyst Pod",
                 "archetype": "ECOSYSTEM_ONCHAIN_ALPHA",

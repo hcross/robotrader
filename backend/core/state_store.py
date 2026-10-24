@@ -95,7 +95,7 @@ class HybridStateStore:
         self.live_pod_pnl: Dict[str, float] = {
             "pod_carry": 0.0,
             "pod_momentum": 0.0,
-            "pod_solana_alpha": 0.0,
+            "pod_onchain_alpha": 0.0,
             "pod_sniper": 0.0,
         }
         self.live_tick_count: int = 0
@@ -204,7 +204,8 @@ class HybridStateStore:
             )
             if isinstance(data.get("live_pod_pnl"), dict):
                 for k, v in data["live_pod_pnl"].items():
-                    self.live_pod_pnl[str(k)] = float(v)
+                    canonical_pod = "pod_onchain_alpha" if str(k) == "pod_solana_alpha" else str(k)
+                    self.live_pod_pnl[canonical_pod] = float(v)
             if isinstance(data.get("testnet_positions"), dict):
                 self.testnet_positions = {
                     k: v
@@ -262,7 +263,7 @@ class HybridStateStore:
             pass
 
     @staticmethod
-    def _synthetic_solana_candles(sym: str, base_price: float) -> List[List[float]]:
+    def _synthetic_ohlcv_candles(sym: str, base_price: float) -> List[List[float]]:
         now_ms = int(time.time() * 1000)
         candles: List[List[float]] = []
         price = base_price * 0.965
@@ -280,7 +281,7 @@ class HybridStateStore:
 
     def refresh_ta_and_panorama(self) -> Dict[str, Any]:
         """
-        Fetches real 15m OHLCV candles for Solana ecosystem pairs (SOL/USDT, JUP/USDT, RAY/USDT)
+        Fetches real 15m OHLCV candles for active ecosystem pairs
         and computes Ichimoku, RSI(14), Fibonacci levels, Bollinger/ATR, and Social Panorama.
         Returns `tool_timings` (per tool-call wall-clock, ms) for transcript instrumentation.
         """
@@ -301,15 +302,15 @@ class HybridStateStore:
             candles = None
             try:
                 if binance is None:
-                    raise RuntimeError("ccxt_unavailable_using_solana_dex_synth")
+                    raise RuntimeError("ccxt_unavailable_using_dex_synth")
                 candles = binance.exchange.fetch_ohlcv(sym, timeframe="15m", limit=60)
                 tool_timings.append(
                     {"name": f"fetch_ohlcv:{sym}", "duration_ms": int((time.perf_counter() - fetch_start) * 1000), "ok": True, "error": ""}
                 )
             except Exception as exc:
-                candles = self._synthetic_solana_candles(sym, fallback_bases.get(sym, 1.5))
+                candles = self._synthetic_ohlcv_candles(sym, fallback_bases.get(sym, 1.5))
                 tool_timings.append(
-                    {"name": f"fetch_ohlcv_solana_dex_synth:{sym}", "duration_ms": int((time.perf_counter() - fetch_start) * 1000), "ok": True, "error": str(exc)[:120]}
+                    {"name": f"fetch_ohlcv_dex_synth:{sym}", "duration_ms": int((time.perf_counter() - fetch_start) * 1000), "ok": True, "error": str(exc)[:120]}
                 )
             try:
                 obi = self._last_obi.get(sym, 0.09)
@@ -447,7 +448,7 @@ class HybridStateStore:
         signed_momentum_bps = float(price_change_bps) * direction
 
         # 1. Realized slippage: half-spread + volatility impact
-        is_dex = "SOLANA" in venue.upper() or pod_id in ("pod_solana_alpha", "pod_sniper")
+        is_dex = "ONCHAIN" in venue.upper() or "SOLANA" in venue.upper() or pod_id in ("pod_onchain_alpha", "pod_solana_alpha", "pod_sniper")
         base_slip_bps = max(4.5 if is_dex else 1.5, float(spread_bps) * 0.5)
         vol_slip_bps = min(18.0, abs(float(price_change_bps)) * 0.35)
         realized_slippage_bps = round(base_slip_bps + vol_slip_bps, 2)
@@ -545,7 +546,7 @@ class HybridStateStore:
 
         chosen_pod = active_pods[self.live_tick_count % len(active_pods)]
 
-        if chosen_pod in ("pod_solana_alpha", "pod_sniper"):
+        if chosen_pod in ("pod_onchain_alpha", "pod_solana_alpha", "pod_sniper"):
             solana = SolanaWalletTool()
             if solana.keypair:
                 pubkey_str = str(solana.keypair.pubkey())

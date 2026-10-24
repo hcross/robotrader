@@ -6,7 +6,8 @@ use std::collections::HashMap;
 pub enum PodId {
     PodCarry,
     PodMomentum,
-    PodSolanaAlpha,
+    #[serde(alias = "pod_solana_alpha")]
+    PodOnchainAlpha,
     PodSniper,
 }
 
@@ -15,7 +16,7 @@ impl PodId {
         match self {
             PodId::PodCarry => "pod_carry",
             PodId::PodMomentum => "pod_momentum",
-            PodId::PodSolanaAlpha => "pod_solana_alpha",
+            PodId::PodOnchainAlpha => "pod_onchain_alpha",
             PodId::PodSniper => "pod_sniper",
         }
     }
@@ -34,7 +35,8 @@ pub enum OrderType {
     PostOnlyMaker,
     Limit,
     Market,
-    JitoBundleAtomic,
+    #[serde(alias = "JITO_BUNDLE_ATOMIC")]
+    MevBundleAtomic,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,8 +45,10 @@ pub enum Venue {
     BinanceSpot,
     BinancePerp,
     HyperliquidPerp,
-    SolanaJupiterJito,
-    SolanaRaydiumAtomic,
+    #[serde(alias = "SOLANA_JUPITER_JITO")]
+    OnchainDexAggregator,
+    #[serde(alias = "SOLANA_RAYDIUM_ATOMIC")]
+    OnchainAtomicPool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,7 +202,7 @@ impl PolicyEnvelope {
             },
         );
         pod_allocations.insert(
-            PodId::PodSolanaAlpha.as_str().to_string(),
+            PodId::PodOnchainAlpha.as_str().to_string(),
             PodAllocation {
                 enabled: false,
                 capital_weight: 0.0,
@@ -237,10 +241,25 @@ impl PolicyEnvelope {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+/// Multi-blockchain on-chain token anti-rug & contract safety invariants:
+/// - `supply_mint_immutable`: SPL `mint_authority_revoked`, ERC-20 `owner_renounced`, Move `TreasuryCap` burned, Jetton `admin=none`
+/// - `transfer_freeze_disabled`: SPL `freeze_authority_revoked`, ERC-20 no `blacklist()`, Move `FreezeCap` burned, XRPL `asfNoFreeze`
+/// - `no_honeypot_or_transfer_tax`: zero hidden buy/sell tax (`buy_tax_bps == 0 && sell_tax_bps == 0`)
+/// - `lp_locked_pct`: percentage of AMM/CLMM liquidity locked or burned
+/// - `top10_holder_pct`: concentration held by top 10 non-LP addresses
+/// - `tx_simulation_success`: pre-flight RPC simulation (`simulateTransaction` / `eth_call` / `dry_run`) succeeded
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SolanaTokenSafety {
-    pub mint_authority_revoked: bool,
-    pub freeze_authority_revoked: bool,
+pub struct OnChainTokenSafety {
+    #[serde(alias = "mint_authority_revoked")]
+    pub supply_mint_immutable: bool,
+    #[serde(alias = "freeze_authority_revoked")]
+    pub transfer_freeze_disabled: bool,
+    #[serde(default = "default_true")]
+    pub no_honeypot_or_transfer_tax: bool,
     pub lp_locked_pct: f64,
     pub top10_holder_pct: f64,
     pub tx_simulation_success: bool,
@@ -266,23 +285,27 @@ pub enum MarketEvent {
         atr_pct: f64,
         breakout_zscore: f64,
     },
-    SolanaSmartMoneySwap {
+    #[serde(alias = "SOLANA_SMART_MONEY_SWAP")]
+    OnchainSmartMoneySwap {
         timestamp_ms: u64,
         symbol: String,
-        mint: String,
+        #[serde(alias = "mint")]
+        token_address: String,
         price_usd: f64,
         whale_wallet_winrate: f64,
         buy_volume_usd: f64,
-        safety: SolanaTokenSafety,
+        safety: OnChainTokenSafety,
     },
-    SolanaPoolLaunch {
+    #[serde(alias = "SOLANA_POOL_LAUNCH")]
+    OnchainPoolLaunch {
         timestamp_ms: u64,
         symbol: String,
-        mint: String,
+        #[serde(alias = "mint")]
+        token_address: String,
         initial_liquidity_usd: f64,
         creator_rug_count: u32,
         price_usd: f64,
-        safety: SolanaTokenSafety,
+        safety: OnChainTokenSafety,
     },
 }
 
@@ -291,8 +314,8 @@ impl MarketEvent {
         match self {
             MarketEvent::FundingSnapshot { timestamp_ms, .. }
             | MarketEvent::OrderbookTick { timestamp_ms, .. }
-            | MarketEvent::SolanaSmartMoneySwap { timestamp_ms, .. }
-            | MarketEvent::SolanaPoolLaunch { timestamp_ms, .. } => *timestamp_ms,
+            | MarketEvent::OnchainSmartMoneySwap { timestamp_ms, .. }
+            | MarketEvent::OnchainPoolLaunch { timestamp_ms, .. } => *timestamp_ms,
         }
     }
 
@@ -300,8 +323,8 @@ impl MarketEvent {
         match self {
             MarketEvent::FundingSnapshot { symbol, .. }
             | MarketEvent::OrderbookTick { symbol, .. }
-            | MarketEvent::SolanaSmartMoneySwap { symbol, .. }
-            | MarketEvent::SolanaPoolLaunch { symbol, .. } => symbol,
+            | MarketEvent::OnchainSmartMoneySwap { symbol, .. }
+            | MarketEvent::OnchainPoolLaunch { symbol, .. } => symbol,
         }
     }
 
@@ -309,8 +332,8 @@ impl MarketEvent {
         match self {
             MarketEvent::FundingSnapshot { spot_price, .. } => *spot_price,
             MarketEvent::OrderbookTick { mid_price, .. } => *mid_price,
-            MarketEvent::SolanaSmartMoneySwap { price_usd, .. } => *price_usd,
-            MarketEvent::SolanaPoolLaunch { price_usd, .. } => *price_usd,
+            MarketEvent::OnchainSmartMoneySwap { price_usd, .. } => *price_usd,
+            MarketEvent::OnchainPoolLaunch { price_usd, .. } => *price_usd,
         }
     }
 }
@@ -331,7 +354,8 @@ pub struct OrderIntent {
     pub requested_leverage: f64,
     pub stop_loss_pct: f64,
     pub take_profit_pct: f64,
-    pub solana_safety: Option<SolanaTokenSafety>,
+    #[serde(alias = "solana_safety")]
+    pub token_safety: Option<OnChainTokenSafety>,
     pub rationale: String,
 }
 
@@ -341,7 +365,8 @@ pub struct ApprovedOrder {
     pub approved_notional_usd: f64,
     pub approved_quantity: f64,
     pub clamped_leverage: f64,
-    pub jito_tip_bps: u32,
+    #[serde(alias = "jito_tip_bps")]
+    pub mev_priority_tip_bps: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -135,10 +135,13 @@ function App() {
 
   const isKilled = statusData.kill_switch?.active;
   const sniperEnabled = Boolean(statusData.policy_envelope?.pod_allocations?.pod_sniper?.enabled);
-  const solanaEnabled = Boolean(statusData.policy_envelope?.pod_allocations?.pod_solana_alpha?.enabled);
+  const onchainAlphaEnabled = Boolean(
+    statusData.policy_envelope?.pod_allocations?.pod_onchain_alpha?.enabled ||
+      statusData.policy_envelope?.pod_allocations?.pod_solana_alpha?.enabled
+  );
   const activePreset = sniperEnabled
     ? 'FULL_SWARM'
-    : solanaEnabled
+    : onchainAlphaEnabled
       ? 'RISK_ON_HIGH_VOL'
       : 'DEFENSIVE';
 
