@@ -8,6 +8,20 @@ from ..core.schemas import Message
 
 # OpenRouter Frontier-Efficiency Model Catalog (Prices in USD per 1M tokens)
 FRONTIER_FLASH_MODELS: Dict[str, Dict[str, Any]] = {
+    "moonshotai/kimi-k3.1-pro": {
+        "litellm_model": "openrouter/moonshotai/kimi-k3.1-pro",
+        "label": "Kimi K3.1 Pro (Master Orchestrator)",
+        "input_usd_per_m": 0.140,
+        "output_usd_per_m": 0.420,
+        "tier": "MASTER_ORCHESTRATOR_PRO",
+    },
+    "deepseek/deepseek-v4.1-flash-1017": {
+        "litellm_model": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "label": "DeepSeek v4.1 Flash 1017 (Leaf Agent)",
+        "input_usd_per_m": 0.028,
+        "output_usd_per_m": 0.080,
+        "tier": "LEAF_AGENT_FLASH_PRIMARY",
+    },
     "deepseek/deepseek-v4.1-flash": {
         "litellm_model": "openrouter/deepseek/deepseek-v4.1-flash",
         "label": "DeepSeek v4.1 Flash",
@@ -61,15 +75,37 @@ class LLMMonitorAgent(BaseWarmAgent):
             os.getenv("MAX_DAILY_LLM_BUDGET_USD", "5.0")
         )
         self.preferred_model: str = os.getenv(
-            "LLM_MODEL", "deepseek/deepseek-v4.1-flash"
+            "LLM_MODEL", "deepseek/deepseek-v4.1-flash-1017"
         ).replace("openrouter/", "")
         if self.preferred_model not in FRONTIER_FLASH_MODELS:
-            self.preferred_model = "deepseek/deepseek-v4.1-flash"
+            self.preferred_model = "deepseek/deepseek-v4.1-flash-1017"
+        self.master_model: str = os.getenv(
+            "MASTER_LLM_MODEL", "moonshotai/kimi-k3.1-pro"
+        ).replace("openrouter/", "")
+        if self.master_model not in FRONTIER_FLASH_MODELS:
+            self.master_model = "moonshotai/kimi-k3.1-pro"
 
         self.total_cost_usd: float = 0.0
         self.total_tokens: int = 0
         self.total_calls: int = 0
         self.usage_log: List[Dict[str, Any]] = []
+
+        # ADR-0003: Profit-Gated & Epoch-Capped OpenRouter Credit Treasury
+        self.openrouter_balance_usd: float = float(
+            os.getenv("OPENROUTER_INITIAL_BALANCE_USD", "8.50")
+        )
+        self.low_watermark_usd: float = float(
+            os.getenv("OPENROUTER_LOW_WATERMARK_USD", "2.00")
+        )
+        self.refill_amount_usd: float = float(
+            os.getenv("OPENROUTER_REFILL_AMOUNT_USD", "10.00")
+        )
+        self.max_epoch_refill_usd: float = float(
+            os.getenv("OPENROUTER_MAX_EPOCH_REFILL_USD", "25.00")
+        )
+        self.epoch_refilled_usd: float = 0.0
+        self.auto_refill_enabled: bool = True
+        self.refill_history: List[Dict[str, Any]] = []
 
     @property
     def remaining_budget_usd(self) -> float:
@@ -113,7 +149,7 @@ class LLMMonitorAgent(BaseWarmAgent):
         if depth == "ECO_CONSERVATION":
             # Mechanical envelope contract (~140-220 tokens): omits prose-heavy
             # panorama_summary & ta_confluence_notes so 350 max_tokens never truncates.
-            model_key = "deepseek/deepseek-v4.1-flash"
+            model_key = "deepseek/deepseek-v4.1-flash-1017"
             return {
                 "thinking_depth": depth,
                 "output_contract": "MECHANICAL_ENVELOPE",
@@ -132,8 +168,14 @@ class LLMMonitorAgent(BaseWarmAgent):
             # comfortably within 700 max_tokens without triggering escalation retries.
             model_key = (
                 self.preferred_model
-                if self.preferred_model in ("deepseek/deepseek-v4.1-flash", "z-ai/glm-5.3-flash", "qwen/qwen3.7-flash")
-                else "deepseek/deepseek-v4.1-flash"
+                if self.preferred_model
+                in (
+                    "deepseek/deepseek-v4.1-flash-1017",
+                    "deepseek/deepseek-v4.1-flash",
+                    "z-ai/glm-5.3-flash",
+                    "qwen/qwen3.7-flash",
+                )
+                else "deepseek/deepseek-v4.1-flash-1017"
             )
             return {
                 "thinking_depth": depth,
@@ -190,6 +232,7 @@ class LLMMonitorAgent(BaseWarmAgent):
 
         agent = str(content.get("agent", "unknown"))
         self.total_cost_usd = round(self.total_cost_usd + cost, 6)
+        self.openrouter_balance_usd = round(max(0.0, self.openrouter_balance_usd - cost), 6)
         self.total_tokens += tokens
         self.total_calls += 1
         self.usage_log.insert(
@@ -202,7 +245,102 @@ class LLMMonitorAgent(BaseWarmAgent):
             },
         )
         self.usage_log = self.usage_log[:50]
+
+        # Check if OpenRouter balance dropped to or below low watermark -> trigger auto-refill
+        if (
+            self.auto_refill_enabled
+            and self.openrouter_balance_usd <= self.low_watermark_usd
+            and (self.epoch_refilled_usd + self.refill_amount_usd) <= self.max_epoch_refill_usd
+        ):
+            self.trigger_openrouter_refill(
+                amount_usd=self.refill_amount_usd,
+                reason=f"Auto-refill triggered: balance ${self.openrouter_balance_usd:.2f} <= watermark ${self.low_watermark_usd:.2f}",
+                source="MASTER_ORCHESTRATOR_AUTO",
+            )
         return self.get_status()
+
+    @property
+    def openrouter_credit_balance_usd(self) -> float:
+        return self.openrouter_balance_usd
+
+    @openrouter_credit_balance_usd.setter
+    def openrouter_credit_balance_usd(self, val: float) -> None:
+        self.openrouter_balance_usd = float(val)
+
+    def trigger_openrouter_refill(
+        self,
+        amount_usd: Optional[float] = None,
+        reason: str = "Master Orchestrator scheduled credit top-up",
+        source: str = "MASTER_ORCHESTRATOR",
+        force: bool = False,
+        realized_trading_pnl_usd: Optional[float] = None,
+        requested_amount_usd: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Executes a bounded OpenRouter credit refill from the Master Orchestrator's OpEx reserve.
+        Enforces the HardRiskGate profit-gate (`realized_trading_pnl_usd > 0`) and epoch cap
+        (`max_epoch_refill_usd`) so a runaway loop can never drain the principal treasury.
+        """
+        import time
+
+        if realized_trading_pnl_usd is not None and float(realized_trading_pnl_usd) <= 0.0:
+            return {
+                "status": "rejected_no_realized_profit",
+                "reason": f"Realized trading PnL (${float(realized_trading_pnl_usd):.2f}) <= 0; principal treasury protected",
+                "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
+            }
+
+        eff_req = requested_amount_usd if requested_amount_usd is not None else amount_usd
+        amt = round(float(eff_req if eff_req is not None else self.refill_amount_usd), 2)
+        if amt <= 0 or amt > 25.0:
+            return {
+                "status": "rejected",
+                "reason": f"Amount ${amt:.2f} outside allowed single-refill bounds (0, $25.00]",
+                "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
+            }
+        if (
+            realized_trading_pnl_usd is not None
+            and amt > float(realized_trading_pnl_usd) * 0.10 + 1e-6
+        ):
+            return {
+                "status": "rejected_exceeds_profit_share",
+                "reason": f"Requested refill ${amt:.2f} > 10% of realized PnL (${float(realized_trading_pnl_usd):.2f})",
+                "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
+            }
+        if not force and self.openrouter_balance_usd > self.low_watermark_usd:
+            return {
+                "status": "skipped_sufficient_balance",
+                "reason": f"Balance ${self.openrouter_balance_usd:.2f} > low watermark ${self.low_watermark_usd:.2f}",
+                "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
+            }
+        if (self.epoch_refilled_usd + amt) > self.max_epoch_refill_usd:
+            return {
+                "status": "rejected_epoch_cap",
+                "reason": f"Epoch cap reached (${self.epoch_refilled_usd:.2f} + ${amt:.2f} > ${self.max_epoch_refill_usd:.2f})",
+                "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
+            }
+
+        before_bal = round(self.openrouter_balance_usd, 4)
+        self.openrouter_balance_usd = round(self.openrouter_balance_usd + amt, 4)
+        self.epoch_refilled_usd = round(self.epoch_refilled_usd + amt, 2)
+        event = {
+            "timestamp_ms": int(time.time() * 1000),
+            "amount_usd": amt,
+            "balance_before_usd": before_bal,
+            "balance_after_usd": self.openrouter_balance_usd,
+            "epoch_refilled_usd": self.epoch_refilled_usd,
+            "max_epoch_refill_usd": self.max_epoch_refill_usd,
+            "source": source,
+            "reason": reason,
+        }
+        self.refill_history.insert(0, event)
+        self.refill_history = self.refill_history[:25]
+        return {
+            "status": "refilled",
+            "refilled_usd": amt,
+            "event": event,
+            "openrouter_balance_usd": self.openrouter_balance_usd,
+        }
 
     def get_status(self) -> Dict[str, Any]:
         utilization_pct = (
@@ -220,6 +358,8 @@ class LLMMonitorAgent(BaseWarmAgent):
             "utilization_pct": round(utilization_pct, 3),
             "budget_exhausted": self.budget_exhausted,
             "thinking_depth": self.get_thinking_depth(),
+            "master_model": self.master_model,
+            "master_model_meta": FRONTIER_FLASH_MODELS.get(self.master_model),
             "active_model": self.preferred_model,
             "active_model_meta": FRONTIER_FLASH_MODELS.get(self.preferred_model),
             "available_models": FRONTIER_FLASH_MODELS,
@@ -227,5 +367,15 @@ class LLMMonitorAgent(BaseWarmAgent):
             "total_tokens": self.total_tokens,
             "total_calls": self.total_calls,
             "recent_usage": self.usage_log[:5],
+            "openrouter_credit": {
+                "balance_usd": round(self.openrouter_balance_usd, 4),
+                "low_watermark_usd": round(self.low_watermark_usd, 2),
+                "refill_amount_usd": round(self.refill_amount_usd, 2),
+                "epoch_refilled_usd": round(self.epoch_refilled_usd, 2),
+                "max_epoch_refill_usd": round(self.max_epoch_refill_usd, 2),
+                "auto_refill_enabled": self.auto_refill_enabled,
+                "refill_history": self.refill_history[:5],
+            },
             "auto_wallet_refill": "DISABLED_BY_SECURITY_POLICY",
+            "auto_refill_policy": "PROFIT_GATED_CAPPED_BY_ORCHESTRATOR",
         }

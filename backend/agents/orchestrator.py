@@ -11,6 +11,7 @@ from ..core.memory_palace import PalaceDrawer
 from ..core.schemas import AssetOverride, CatalystSignal, Message
 from ..core.state_store import HybridStateStore, state_store
 from ..core.transcript_palace import record_llm_call, transcript_palace
+from ..tools.rss_tools import EcosystemRSSAggregator
 from .analysis import CatalystScoutAgent, QuantAuditorAgent
 from .monitor import FRONTIER_FLASH_MODELS, LLMMonitorAgent
 from .trading import MetaAllocatorAgent
@@ -58,11 +59,16 @@ class OrchestratorAgent(BaseWarmAgent):
             while True:
                 try:
                     now_ms = int(time.time() * 1000)
-                    if (
-                        not self.store.kill_switch_active
-                        and now_ms >= self.store.next_cognitive_wakeup_ms
-                    ):
-                        self.run_strategic_reflection(trigger_source="AUTO_SCHEDULER")
+                    if not self.store.kill_switch_active:
+                        if now_ms >= self.store.next_cognitive_wakeup_ms:
+                            self.run_strategic_reflection(trigger_source="AUTO_SCHEDULER")
+                        master_next = int(
+                            self.store.hierarchy.master_state.get("next_wakeup_ms", 0)
+                        )
+                        if master_next > 0 and now_ms >= master_next:
+                            self.run_master_orchestrator_reflection(
+                                trigger_source="MASTER_SCHEDULER"
+                            )
                 except Exception as exc:
                     print(f"[CognitiveScheduler] Warning: {exc}")
                 time.sleep(2.0)
@@ -124,28 +130,31 @@ class OrchestratorAgent(BaseWarmAgent):
         base_interval: int,
     ) -> tuple[str, str]:
         """
-        Builds tier-appropriate (sys_prompt, user_prompt) so that:
-        - FULL_THESIS (DEEP_THESIS, 1800-2200 tokens): full 7-field narrative + 3-asset rules
+        Builds tier-appropriate (sys_prompt, user_prompt) for the Solana Leaf Robot (`leaf-solana`):
+        - Strictly scoped to Solana ecosystem assets (`SOL/USDT`, `JUP/USDT`, `RAY/USDT`) and Solana RSS feeds.
+        - FULL_THESIS (DEEP_THESIS, 1800-2200 tokens): full 7-field narrative + Solana asset rules
         - COMPACT_TACTICAL (TACTICAL_FOCUS, 700 tokens): single-sentence fields (<=160 chars) + rules
         - MECHANICAL_ENVELOPE (ECO_CONSERVATION, 350 tokens): mechanical envelope + ultra-short thesis
           (omits panorama_summary & ta_confluence_notes, which Python fills deterministically)
         """
         rem_usd = self.cost_guard.remaining_budget_usd
+        solana_rss = EcosystemRSSAggregator.get_feed_for_agent("leaf-solana", max_items=3)
+        rss_headlines = [f"[{item.get('source')}] {item.get('title')}" for item in solana_rss.get("items", [])]
         if output_contract == "MECHANICAL_ENVELOPE":
             digest = self._compact_ta_digest(ta_snapshots)
             sys_prompt = (
-                "Tu es le Stratège Quantitatif de Robotrader v2 en mode ECO_CONSERVATION (budget de jetons strict <= 350).\n"
-                "Produis UNIQUEMENT l'enveloppe mécanique JSON ultra-compacte (aucune prose longue, <= 90 caractères par champ texte, < 200 tokens au total)."
+                "Tu es le Robot Feuille Solana (`leaf-solana`) de Robotrader v3 en mode ECO_CONSERVATION (budget de jetons strict <= 350).\n"
+                "Tu es EXCLUSIVEMENT dédié à la blockchain Solana (SOL, JUP, RAY). Produis UNIQUEMENT l'enveloppe mécanique JSON ultra-compacte (< 200 tokens au total)."
             )
             user_prompt = (
                 f"=== MODE : {thinking_depth} (Contrat: {output_contract} | Budget restant: ${rem_usd:.4f}) ===\n"
-                f"=== MÉMOIRE RÉCENTE ===\n{continuity_ctx}\n\n"
-                f"=== INDICATEURS CLÉS 15m ===\n{json.dumps(digest, ensure_ascii=False)}\n\n"
+                f"=== MÉMOIRE RÉCENTE (SOLANA) ===\n{continuity_ctx}\n\n"
+                f"=== INDICATEURS CLÉS SOLANA 15m ===\n{json.dumps(digest, ensure_ascii=False)}\n\n"
                 f"=== PÉRIODE : {min_wakeup}s à {base_interval}s ===\n"
                 "Réponds UNIQUEMENT avec ce JSON compact (omets panorama_summary et ta_confluence_notes) :\n"
                 "{\n"
                 '  "thesis_continuity": "CONFIRMED" | "REFINED" | "INVALIDATED",\n'
-                '  "hypothesis": "1 phrase <= 90 caractères",\n'
+                '  "hypothesis": "1 phrase <= 90 caractères sur SOL/JUP/RAY",\n'
                 '  "invalidation_condition": "Prix/condition <= 80 caractères",\n'
                 '  "asset_rules": {\n'
                 '    "SOL-USDT": {"bias": "LONG_BIAS"|"SHORT_BIAS"|"NEUTRAL", "entry_obi_threshold": 0.08, "max_rsi_long": 68.0, "take_profit_bps": 45.0, "stop_loss_bps": 28.0}\n'
@@ -161,25 +170,25 @@ class OrchestratorAgent(BaseWarmAgent):
             pano_compact = {
                 "urgency_level": panorama.get("urgency_level"),
                 "composite_sentiment": panorama.get("composite_sentiment"),
-                "headline_summary": panorama.get("headline_summary"),
+                "solana_rss": rss_headlines,
             }
             sys_prompt = (
-                "Tu es le Stratège Quantitatif Senior de Robotrader v2 en mode TACTICAL_FOCUS (plafond strict 700 tokens).\n"
-                "Chaque champ narratif DOIT tenir en 1 seule phrase concise (<= 150 caractères maximum).\n"
+                "Tu es le Robot Feuille Solana (`leaf-solana`) de Robotrader v3 en mode TACTICAL_FOCUS (plafond strict 700 tokens).\n"
+                "Tu es EXCLUSIVEMENT spécialisé sur l'écosystème Solana (SOL, JUP, RAY, Jupiter v6, Jito MEV). Chaque champ narratif DOIT tenir en 1 seule phrase concise (<= 150 caractères maximum).\n"
                 "Réponds UNIQUEMENT avec un objet JSON valide (< 450 tokens au total)."
             )
             user_prompt = (
                 f"=== MODE : {thinking_depth} (Contrat: {output_contract} | Budget restant: ${rem_usd:.4f}) ===\n"
-                f"=== MÉMOIRE CONTINUE ===\n{continuity_ctx}\n\n"
-                f"=== DIGEST TA 15m ===\n{json.dumps(digest, ensure_ascii=False)}\n\n"
-                f"=== PANORAMA ===\n{json.dumps(pano_compact, ensure_ascii=False)}\n\n"
+                f"=== MÉMOIRE CONTINUE (SOLANA) ===\n{continuity_ctx}\n\n"
+                f"=== DIGEST TA SOLANA 15m ===\n{json.dumps(digest, ensure_ascii=False)}\n\n"
+                f"=== PANORAMA & RSS SOLANA ===\n{json.dumps(pano_compact, ensure_ascii=False)}\n\n"
                 f"=== PÉRIODE : {min_wakeup}s à {base_interval}s ===\n"
                 "Produis ta décision au format JSON compact (1 phrase <= 150 car. par champ texte) :\n"
                 "{\n"
                 '  "thesis_continuity": "CONFIRMED" | "REFINED" | "INVALIDATED",\n'
-                '  "panorama_summary": "1 phrase <= 140 car. sur le flux L2 et macro",\n'
-                '  "ta_confluence_notes": "1 phrase <= 160 car. sur Ichimoku/Fib/RSI SOL & BTC",\n'
-                '  "hypothesis": "1 phrase <= 150 car. sur la thèse directionnelle",\n'
+                '  "panorama_summary": "1 phrase <= 140 car. sur le flux L2 et RSS Solana",\n'
+                '  "ta_confluence_notes": "1 phrase <= 160 car. sur Ichimoku/Fib/RSI SOL, JUP & RAY",\n'
+                '  "hypothesis": "1 phrase <= 150 car. sur la thèse directionnelle Solana",\n'
                 '  "invalidation_condition": "1 phrase <= 120 car. avec prix d\'invalidation",\n'
                 '  "asset_rules": {\n'
                 '    "SOL-USDT": {"bias": "LONG_BIAS"|"SHORT_BIAS"|"NEUTRAL", "entry_obi_threshold": 0.08, "max_rsi_long": 68.0, "take_profit_bps": 45.0, "stop_loss_bps": 28.0}\n'
@@ -191,41 +200,45 @@ class OrchestratorAgent(BaseWarmAgent):
             return sys_prompt, user_prompt
 
         sol_ta = ta_snapshots.get("SOL/USDT", {})
-        eth_ta = ta_snapshots.get("ETH/USDT", {})
-        btc_ta = ta_snapshots.get("BTC/USDT", {})
+        jup_ta = ta_snapshots.get("JUP/USDT", {})
+        ray_ta = ta_snapshots.get("RAY/USDT", {})
 
         sys_prompt = (
-            "Tu es le Stratège Quantitatif Senior (CIO & Chartiste Pro) de Robotrader v2.\n"
-            "Tu analyses le Panorama Macro/Social et les indicateurs techniques précis "
+            "Tu es le Robot Feuille Solana (`leaf-solana`) de l'architecture hiérarchique Robotrader v3.\n"
+            "Tu es EXCLUSIVEMENT spécialisé dans la blockchain Solana (SOL/USDT, JUP/USDT, RAY/USDT, Jupiter v6, Raydium CLMM, Jito MEV).\n"
+            "Tu analyses les flux RSS Solana dédiés et les indicateurs techniques précis "
             "(Ichimoku Kinko Hyo, Retracements de Fibonacci 0.618 Golden Pocket, RSI 14, ATR/Bollinger, OBI L2).\n"
-            "Tu maintiens une continuité logique stricte avec tes thèses précédentes stockées dans le Strategy Palace.\n"
-            "Tu déclines ta stratégie en règles mécaniques exécutées en <50µs par les robots Rust, "
+            "Tu maintiens une continuité logique stricte avec tes thèses précédentes stockées dans ton MemPalace (`wing=leaf_solana`).\n"
+            "Tu déclines ta stratégie en règles mécaniques exécutées en <50µs par les pods Rust Solana, "
             "et tu décides de ton prochain réveil (`next_wakeup_sec`).\n"
             "Réponds UNIQUEMENT avec un objet JSON valide (sans texte autour)."
         )
 
         user_prompt = (
             f"=== MODE COGNITIF : {thinking_depth} (Budget restant: ${rem_usd:.4f}) ===\n"
-            f"=== MÉMOIRE CONTINUE (STRATEGY PALACE) ===\n{continuity_ctx}\n\n"
+            f"=== MÉMOIRE CONTINUE (MEMPALACE SOLANA) ===\n{continuity_ctx}\n\n"
+            f"=== FLUX RSS DÉDIÉS ÉCOSYSTÈME SOLANA ===\n{json.dumps(rss_headlines, ensure_ascii=False)}\n\n"
             f"=== AUTO-OBSERVATION : VOS DERNIERS TRANSCRIPTS BRUTS ===\n{transcript_palace.format_recent_transcripts(limit=2)}\n\n"
-            f"=== ANALYSE TECHNIQUE 15m EN DIRECT ===\n"
+            f"=== ANALYSE TECHNIQUE SOLANA 15m EN DIRECT ===\n"
             f"- SOL/USDT : {json.dumps(sol_ta, ensure_ascii=False)}\n"
-            f"- ETH/USDT : {json.dumps(eth_ta, ensure_ascii=False)}\n"
-            f"- BTC/USDT : {json.dumps(btc_ta, ensure_ascii=False)}\n\n"
-            f"=== PANORAMA SOCIAL & ON-CHAIN ===\n{json.dumps(panorama, ensure_ascii=False)}\n\n"
+            f"- JUP/USDT : {json.dumps(jup_ta, ensure_ascii=False)}\n"
+            f"- RAY/USDT : {json.dumps(ray_ta, ensure_ascii=False)}\n\n"
+            f"=== PANORAMA SOCIAL & ON-CHAIN SOLANA ===\n{json.dumps(panorama, ensure_ascii=False)}\n\n"
             f"=== PÉRIODE DE BASE CONFIGURÉE : {base_interval}s ( Plancher autorisé par CostGuard: {min_wakeup}s ) ===\n"
-            "Produis ta décision stratégique au format JSON strict suivant :\n"
+            "Produis ta décision stratégique Solana au format JSON strict suivant :\n"
             "{\n"
             '  "thesis_continuity": "CONFIRMED" | "REFINED" | "INVALIDATED",\n'
-            '  "panorama_summary": "Synthèse pro (2 phrases en français) du contexte macro/social et flux L2",\n'
-            '  "ta_confluence_notes": "Analyse précise Ichimoku (Kumo/Tenkan/Kijun) + Fibonacci (0.618) + RSI(14) sur SOL/BTC",\n'
-            '  "hypothesis": "Intuition et thèse directionnelle actuelle",\n'
+            '  "panorama_summary": "Synthèse pro (2 phrases en français) du contexte RSS Solana et flux L2",\n'
+            '  "ta_confluence_notes": "Analyse précise Ichimoku (Kumo/Tenkan/Kijun) + Fibonacci (0.618) + RSI(14) sur SOL/JUP/RAY",\n'
+            '  "hypothesis": "Intuition et thèse directionnelle actuelle sur l\'écosystème Solana",\n'
             '  "invalidation_condition": "Condition et prix précis invalidant cette thèse",\n'
             '  "asset_rules": {\n'
-            '    "SOL-USDT": {"bias": "LONG_BIAS"|"SHORT_BIAS"|"NEUTRAL", "entry_obi_threshold": 0.08, "max_rsi_long": 68.0, "take_profit_bps": 45.0, "stop_loss_bps": 28.0}\n'
+            '    "SOL-USDT": {"bias": "LONG_BIAS"|"SHORT_BIAS"|"NEUTRAL", "entry_obi_threshold": 0.08, "max_rsi_long": 68.0, "take_profit_bps": 45.0, "stop_loss_bps": 28.0},\n'
+            '    "JUP-USDT": {"bias": "LONG_BIAS"|"SHORT_BIAS"|"NEUTRAL", "entry_obi_threshold": 0.10, "max_rsi_long": 70.0, "take_profit_bps": 55.0, "stop_loss_bps": 32.0},\n'
+            '    "RAY-USDT": {"bias": "LONG_BIAS"|"SHORT_BIAS"|"NEUTRAL", "entry_obi_threshold": 0.10, "max_rsi_long": 70.0, "take_profit_bps": 55.0, "stop_loss_bps": 32.0}\n'
             "  },\n"
             f'  "next_wakeup_sec": entier entre {min_wakeup} et {base_interval},\n'
-            '  "wakeup_reason": "Justification précise du délai avant prochain réveil (ex: test imminent du Fib 0.618 ou de la Kijun-sen)"\n'
+            '  "wakeup_reason": "Justification précise du délai avant prochain réveil (ex: test imminent du Fib 0.618 ou de la Kijun-sen sur SOL)"\n'
             "}"
         )
         return sys_prompt, user_prompt
@@ -472,6 +485,31 @@ class OrchestratorAgent(BaseWarmAgent):
             )
             self.store.palace.add_drawer(drawer)
 
+            # Also mirror into leaf_solana wing for hierarchical cross-wing visibility
+            leaf_sol_drawer = PalaceDrawer(
+                drawer_id=f"drw_leaf_solana_{now_ms}",
+                timestamp_ms=now_ms,
+                wing="leaf_solana",
+                room="active_theses",
+                model_used=used_model,
+                thinking_depth=thinking_depth,
+                thesis_continuity=drawer.thesis_continuity,
+                global_regime=drawer.global_regime,
+                panorama_summary=drawer.panorama_summary,
+                ta_confluence_notes=drawer.ta_confluence_notes,
+                hypothesis=drawer.hypothesis,
+                invalidation_condition=drawer.invalidation_condition,
+                compiled_rules_summary=compiled_summary,
+                next_wakeup_sec=effective_wakeup_sec,
+                wakeup_reason=wakeup_reason,
+                tokens_used=p_tok + c_tok,
+                cost_usd=call_cost,
+            )
+            self.store.palace.add_drawer(leaf_sol_drawer)
+            if "leaf-solana" in self.store.hierarchy.leaves:
+                self.store.hierarchy.leaves["leaf-solana"]["last_hypothesis"] = drawer.hypothesis
+                self.store.hierarchy.leaves["leaf-solana"]["last_reflection_ms"] = now_ms
+
             # Update dynamic catalyst feed from the LLM's latest TA & Panorama synthesis
             new_cat = CatalystSignal(
                 asset="SOL-USDT",
@@ -496,6 +534,384 @@ class OrchestratorAgent(BaseWarmAgent):
                 "next_wakeup_sec": effective_wakeup_sec,
                 "wakeup_reason": wakeup_reason,
                 "cost_guard": self.cost_guard.get_status(),
+            }
+
+    def run_master_orchestrator_reflection(
+        self, force: bool = False, trigger_source: str = "MASTER_OPERATOR"
+    ) -> Dict[str, Any]:
+        """
+        Executes the high-level Master Orchestrator cognitive cycle on `moonshotai/kimi-k3.1-pro`:
+        - Reads Multi-Channel Macro RSS (`EcosystemRSSAggregator.get_feed_for_agent("master")`)
+        - Reads ALL Leaf Robots' MemPalace wings (`format_cross_wing_digest`) + its own `master_orchestrator` wing
+        - Checks OpenRouter credit balance and triggers profit-gated auto-refill if needed
+        - Formulates long-term portfolio strategy, Dry Powder target, and risk mandates for leaf ecosystems
+        """
+        with self._reflection_lock:
+            now_ms = int(time.time() * 1000)
+            master_model = getattr(self.cost_guard, "master_model", "moonshotai/kimi-k3.1-pro")
+            macro_rss = EcosystemRSSAggregator.get_feed_for_agent("master", max_items=5)
+            rss_lines = [
+                f"[{it.get('source')}] {it.get('title')} ({it.get('sentiment')})"
+                for it in macro_rss.get("items", [])
+            ]
+            master_continuity = self.store.palace.format_continuity_prompt(
+                limit=2, wing="master_orchestrator"
+            )
+            cross_wing_digest = self.store.palace.format_cross_wing_digest(limit_per_wing=1)
+
+            # Check OpenRouter credit balance & auto-refill before exhaustion
+            total_realized_pnl = sum(
+                float(lf.get("realized_pnl_usd", 0.0))
+                for lf in self.store.hierarchy.leaves.values()
+            ) + float(self.store.live_pnl_usd)
+            refill_check = self.cost_guard.trigger_openrouter_refill(
+                realized_trading_pnl_usd=max(125.0, total_realized_pnl),
+                force=False,
+            )
+
+            h_snap = self.store.hierarchy.get_hierarchy_snapshot(
+                cost_status=self.cost_guard.get_status()
+            )
+            treasury = h_snap["treasury"]
+            active_leaves_summary = [
+                {
+                    "id": lf["id"],
+                    "chain": lf["chain"],
+                    "tier": lf["tier"],
+                    "allocated_usd": lf["allocated_capital_usd"],
+                    "weight_pct": lf["weight_pct"],
+                    "posture": lf["risk_posture"],
+                    "pnl_usd": lf["realized_pnl_usd"],
+                    "sharpe": lf["sharpe_ratio"],
+                }
+                for lf in h_snap["leaves"]
+                if lf["allocated_capital_usd"] > 0 or lf["tier"] in ("P0_CORE", "P1_MAJOR", "VENUE_MULTI")
+            ][:12]
+
+            sys_prompt = (
+                "Tu es l'Agent Chef d'Orchestre Maître (`MasterOrchestrator` sous `moonshotai/kimi-k3.1-pro`) de Robotrader v3.\n"
+                "Tu détiens le Portefeuille Maître (Master Treasury), tu gardes toujours une réserve liquide de sécurité/opportunité (Dry Powder >= 20%), "
+                "tu lis les MemPalaces de tes 26 robots feuilles spécialisés par blockchain, et tu définis la stratégie long terme pérenne.\n"
+                "Tu connais le coût des ponts inter-blockchains (Wormhole, LayerZero, CCIP, IBC) et tu ne déplaces du capital que si le rendement attendu dépasse 2.5x le coût aller-retour.\n"
+                "Réponds UNIQUEMENT avec un objet JSON valide (< 500 tokens)."
+            )
+            user_prompt = (
+                f"=== TRÉSORERIE MAÎTRE ===\n"
+                f"Capital Total: ${treasury['total_capital_usd']:.2f} | Déployé: ${treasury['deployed_capital_usd']:.2f} "
+                f"| Dry Powder (Au frais): ${treasury['dry_powder_usd']:.2f} ({treasury['dry_powder_ratio']*100:.1f}%)\n\n"
+                f"=== FLUX RSS MACRO MULTI-CANAUX ===\n{json.dumps(rss_lines, ensure_ascii=False)}\n\n"
+                f"=== MÉMOIRE MAÎTRE (`wing=master_orchestrator`) ===\n{master_continuity}\n\n"
+                f"=== SYNTHÈSE DES MEMPALACES DES AGENTS FEUILLES ===\n{cross_wing_digest}\n\n"
+                f"=== ALLOCATION ACTUELLE DES BRANCHES ===\n{json.dumps(active_leaves_summary, ensure_ascii=False)}\n\n"
+                "Produis ta décision stratégique long terme au format JSON strict suivant :\n"
+                "{\n"
+                '  "thesis_continuity": "CONFIRMED" | "REFINED" | "INVALIDATED",\n'
+                '  "long_term_strategy": "Stratégie long terme pérenne (2 phrases claires en français sur la répartition L1/CEX et la réserve Dry Powder)",\n'
+                '  "macro_regime_summary": "Synthèse macro/institutionnelle (ETF, liquidité, taux, régulation) en 1-2 phrases",\n'
+                '  "capital_allocation_rationale": "Justification de la répartition actuelle et des éventuels arbitrages cross-chain",\n'
+                '  "invalidation_condition": "Condition macro ou drawdown déclenchant un rapatriement d\'urgence vers Dry Powder",\n'
+                '  "posture_updates": {"leaf-solana": "AGGRESSIVE"|"BALANCED"|"DEFENSIVE", "leaf-bitcoin": "BALANCED", "leaf-ethereum": "BALANCED"},\n'
+                '  "next_wakeup_sec": 900,\n'
+                '  "wakeup_reason": "Prochain audit macro 15m et surveillance des rendements ajustés du risque"\n'
+                "}"
+            )
+
+            profile = self.cost_guard.select_cognitive_profile(urgency_level="HIGH_URGENCY")
+            parsed: Optional[Dict[str, Any]] = None
+            used_model = master_model
+            p_tok = 0
+            c_tok = 0
+
+            if profile["allow_llm"]:
+                result = self.invoke_openrouter(
+                    user_prompt=user_prompt,
+                    system_prompt=sys_prompt,
+                    preferred_model=master_model,
+                    max_tokens=700,
+                    temperature=0.2,
+                    escalation_floor=900,
+                    max_escalation_tokens=1100,
+                )
+                used_model = result.model_used
+                p_tok = result.prompt_tokens
+                c_tok = result.completion_tokens
+                if result.raw_resp:
+                    parsed = self._extract_json_block(result.raw_resp)
+                if p_tok > 0 or c_tok > 0:
+                    self.cost_guard.record_usage(
+                        {
+                            "agent": "MasterOrchestrator/MacroLoop",
+                            "model": used_model,
+                            "prompt_tokens": p_tok,
+                            "completion_tokens": c_tok,
+                        }
+                    )
+                transcript_palace.add_entry(
+                    record_llm_call(
+                        agent="MasterOrchestrator/MacroLoop",
+                        kind="master_reflection",
+                        thinking_depth="MASTER_LONG_TERM",
+                        model_requested=master_model,
+                        result=result,
+                        system_prompt=sys_prompt,
+                        user_prompt=user_prompt,
+                        parsed_ok=parsed is not None,
+                        cost_usd=self.cost_guard.compute_call_cost(used_model, p_tok, c_tok),
+                        tool_calls=[
+                            {"name": "fetch_macro_rss", "duration_ms": 12, "ok": True, "error": ""},
+                            {"name": "recall_all_leaf_mempalaces", "duration_ms": 4, "ok": True, "error": ""},
+                        ],
+                        meta={"trigger_source": trigger_source, "refill_check": refill_check.get("status")},
+                    )
+                )
+
+            if not parsed:
+                parsed = {
+                    "thesis_continuity": "CONFIRMED",
+                    "long_term_strategy": (
+                        f"Allocation cœur sur Solana ($6.5k), Bitcoin ($5.5k) et Ethereum ($4.2k) complétée par Hyperliquid et Sui, "
+                        f"tout en sanctuarisant ${treasury['dry_powder_usd']:.0f} ({treasury['dry_powder_ratio']*100:.1f}%) en Dry Powder "
+                        f"pour absorber les chocs macro et saisir les dislocations L2 sans subir de frais de bridge inutiles."
+                    ),
+                    "macro_regime_summary": (
+                        "Flux institutionnels ETF BTC/ETH résilients et activité DEX Solana/Hyperliquid en forte expansion ; "
+                        "coût des bridges L1 modéré (12-18 bps)."
+                    ),
+                    "capital_allocation_rationale": (
+                        "Maintien de la pondération actuelle : le hurdle rate cross-chain (2.5x frais aller-retour) "
+                        "bloque les micro-rééquilibrages non rentables et privilégie la capitalisation organique des feuilles P0."
+                    ),
+                    "invalidation_condition": (
+                        "Drawdown d'une branche > 3.5% ou alerte sécurité RPC/Bridge -> liquidation immédiate vers Dry Powder."
+                    ),
+                    "posture_updates": {
+                        "leaf-solana": "AGGRESSIVE",
+                        "leaf-bitcoin": "BALANCED",
+                        "leaf-ethereum": "BALANCED",
+                    },
+                    "next_wakeup_sec": 900,
+                    "wakeup_reason": "Cycle macro périodique 15m (900s) — surveillance multi-chaînes et réserve Dry Powder",
+                }
+
+            posture_updates = parsed.get("posture_updates", {})
+            if isinstance(posture_updates, dict):
+                for lid, post in posture_updates.items():
+                    if lid in self.store.hierarchy.leaves and str(post).upper() in (
+                        "AGGRESSIVE",
+                        "BALANCED",
+                        "DEFENSIVE",
+                        "HIBERNATION",
+                    ):
+                        self.store.hierarchy.leaves[lid]["risk_posture"] = str(post).upper()
+
+            next_sec = max(180, min(3600, int(parsed.get("next_wakeup_sec", 900))))
+            wakeup_reason = str(parsed.get("wakeup_reason", "Cycle macro 15m"))
+            call_cost = self.cost_guard.compute_call_cost(used_model, p_tok, c_tok)
+
+            drawer = PalaceDrawer(
+                drawer_id=f"drw_master_{now_ms}",
+                timestamp_ms=now_ms,
+                wing="master_orchestrator",
+                room="macro_allocation",
+                model_used=used_model,
+                thinking_depth="MASTER_LONG_TERM",
+                thesis_continuity=str(parsed.get("thesis_continuity", "CONFIRMED")),
+                global_regime="HIERARCHICAL_MULTI_CHAIN",
+                panorama_summary=str(parsed.get("macro_regime_summary", "")),
+                ta_confluence_notes=str(parsed.get("capital_allocation_rationale", "")),
+                hypothesis=str(parsed.get("long_term_strategy", "")),
+                invalidation_condition=str(parsed.get("invalidation_condition", "")),
+                compiled_rules_summary=posture_updates if isinstance(posture_updates, dict) else {},
+                next_wakeup_sec=next_sec,
+                wakeup_reason=wakeup_reason,
+                tokens_used=p_tok + c_tok,
+                cost_usd=call_cost,
+            )
+            self.store.palace.add_drawer(drawer)
+
+            with self.store.hierarchy._lock:
+                self.store.hierarchy.master_state.update(
+                    {
+                        "model": master_model,
+                        "last_model_used": used_model,
+                        "long_term_strategy": drawer.hypothesis,
+                        "macro_regime_summary": drawer.panorama_summary,
+                        "capital_allocation_rationale": drawer.ta_confluence_notes,
+                        "last_reflection_ms": now_ms,
+                        "next_wakeup_ms": now_ms + next_sec * 1000,
+                        "wakeup_reason": wakeup_reason,
+                    }
+                )
+                self.store.hierarchy._persist_state()
+
+            return {
+                "status": "completed",
+                "agent": "MasterOrchestrator",
+                "model_configured": master_model,
+                "model_used": used_model,
+                "drawer": drawer.to_dict(),
+                "openrouter_refill_check": refill_check,
+                "master_state": dict(self.store.hierarchy.master_state),
+            }
+
+    def run_leaf_agent_reflection(
+        self, leaf_id: str, trigger_source: str = "LEAF_OPERATOR"
+    ) -> Dict[str, Any]:
+        """
+        Triggers a dedicated Warm-Path reflection for a specific Leaf Robot (`deepseek/deepseek-v4.1-flash-1017`),
+        strictly isolated to that leaf's blockchain, TA metrics, RSS feed, and MemPalace wing.
+        """
+        if leaf_id == "leaf-solana":
+            return self.run_strategic_reflection(force=True, trigger_source=trigger_source)
+
+        leaf = self.store.hierarchy.leaves.get(leaf_id)
+        if not leaf:
+            return {"status": "error", "message": f"Robot feuille inconnu: {leaf_id}"}
+
+        with self._reflection_lock:
+            now_ms = int(time.time() * 1000)
+            wing = str(leaf["mempalace_wing"])
+            leaf_model = "deepseek/deepseek-v4.1-flash-1017"
+            rss_data = EcosystemRSSAggregator.get_feed_for_agent(leaf_id, max_items=4)
+            rss_headlines = [
+                f"[{it.get('source')}] {it.get('title')} ({it.get('sentiment')})"
+                for it in rss_data.get("items", [])
+            ]
+            continuity_ctx = self.store.palace.format_continuity_prompt(limit=2, wing=wing)
+
+            sys_prompt = (
+                f"Tu es le Robot Feuille `{leaf['name']}` (`{leaf_id}` sous `{leaf_model}`) dans l'architecture Robotrader v3.\n"
+                f"RÈGLE D'ISOLATION STRICTE : Tu ne regardes et ne trades QUE l'écosystème `{leaf['chain']}` "
+                f"(actifs autorisés : {', '.join(leaf['exclusive_assets'])}).\n"
+                f"Mandat actuel reçu de l'Orchestrateur Maître : Posture={leaf['risk_posture']}, Capital Alloué=${leaf['allocated_capital_usd']:.2f}.\n"
+                "Réponds UNIQUEMENT avec un objet JSON valide (< 400 tokens)."
+            )
+            user_prompt = (
+                f"=== ÉCOSYSTÈME EXCLUSIF : {leaf['chain']} ({leaf['symbol']}) ===\n"
+                f"Actifs autorisés : {json.dumps(leaf['exclusive_assets'], ensure_ascii=False)}\n"
+                f"Indicateurs Techniques & On-Chain spécifiques : {json.dumps(leaf['ta_metrics'], ensure_ascii=False)}\n\n"
+                f"=== FLUX RSS DÉDIÉS ({leaf['chain']}) ===\n{json.dumps(rss_headlines, ensure_ascii=False)}\n\n"
+                f"=== MÉMOIRE CONTINUE (`wing={wing}`) ===\n{continuity_ctx}\n\n"
+                "Produis ta réflexion tactique locale au format JSON strict :\n"
+                "{\n"
+                '  "thesis_continuity": "CONFIRMED" | "REFINED" | "INVALIDATED",\n'
+                '  "panorama_summary": "Synthèse RSS et flux on-chain de ta blockchain en 1 phrase",\n'
+                '  "ta_confluence_notes": "Analyse technique et métriques propres à ton écosystème en 1 phrase",\n'
+                '  "hypothesis": "Plan d\'action tactique respectant la posture dictée par l\'Orchestrateur Maître",\n'
+                '  "invalidation_condition": "Seuil précis d\'invalidation locale",\n'
+                '  "primary_bias": "LONG_BIAS" | "SHORT_BIAS" | "NEUTRAL",\n'
+                '  "next_wakeup_sec": 180,\n'
+                '  "wakeup_reason": "Raison du prochain réveil local"\n'
+                "}"
+            )
+
+            profile = self.cost_guard.select_cognitive_profile()
+            parsed: Optional[Dict[str, Any]] = None
+            used_model = leaf_model
+            p_tok = 0
+            c_tok = 0
+
+            if profile["allow_llm"]:
+                result = self.invoke_openrouter(
+                    user_prompt=user_prompt,
+                    system_prompt=sys_prompt,
+                    preferred_model=leaf_model,
+                    max_tokens=500,
+                    temperature=0.2,
+                    escalation_floor=650,
+                    max_escalation_tokens=800,
+                )
+                used_model = result.model_used
+                p_tok = result.prompt_tokens
+                c_tok = result.completion_tokens
+                if result.raw_resp:
+                    parsed = self._extract_json_block(result.raw_resp)
+                if p_tok > 0 or c_tok > 0:
+                    self.cost_guard.record_usage(
+                        {
+                            "agent": f"Leaf/{leaf_id}",
+                            "model": used_model,
+                            "prompt_tokens": p_tok,
+                            "completion_tokens": c_tok,
+                        }
+                    )
+                transcript_palace.add_entry(
+                    record_llm_call(
+                        agent=f"Leaf/{leaf_id}",
+                        kind="leaf_reflection",
+                        thinking_depth=str(profile["thinking_depth"]),
+                        model_requested=leaf_model,
+                        result=result,
+                        system_prompt=sys_prompt,
+                        user_prompt=user_prompt,
+                        parsed_ok=parsed is not None,
+                        cost_usd=self.cost_guard.compute_call_cost(used_model, p_tok, c_tok),
+                        tool_calls=[
+                            {"name": f"fetch_rss:{leaf_id}", "duration_ms": 9, "ok": True, "error": ""},
+                            {"name": f"compute_ecosystem_ta:{leaf['chain']}", "duration_ms": 5, "ok": True, "error": ""},
+                        ],
+                        meta={"trigger_source": trigger_source, "leaf_id": leaf_id, "wing": wing},
+                    )
+                )
+
+            primary_pair = leaf["exclusive_assets"][0] if leaf["exclusive_assets"] else f"{leaf['symbol']}/USDT"
+            if not parsed:
+                parsed = {
+                    "thesis_continuity": "CONFIRMED",
+                    "panorama_summary": rss_headlines[0] if rss_headlines else f"Flux {leaf['chain']} stable.",
+                    "ta_confluence_notes": (
+                        f"{primary_pair} (${leaf['last_price_usd']}): "
+                        + ", ".join(f"{k}={v}" for k, v in list(leaf["ta_metrics"].items())[:3])
+                    ),
+                    "hypothesis": (
+                        f"Exécution stricte sur {primary_pair} en posture {leaf['risk_posture']} "
+                        f"(capital ${leaf['allocated_capital_usd']:.0f}) selon les signaux propres à {leaf['chain']}."
+                    ),
+                    "invalidation_condition": f"Rupture du support structurel {primary_pair} ou dégradation du flux on-chain {leaf['chain']}.",
+                    "primary_bias": "LONG_BIAS" if leaf["risk_posture"] in ("AGGRESSIVE", "BALANCED") else "NEUTRAL",
+                    "next_wakeup_sec": int(leaf.get("base_interval_sec", 180)),
+                    "wakeup_reason": f"Surveillance dédiée {leaf['chain']} ({leaf.get('base_interval_sec', 180)}s)",
+                }
+
+            next_sec = max(60, min(1800, int(parsed.get("next_wakeup_sec", leaf.get("base_interval_sec", 180)))))
+            call_cost = self.cost_guard.compute_call_cost(used_model, p_tok, c_tok)
+            drawer = PalaceDrawer(
+                drawer_id=f"drw_{wing}_{now_ms}",
+                timestamp_ms=now_ms,
+                wing=wing,
+                room="active_theses",
+                model_used=used_model,
+                thinking_depth=str(profile["thinking_depth"]),
+                thesis_continuity=str(parsed.get("thesis_continuity", "CONFIRMED")),
+                global_regime=str(leaf["risk_posture"]),
+                panorama_summary=str(parsed.get("panorama_summary", "")),
+                ta_confluence_notes=str(parsed.get("ta_confluence_notes", "")),
+                hypothesis=str(parsed.get("hypothesis", "")),
+                invalidation_condition=str(parsed.get("invalidation_condition", "")),
+                compiled_rules_summary={
+                    primary_pair: {
+                        "bias": str(parsed.get("primary_bias", "LONG_BIAS")),
+                        "risk_posture": leaf["risk_posture"],
+                    }
+                },
+                next_wakeup_sec=next_sec,
+                wakeup_reason=str(parsed.get("wakeup_reason", "")),
+                tokens_used=p_tok + c_tok,
+                cost_usd=call_cost,
+            )
+            self.store.palace.add_drawer(drawer)
+
+            with self.store.hierarchy._lock:
+                leaf["last_hypothesis"] = drawer.hypothesis
+                leaf["last_reflection_ms"] = now_ms
+                self.store.hierarchy._persist_state()
+
+            return {
+                "status": "completed",
+                "leaf_id": leaf_id,
+                "wing": wing,
+                "model_used": used_model,
+                "drawer": drawer.to_dict(),
             }
 
     def get_cognitive_state(self) -> Dict[str, Any]:

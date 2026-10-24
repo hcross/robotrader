@@ -273,12 +273,12 @@ pub fn benchmark_market_stream() -> (Vec<MarketEvent>, PolicyEnvelope) {
             price_usd: 0.015,
             safety: clean_safety,
         },
-        // 6. Pod 1: ETH Funding Carry
+        // 6. Pod 1: RAY (Solana Raydium) Funding Carry — pure Solana ecosystem
         MarketEvent::FundingSnapshot {
             timestamp_ms: base_ts + 6_000,
-            symbol: "ETH-USDT".to_string(),
-            spot_price: 2_820.0,
-            perp_price: 2_826.5,
+            symbol: "RAY-USDT".to_string(),
+            spot_price: 2.820,
+            perp_price: 2.8265,
             annualized_funding_apr: 0.26,
         },
         // 7. Pod 2: JUP Breakout

@@ -127,20 +127,52 @@ class StrategyMemoryPalace:
         return drawer
 
     def recall_recent(self, limit: int = 4, wing: Optional[str] = None) -> List[Dict[str, Any]]:
-        filtered = [d for d in self.drawers if (wing is None or d.wing == wing)]
+        if wing in ("leaf_solana", "strategy_ledger"):
+            filtered = [d for d in self.drawers if d.wing in ("leaf_solana", "strategy_ledger")]
+        else:
+            filtered = [d for d in self.drawers if (wing is None or d.wing == wing)]
         return [d.to_dict() for d in filtered[:limit]]
 
-    def format_continuity_prompt(self, limit: int = 3) -> str:
-        recent = self.recall_recent(limit=limit)
+    def recall_across_wings(
+        self, wings: Optional[List[str]] = None, per_wing_limit: int = 2
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Allows the Master Orchestrator to inspect the recent memory drawers of all leaf agents."""
+        target_wings = wings or sorted(
+            {d.wing for d in self.drawers if d.wing != "master_orchestrator"}
+        )
+        return {w: self.recall_recent(limit=per_wing_limit, wing=w) for w in target_wings}
+
+    def format_continuity_prompt(self, limit: int = 3, wing: Optional[str] = None) -> str:
+        recent = self.recall_recent(limit=limit, wing=wing)
         if not recent:
             return "Aucune thèse antérieure enregistrée dans le Strategy Palace (Premier cycle d'initialisation)."
         lines: List[str] = []
         for idx, d in enumerate(recent, 1):
             lines.append(
-                f"[Thèse T-{idx} | {d['thesis_continuity']} | Régime={d['global_regime']} | Modèle={d['model_used']}]\n"
+                f"[Thèse T-{idx} | Wing={d.get('wing')} | {d['thesis_continuity']} | Régime={d['global_regime']} | Modèle={d['model_used']}]\n"
                 f"  - Panorama & TA : {d['ta_confluence_notes']}\n"
                 f"  - Hypothèse : {d['hypothesis']}\n"
                 f"  - Invalidation : {d['invalidation_condition']}\n"
                 f"  - Règles compilées : {json.dumps(d.get('compiled_rules_summary', {}), ensure_ascii=False)}"
             )
         return "\n".join(lines)
+
+    def format_cross_wing_digest(
+        self,
+        wings: Optional[List[str]] = None,
+        per_wing_limit: int = 1,
+        limit_per_wing: Optional[int] = None,
+    ) -> str:
+        """Compact summary of all leaf agents' MemPalace wings for the Master Orchestrator."""
+        eff_limit = limit_per_wing if limit_per_wing is not None else per_wing_limit
+        across = self.recall_across_wings(wings=wings, per_wing_limit=eff_limit)
+        blocks: List[str] = []
+        for w, items in across.items():
+            if not items:
+                continue
+            top = items[0]
+            blocks.append(
+                f"- [{w}] ({top.get('thesis_continuity')} | {top.get('model_used')}): "
+                f"{top.get('hypothesis', '')[:180]} | Invalidation: {top.get('invalidation_condition', '')[:120]}"
+            )
+        return "\n".join(blocks) if blocks else "Aucun rapport MemPalace feuille disponible."

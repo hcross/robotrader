@@ -26,6 +26,9 @@ pub enum RiskRejection {
 
     #[error("Computed Kelly/volatility size is non-positive")]
     ZeroPositionSize,
+
+    #[error("OpenRouter auto-refill rejected: {reason}")]
+    InferenceRefillRejected { reason: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +83,46 @@ impl HardRiskGate {
     pub fn reset_kill_switch(&mut self) {
         self.kill_switch_active = false;
         self.kill_switch_reason = None;
+    }
+
+    /// Validates a bounded OpenRouter credit auto-refill initiated by the Master Orchestrator.
+    pub fn validate_inference_refill(
+        &self,
+        requested_usd: f64,
+        current_balance_usd: f64,
+        low_watermark_usd: f64,
+        epoch_refilled_usd: f64,
+        max_epoch_refill_usd: f64,
+    ) -> Result<f64, RiskRejection> {
+        if self.kill_switch_active {
+            return Err(RiskRejection::KillSwitchActive {
+                reason: self
+                    .kill_switch_reason
+                    .clone()
+                    .unwrap_or_else(|| "Kill-switch active".to_string()),
+            });
+        }
+        if requested_usd <= 0.0 || requested_usd > 25.0 {
+            return Err(RiskRejection::InferenceRefillRejected {
+                reason: format!("Single refill ${requested_usd:.2} outside (0, $25.00] bounds"),
+            });
+        }
+        if current_balance_usd > low_watermark_usd {
+            return Err(RiskRejection::InferenceRefillRejected {
+                reason: format!(
+                    "Current balance ${current_balance_usd:.2} is above low watermark ${low_watermark_usd:.2}"
+                ),
+            });
+        }
+        if epoch_refilled_usd + requested_usd > max_epoch_refill_usd {
+            return Err(RiskRejection::InferenceRefillRejected {
+                reason: format!(
+                    "Epoch refill cap exceeded: ${:.2} + ${:.2} > ${:.2}",
+                    epoch_refilled_usd, requested_usd, max_epoch_refill_usd
+                ),
+            });
+        }
+        Ok(requested_usd)
     }
 
     pub fn validate_solana_safety(&self, safety: &SolanaTokenSafety) -> Result<(), RiskRejection> {
@@ -342,6 +385,28 @@ mod tests {
         assert!(matches!(
             res,
             Err(RiskRejection::SolanaRugCheckFailed { .. })
+        ));
+    }
+
+    #[test]
+    fn test_profit_gated_inference_refill_validation() {
+        let gate = HardRiskGate::new(RiskLimits::default());
+        // Valid refill below low watermark and within epoch cap
+        let ok = gate.validate_inference_refill(10.0, 1.20, 2.00, 5.0, 25.0);
+        assert_eq!(ok, Ok(10.0));
+
+        // Rejected when balance is still above low watermark
+        let above = gate.validate_inference_refill(10.0, 4.50, 2.00, 5.0, 25.0);
+        assert!(matches!(
+            above,
+            Err(RiskRejection::InferenceRefillRejected { .. })
+        ));
+
+        // Rejected when epoch cap would be exceeded
+        let cap_hit = gate.validate_inference_refill(10.0, 1.20, 2.00, 20.0, 25.0);
+        assert!(matches!(
+            cap_hit,
+            Err(RiskRejection::InferenceRefillRejected { .. })
         ));
     }
 }

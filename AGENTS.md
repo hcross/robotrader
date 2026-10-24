@@ -3,11 +3,12 @@
 Welcome, fellow agent! This document is designed to help you quickly understand the **Robotrader v2** project and how to contribute effectively.
 
 ## Project Overview
-Robotrader v2 is a **Hybrid Rust/Python Quantitative & Agentic Cryptocurrency Trading Platform** ([ADR-0001](docs/adr/0001-hybrid-quant-agentic-architecture.md), [ADR-0002](docs/adr/0002-autonomous-cognitive-warm-path-and-ta-memory.md)).
+Robotrader v3 is a **Hierarchical Hybrid Rust/Python Quantitative & Agentic Cryptocurrency Trading Platform** ([ADR-0001](docs/adr/0001-hybrid-quant-agentic-architecture.md), [ADR-0002](docs/adr/0002-autonomous-cognitive-warm-path-and-ta-memory.md), [ADR-0003](docs/adr/0003-hierarchical-multi-ecosystem-architecture.md)).
 
 It strictly separates:
-1. **Deterministic Sub-millisecond Execution & Hard Risk Enforcement (`engine-rs` in Rust)**: Hot-path event processing, order book imbalance (OBI) parsing, HardRiskGate validation (<50µs), Kelly position sizing, Solana anti-rug checks, and zero LLM latency.
-2. **Asynchronous Autonomous Cognitive Loop & Strategy Memory (`backend` in Python)**: Warm-path periodic reflection, Pro Technical Analysis toolbelt (Ichimoku, Fibonacci 0.618 Golden Pocket, RSI, ATR, Bollinger), Social/Macro Panorama, Infinite Strategy Memory Palace (`strategy_ledger`), mechanical rule compilation into `PolicyEnvelope`, self-scheduling wakeups, and budget-driven ultra-low-cost frontier LLM routing.
+1. **Master Orchestrator & Cross-Chain Treasury (`moonshotai/kimi-k3.1-pro`)**: Holds the Master Portfolio, enforces the `Dry Powder` reserve floor ($\ge 20\%$), prices cross-chain transfer viability (`hurdle_rate_bps = 2.5x round-trip cost`), executes multi-chain/multi-token operator `Checkout` requests, reads across all 26 leaf agents' MemPalace wings (`wing="master_orchestrator"` + `recall_across_wings`), and manages profit-gated/epoch-capped OpenRouter credit auto-refill.
+2. **26 Specialized Blockchain & Venue Leaf Robots (`deepseek/deepseek-v4.1-flash-1017`)**: Each leaf robot is strictly isolated to **one single blockchain** (or dedicated multi-crypto/paper venue), with its own RSS feed (`EcosystemRSSAggregator`), specific TA/on-chain indicators, and dedicated MemPalace wing (`wing="leaf_<slug>"`). In particular, `leaf-solana` is purified to trade exclusively Solana ecosystem assets (`SOL/USDT`, `JUP/USDT`, `RAY/USDT`, `SOL-DEVNET`).
+3. **Deterministic Sub-millisecond Execution & Hard Risk Enforcement (`engine-rs` in Rust)**: Hot-path event processing, order book imbalance (OBI) parsing, `HardRiskGate` validation (<50µs, including `validate_inference_refill`), Kelly position sizing, Solana anti-rug checks, and zero LLM latency.
 
 ## Tech Stack
 - **Hot-Path & Replay Engine (`engine-rs`)**: Rust (Edition 2021), Cargo Workspace (`common`, `risk-gate`, `strategies`, `exec-router`, `backtest`, `node`), Serde, Tokio.
