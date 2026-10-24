@@ -218,6 +218,8 @@ cd frontend && npm run build
   *Master Orchestrator (`moonshotai/kimi-k3.1-pro`) + 26 isolated blockchain/venue leaf agents (`deepseek/deepseek-v4.1-flash-1017`), `<= 4` ecosystem-adapted Rust pods per blockchain, Cross-Chain Bridge Hurdle Pricer (`2.5x`), Dry Powder floor (`>= 20%`), and multi-token Checkout.*
 - [**Performance & LLM Cost Post-Mortem Audit (`docs/PERFORMANCE_AND_COST_AUDIT.md`)**](docs/PERFORMANCE_AND_COST_AUDIT.md)  
   *Full quantitative audit of the 325 LLM cycles / 4.41M tokens (`~$2.00` OpenRouter spend), breakdown of the 3 trading populations (`backtest_fixture` 100% win rate / Sharpe 28.22, `paper_model` `+$1,155.52` over 1,500 trades, `live_testnet`), and the 4 structural remediations reducing LLM OpEx by 25x–40x.*
+- [**Cryptographic Vault Enclave & 26-Chain HD Key Management (`docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md`)**](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)  
+  *Single-seed `BIP-32` / `BIP-44` / `SLIP-0010` hierarchical deterministic derivation across all 26 blockchains (`secp256k1`, `Ed25519`, `Sr25519`), volatile RAM scrubbing (`ZeroizingBytes`), destination whitelist enforcement, and zero private-key exposure to the Python LLM runtime.*
 
 ---
 

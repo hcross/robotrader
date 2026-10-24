@@ -179,6 +179,15 @@ def evaluate_cross_chain_bridge(req: BridgeEvaluationRequest) -> Dict[str, Any]:
     )
 
 
+@app.get("/api/v1/vault/manifest")
+def get_vault_enclave_manifest() -> Dict[str, Any]:
+    """
+    Returns the public-only HD wallet manifest (`BIP-32` / `BIP-44` / `SLIP-0010`)
+    exported by `RustVaultEnclave` in `engine-rs` for all 26 blockchains.
+    """
+    return state_store.hierarchy.vault_manifest
+
+
 @app.post("/api/v1/master/reflect")
 def trigger_master_reflection() -> Dict[str, Any]:
     return orchestrator.run_master_orchestrator_reflection(

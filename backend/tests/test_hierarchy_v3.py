@@ -318,6 +318,32 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         # 0.1M * $0.30 + 0.02M * $1.10 = $0.03 + $0.022 = $0.052
         self.assertAlmostEqual(hydrated["hydrated_cost_usd"], 0.052, places=4)
 
+    def test_rust_vault_enclave_26_chains_and_whitelist_enforcement(self) -> None:
+        """
+        Verifies that all 26 blockchains derive public-only HD wallets from the Rust Vault Enclave
+        (`python_private_key_access == False`) and that untrusted checkout addresses are blocked.
+        """
+        manifest = self.store.hierarchy.vault_manifest
+        self.assertFalse(manifest["python_private_key_access"])
+        self.assertTrue(manifest["zeroize_on_drop"])
+        self.assertEqual(len(manifest["wallets"]), 26)
+
+        for lid, leaf in self.store.hierarchy.leaves.items():
+            wv = leaf.get("wallet_vault", {})
+            self.assertEqual(wv.get("leaf_id"), lid)
+            self.assertTrue(wv.get("master_treasury_address"))
+            self.assertTrue(wv.get("leaf_hot_address"))
+
+        # Untrusted destination must be rejected by the Rust Enclave
+        rejected = self.store.hierarchy.checkout_funds(
+            amount_usd=500.0,
+            target_chain="Solana",
+            target_token="SOL",
+            destination_address="attacker_drain_wallet_xyz",
+            quote_only=False,
+        )
+        self.assertEqual(rejected["status"], "rejected_by_rust_enclave")
+
 
 if __name__ == "__main__":
     unittest.main()

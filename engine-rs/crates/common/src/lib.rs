@@ -90,6 +90,66 @@ pub struct EcosystemPodSpec {
     pub description: String,
 }
 
+/// Cryptographic curve or authentication mechanism used by the Rust Vault Enclave for a blockchain/venue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CryptographicCurve {
+    Secp256k1EcdsaBip44,
+    Secp256k1SchnorrTaproot,
+    Ed25519Slip0010,
+    Ed25519Cip1852,
+    Sr25519Substrate,
+    HmacSha256NoWithdraw,
+    MtlsX509Participant,
+    VirtualZeroKey,
+}
+
+/// Public-only wallet descriptor exported by the Rust Vault Enclave (`engine-rs`).
+/// Private keys and master seed bytes never leave the `ZeroizingSeed` buffer inside Rust.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicWalletDescriptor {
+    pub leaf_id: String,
+    pub chain: String,
+    pub symbol: String,
+    pub curve: CryptographicCurve,
+    pub slip44_coin_type: u32,
+    pub master_derivation_path: String,
+    pub leaf_derivation_path: String,
+    pub master_treasury_address: String,
+    pub leaf_hot_address: String,
+    pub key_fingerprint: String,
+    pub key_isolation_mode: String,
+    pub withdrawal_whitelist_enforced: bool,
+}
+
+/// Full public manifest of all 26 ecosystems' derived wallets and enclave status.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultEnclaveManifest {
+    pub enclave_version: String,
+    pub vault_mode: String,
+    pub master_seed_fingerprint: String,
+    pub zeroize_on_drop: bool,
+    pub python_private_key_access: bool,
+    pub operator_whitelist_count: usize,
+    pub canonical_bridge_contracts_count: usize,
+    pub wallets: Vec<PublicWalletDescriptor>,
+}
+
+/// Receipt returned when the Rust Vault Enclave validates and signs a checkout or bridge transfer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignedTransferReceipt {
+    pub leaf_id: String,
+    pub chain: String,
+    pub curve: CryptographicCurve,
+    pub signer_address: String,
+    pub destination_address: String,
+    pub amount_usd: f64,
+    pub token: String,
+    pub destination_whitelisted: bool,
+    pub signature_hex: String,
+    pub key_zeroized_after_sign: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetOverride {
     pub catalyst_score: f64,

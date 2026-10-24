@@ -1,8 +1,11 @@
+pub mod vault;
+
 use robotrader_common::{
     ApprovedOrder, OrderIntent, PolicyEnvelope, PortfolioState, SolanaTokenSafety,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+pub use vault::{RustVaultEnclave, ZeroizingBytes};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Error)]
 pub enum RiskRejection {
@@ -29,6 +32,9 @@ pub enum RiskRejection {
 
     #[error("OpenRouter auto-refill rejected: {reason}")]
     InferenceRefillRejected { reason: String },
+
+    #[error("Vault Enclave signing rejected: {reason}")]
+    VaultSigningRejected { reason: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -408,5 +414,70 @@ mod tests {
             cap_hit,
             Err(RiskRejection::InferenceRefillRejected { .. })
         ));
+    }
+
+    #[test]
+    fn test_vault_enclave_26_chains_hd_derivation_and_whitelist_signing() {
+        let enclave = RustVaultEnclave::default();
+        let manifest = enclave.export_public_manifest();
+
+        assert_eq!(manifest.wallets.len(), 26);
+        assert!(manifest.zeroize_on_drop);
+        assert!(!manifest.python_private_key_access);
+
+        // Verify distinct master vs leaf addresses and native formatting
+        let sol = enclave.derive_wallet_descriptor("leaf-solana").unwrap();
+        assert_ne!(sol.master_treasury_address, sol.leaf_hot_address);
+        assert_eq!(sol.master_derivation_path, "m/44'/501'/0'/0/0");
+        assert_eq!(sol.leaf_derivation_path, "m/44'/501'/1'/0/0");
+
+        let btc = enclave.derive_wallet_descriptor("leaf-bitcoin").unwrap();
+        assert!(btc.master_treasury_address.starts_with("bc1q"));
+        assert_eq!(btc.master_derivation_path, "m/84'/0'/0'/0/0");
+
+        let eth = enclave.derive_wallet_descriptor("leaf-ethereum").unwrap();
+        assert!(eth.master_treasury_address.starts_with("0x"));
+        assert_eq!(eth.master_treasury_address.len(), 42);
+
+        // Whitelisted operator address succeeds and zeroizes ephemeral key
+        let receipt = enclave
+            .validate_and_sign_transfer(
+                false,
+                "Solana",
+                "FK286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN",
+                1500.0,
+                "SOL",
+            )
+            .expect("Whitelisted operator address should be signed");
+        assert!(receipt.destination_whitelisted);
+        assert!(receipt.key_zeroized_after_sign);
+        assert!(receipt.signature_hex.starts_with("0x"));
+        assert_eq!(receipt.signature_hex.len(), 66);
+
+        // Untrusted / attacker address is rejected by Rust enclave
+        let bad = enclave.validate_and_sign_transfer(
+            false,
+            "Solana",
+            "attacker_drain_wallet_999999999",
+            1500.0,
+            "SOL",
+        );
+        assert!(matches!(bad, Err(RiskRejection::VaultSigningRejected { .. })));
+
+        // Kill-switch active blocks all signing
+        let killed = enclave.validate_and_sign_transfer(
+            true,
+            "Solana",
+            "FK286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN",
+            1500.0,
+            "SOL",
+        );
+        assert!(matches!(killed, Err(RiskRejection::KillSwitchActive { .. })));
+
+        // Verify volatile zeroization
+        let mut secret = ZeroizingBytes::new([0xAAu8; 32]);
+        assert_eq!(secret.as_slice()[0], 0xAA);
+        secret.zeroize_now();
+        assert!(secret.as_slice().iter().all(|&b| b == 0));
     }
 }
