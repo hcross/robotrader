@@ -4,12 +4,13 @@ import json
 import re
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from ..core.agent import BaseWarmAgent
+from ..core.agent import BaseWarmAgent, CallResult
 from ..core.memory_palace import PalaceDrawer
 from ..core.schemas import AssetOverride, CatalystSignal, Message
 from ..core.state_store import HybridStateStore, state_store
+from ..core.transcript_palace import record_llm_call, transcript_palace
 from .analysis import CatalystScoutAgent, QuantAuditorAgent
 from .monitor import FRONTIER_FLASH_MODELS, LLMMonitorAgent
 from .trading import MetaAllocatorAgent
@@ -34,6 +35,7 @@ class OrchestratorAgent(BaseWarmAgent):
         self.store = store or state_store
         self._scheduler_started = False
         self._reflection_lock = threading.Lock()
+        self._last_tool_timings: List[Dict[str, Any]] = []
 
         # Instantiate and interconnect the Warm-Path swarm
         self.cost_guard = LLMMonitorAgent(name="CostGuard")
@@ -100,6 +102,7 @@ class OrchestratorAgent(BaseWarmAgent):
             data = self.store.refresh_ta_and_panorama()
             ta_snapshots = data.get("ta_snapshots", {})
             panorama = data.get("social_panorama", {})
+            self._last_tool_timings = list(data.get("tool_timings", []))
             urgency = str(panorama.get("urgency_level", "NORMAL_FLOW"))
 
             profile = self.cost_guard.select_cognitive_profile(urgency_level=urgency)
@@ -130,6 +133,7 @@ class OrchestratorAgent(BaseWarmAgent):
             user_prompt = (
                 f"=== MODE COGNITIF : {thinking_depth} (Budget restant: ${self.cost_guard.remaining_budget_usd:.4f}) ===\n"
                 f"=== MÉMOIRE CONTINUE (STRATEGY PALACE) ===\n{continuity_ctx}\n\n"
+                f"=== AUTO-OBSERVATION : VOS DERNIERS TRANSCRIPTS BRUTS ===\n{transcript_palace.format_recent_transcripts(limit=2)}\n\n"
                 f"=== ANALYSE TECHNIQUE 15m EN DIRECT ===\n"
                 f"- SOL/USDT : {json.dumps(sol_ta, ensure_ascii=False)}\n"
                 f"- ETH/USDT : {json.dumps(eth_ta, ensure_ascii=False)}\n"
@@ -156,16 +160,25 @@ class OrchestratorAgent(BaseWarmAgent):
             p_tok = 0
             c_tok = 0
 
+            reflection_meta = {
+                "trigger_source": trigger_source,
+                "base_interval_sec": base_interval,
+                "urgency_level": urgency,
+            }
+
             if profile["allow_llm"]:
-                raw_resp, used_model, p_tok, c_tok = self.invoke_openrouter(
+                result = self.invoke_openrouter(
                     user_prompt=user_prompt,
                     system_prompt=sys_prompt,
                     preferred_model=model_key,
                     max_tokens=int(profile["max_tokens"]),
                     temperature=0.2,
                 )
-                if raw_resp:
-                    parsed = self._extract_json_block(raw_resp)
+                used_model = result.model_used
+                p_tok = result.prompt_tokens
+                c_tok = result.completion_tokens
+                if result.raw_resp:
+                    parsed = self._extract_json_block(result.raw_resp)
                 if p_tok > 0 or c_tok > 0:
                     self.cost_guard.record_usage(
                         {
@@ -175,6 +188,40 @@ class OrchestratorAgent(BaseWarmAgent):
                             "completion_tokens": c_tok,
                         }
                     )
+                transcript_palace.add_entry(
+                    record_llm_call(
+                        agent="Orchestrator/CognitiveLoop",
+                        kind="reflection",
+                        thinking_depth=thinking_depth,
+                        model_requested=model_key,
+                        result=result,
+                        system_prompt=sys_prompt,
+                        user_prompt=user_prompt,
+                        parsed_ok=parsed is not None,
+                        cost_usd=self.cost_guard.compute_call_cost(used_model, p_tok, c_tok),
+                        tool_calls=self._last_tool_timings,
+                        meta=reflection_meta,
+                    )
+                )
+            else:
+                # Budget-locked cycle: persist what would have been sent so production
+                # inspection shows the skipped cycle instead of an opaque silence.
+                transcript_palace.add_entry(
+                    record_llm_call(
+                        agent="Orchestrator/CognitiveLoop",
+                        kind="reflection",
+                        thinking_depth=thinking_depth,
+                        model_requested=model_key,
+                        result=CallResult(None, model_key, 0, 0, 0, error="llm_skipped_budget"),
+                        system_prompt=sys_prompt,
+                        user_prompt=user_prompt,
+                        parsed_ok=False,
+                        cost_usd=0.0,
+                        tool_calls=self._last_tool_timings,
+                        meta=reflection_meta,
+                        status="llm_skipped_budget",
+                    )
+                )
 
             # Fallback quantitative synthesis if LLM is locked by budget or response unparseable
             sol_price = float(sol_ta.get("last_price", 85.0))
@@ -471,24 +518,43 @@ class OrchestratorAgent(BaseWarmAgent):
                 f"Question de l'opérateur : {command}\n"
                 "Réponds de façon concise, directe et technique en français (3 à 5 lignes max)."
             )
-            ans, used_model, p_tok, c_tok = self.invoke_openrouter(
+            result = self.invoke_openrouter(
                 user_prompt=prompt,
                 preferred_model=str(profile["model_key"]),
                 max_tokens=450,
             )
-            if ans:
+            ans = result.raw_resp
+            if result.prompt_tokens > 0 or result.completion_tokens > 0:
                 self.cost_guard.record_usage(
                     {
                         "agent": "Orchestrator/Chat",
-                        "model": used_model,
-                        "prompt_tokens": p_tok,
-                        "completion_tokens": c_tok,
+                        "model": result.model_used,
+                        "prompt_tokens": result.prompt_tokens,
+                        "completion_tokens": result.completion_tokens,
                     }
                 )
+            transcript_palace.add_entry(
+                record_llm_call(
+                    agent="Orchestrator/Chat",
+                    kind="chat",
+                    thinking_depth=str(profile["thinking_depth"]),
+                    model_requested=str(profile["model_key"]),
+                    result=result,
+                    system_prompt=self.system_prompt,
+                    user_prompt=prompt,
+                    parsed_ok=bool(ans),
+                    cost_usd=self.cost_guard.compute_call_cost(
+                        result.model_used, result.prompt_tokens, result.completion_tokens
+                    ),
+                    tool_calls=[],
+                    meta={"trigger_source": "CHAT_OPERATOR"},
+                )
+            )
+            if ans:
                 return {
                     "role": "agent",
                     "action": "LLM_RESPONSE",
-                    "content": f"[{used_model}] {ans}",
+                    "content": f"[{result.model_used}] {ans}",
                 }
 
         # Fallback briefing

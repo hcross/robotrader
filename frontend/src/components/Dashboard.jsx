@@ -6,11 +6,13 @@ import {
   Shield,
   Cpu,
   Zap,
+  ScrollText,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
 } from 'lucide-react';
+import LLMInspectionModal from './LLMInspectionModal';
 
 const POD_META = {
   pod_carry: {
@@ -46,6 +48,7 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(8);
   const [reflecting, setReflecting] = useState(false);
+  const [showLLMModal, setShowLLMModal] = useState(false);
 
   const metrics = statusData?.engine_metrics || {};
   const allocations = statusData?.policy_envelope?.pod_allocations || {};
@@ -508,6 +511,18 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
             >
               {reflecting ? '⏳ Analyse TA & LLM...' : '⚡ Forcer Réflexion LLM'}
             </button>
+
+            <button
+              type="button"
+              onClick={() => setShowLLMModal(true)}
+              className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition"
+              title="Inspecter la production LLM (transcripts bruts, latence, coût)"
+            >
+              <span className="flex items-center gap-1 text-xs">
+                <ScrollText className="w-3.5 h-3.5 text-purple-400" />
+                Inspection LLM
+              </span>
+            </button>
           </div>
         </div>
 
@@ -653,6 +668,11 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
           ))}
         </div>
       </div>
+      <LLMInspectionModal
+        apiBase={apiBase}
+        open={showLLMModal}
+        onClose={() => setShowLLMModal(false)}
+      />
     </div>
   );
 };

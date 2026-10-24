@@ -3,10 +3,26 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import urllib.request
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 from .schemas import Message
+
+
+@dataclass
+class CallResult:
+    """Structured result of one OpenRouter invocation with per-attempt failover telemetry."""
+
+    raw_resp: Optional[str]
+    model_used: str
+    prompt_tokens: int
+    completion_tokens: int
+    latency_ms: int
+    attempts: List[Dict[str, Any]] = field(default_factory=list)
+    #  attempt = {"model", "latency_ms", "ok", "prompt_tokens", "completion_tokens", "error"}
+    error: str = ""  # "" | "no_api_key" | "fallback_exhausted"
 
 
 class BaseWarmAgent:
@@ -60,21 +76,25 @@ class BaseWarmAgent:
         preferred_model: str = "deepseek/deepseek-v4.1-flash",
         max_tokens: int = 900,
         temperature: float = 0.2,
-    ) -> Tuple[Optional[str], str, int, int]:
+    ) -> CallResult:
         """
         Calls OpenRouter with the preferred near-frontier low-cost model (`deepseek/deepseek-v4.1-flash`
         or `z-ai/glm-5.3-flash`) and automatic failover across FALLBACK_CHAIN.
-        Returns: (response_text, model_used, prompt_tokens, completion_tokens)
+        Returns a `CallResult`: raw response (or None), model actually used, token usage,
+        wall-clock latency, per-attempt failover telemetry and transport error.
         """
         api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-        if not api_key or api_key == "sk-or-your-key-here":
-            return None, preferred_model, 0, 0
-
         clean_pref = preferred_model.replace("openrouter/", "")
+        if not api_key or api_key == "sk-or-your-key-here":
+            return CallResult(None, clean_pref, 0, 0, 0, error="no_api_key")
+
         candidates = [clean_pref] + [m for m in self.FALLBACK_CHAIN if m != clean_pref]
         sys_msg = system_prompt or self.system_prompt
+        attempts: List[Dict[str, Any]] = []
+        total_start = time.perf_counter()
 
         for model_slug in candidates:
+            attempt_start = time.perf_counter()
             try:
                 payload = json.dumps(
                     {
@@ -102,15 +122,55 @@ class BaseWarmAgent:
                     body = json.loads(resp.read().decode("utf-8"))
                 choices = body.get("choices", [])
                 if not choices:
+                    attempts.append(
+                        {
+                            "model": model_slug,
+                            "latency_ms": int((time.perf_counter() - attempt_start) * 1000),
+                            "ok": False,
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "error": "empty_choices",
+                        }
+                    )
                     continue
                 content = choices[0].get("message", {}).get("content", "")
                 usage = body.get("usage", {})
                 p_tok = int(usage.get("prompt_tokens", 0))
                 c_tok = int(usage.get("completion_tokens", 0))
+                attempts.append(
+                    {
+                        "model": model_slug,
+                        "latency_ms": int((time.perf_counter() - attempt_start) * 1000),
+                        "ok": bool(content),
+                        "prompt_tokens": p_tok,
+                        "completion_tokens": c_tok,
+                        "error": "" if content else "empty_content",
+                    }
+                )
                 if content:
-                    return str(content).strip(), model_slug, p_tok, c_tok
+                    return CallResult(
+                        str(content).strip(),
+                        model_slug,
+                        p_tok,
+                        c_tok,
+                        int((time.perf_counter() - total_start) * 1000),
+                        attempts=attempts,
+                        error="",
+                    )
             except Exception as exc:
+                attempts.append(
+                    {
+                        "model": model_slug,
+                        "latency_ms": int((time.perf_counter() - attempt_start) * 1000),
+                        "ok": False,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "error": str(exc)[-200:],
+                    }
+                )
                 print(f"[{self.agent_name}] OpenRouter model {model_slug} warning: {exc}")
                 continue
 
-        return None, clean_pref, 0, 0
+        return CallResult(
+            None, clean_pref, 0, 0, int((time.perf_counter() - total_start) * 1000), attempts=attempts, error="fallback_exhausted"
+        )

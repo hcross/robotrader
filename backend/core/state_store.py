@@ -214,30 +214,53 @@ class HybridStateStore:
         """
         Fetches real 15m OHLCV candles from Binance for SOL/USDT, ETH/USDT, BTC/USDT
         and computes Ichimoku, RSI(14), Fibonacci levels, Bollinger/ATR, and Social Panorama.
+        Returns `tool_timings` (per tool-call wall-clock, ms) for transcript instrumentation.
         """
         from ..tools.exchange_tools import BinanceTool
         from ..tools.ta_tools import SocialMacroPanoramaTool, TechnicalAnalysisTool
 
         binance = BinanceTool()
         snapshots: Dict[str, Dict[str, Any]] = {}
+        tool_timings: List[Dict[str, Any]] = []
         for sym in ("SOL/USDT", "ETH/USDT", "BTC/USDT"):
+            fetch_start = time.perf_counter()
             try:
                 candles = binance.exchange.fetch_ohlcv(sym, timeframe="15m", limit=60)
+                tool_timings.append(
+                    {"name": f"fetch_ohlcv:{sym}", "duration_ms": int((time.perf_counter() - fetch_start) * 1000), "ok": True, "error": ""}
+                )
                 obi = self._last_obi.get(sym, 0.05)
                 if candles:
+                    analyze_start = time.perf_counter()
                     snapshots[sym] = TechnicalAnalysisTool.analyze_candles(
                         sym, candles, obi=obi, timeframe="15m"
                     )
                     self._last_prices[sym] = float(snapshots[sym]["last_price"])
+                    tool_timings.append(
+                        {"name": f"analyze_candles:{sym}", "duration_ms": int((time.perf_counter() - analyze_start) * 1000), "ok": True, "error": ""}
+                    )
             except Exception as exc:
+                err_ms = int((time.perf_counter() - fetch_start) * 1000)
+                if not any(t["name"] == f"fetch_ohlcv:{sym}" for t in tool_timings):
+                    tool_timings.append({"name": f"fetch_ohlcv:{sym}", "duration_ms": err_ms, "ok": False, "error": str(exc)[:200]})
                 print(f"[TA Engine] Warning fetching OHLCV for {sym}: {exc}")
 
-        panorama = SocialMacroPanoramaTool.build_panorama(snapshots)
+        pano_start = time.perf_counter()
+        try:
+            panorama = SocialMacroPanoramaTool.build_panorama(snapshots)
+            tool_timings.append({"name": "build_panorama", "duration_ms": int((time.perf_counter() - pano_start) * 1000), "ok": True, "error": ""})
+        except Exception as exc:
+            panorama = {}
+            tool_timings.append({"name": "build_panorama", "duration_ms": int((time.perf_counter() - pano_start) * 1000), "ok": False, "error": str(exc)[:200]})
         with self._lock:
             if snapshots:
                 self.latest_ta_snapshots = snapshots
             self.latest_social_panorama = panorama
-        return {"ta_snapshots": self.latest_ta_snapshots, "social_panorama": self.latest_social_panorama}
+        return {
+            "ta_snapshots": self.latest_ta_snapshots,
+            "social_panorama": self.latest_social_panorama,
+            "tool_timings": tool_timings,
+        }
 
     def get_testnet_telemetry(self) -> Dict[str, Any]:
         if not self.is_testnet_mode:

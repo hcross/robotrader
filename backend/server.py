@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from .agents.orchestrator import OrchestratorAgent
 from .core.schemas import Message
 from .core.state_store import state_store
+from .core.transcript_palace import transcript_palace
 
 app = FastAPI(
     title="Robotrader v2 Hybrid Control Plane",
@@ -82,6 +83,31 @@ def get_system_status() -> Dict[str, Any]:
         "testnet_telemetry": state_store.get_testnet_telemetry(),
         "cognitive_engine": orchestrator.get_cognitive_state(),
     }
+
+
+@app.get("/api/v1/llm/calls")
+def list_llm_calls(
+    offset: int = 0,
+    limit: int = 50,
+    agent: str | None = None,
+    model: str | None = None,
+    depth: str | None = None,
+) -> Dict[str, Any]:
+    """
+    Production LLM inspection feed (backlog ADR-0002): raw-reasoning transcripts —
+    prompts, completions, per-attempt failover, tool calls, latency/cost — served
+    on demand, not on the 4s-polling `/status` lane.
+    """
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    page, total = transcript_palace.list_entries(
+        offset=offset,
+        limit=limit,
+        agent=agent or None,
+        model=model or None,
+        thinking_depth=depth or None,
+    )
+    return {"calls": page, "total": total, "offset": offset, "limit": limit}
 
 
 @app.post("/api/v1/cognitive/reflect")
