@@ -983,6 +983,273 @@ class HierarchicalFleetManager:
         self._seed_initial_palace_drawers()
         self._load_persisted()
 
+    def _build_rust_pods_for_leaf(self, spec: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Returns the 1 to 4 (strictly <= 4) ecosystem-adapted Rust Strategy Pods (`engine-rs`)
+        for a given blockchain leaf, matching `ecosystem_pod_specs` in `engine-rs/crates/strategies`.
+        """
+        lid = str(spec["leaf_id"])
+        chain = str(spec["chain"])
+        venues = list(spec.get("venues", []))
+        v1 = venues[0] if venues else f"{chain} Native DEX"
+        v2 = venues[1] if len(venues) > 1 else v1
+
+        catalog: Dict[str, List[Dict[str, Any]]] = {
+            "leaf-solana": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "sol_drift_carry",
+                    "name": "Solana Drift/JUP Perp Carry",
+                    "archetype": "DELTA_NEUTRAL_CARRY",
+                    "native_venue": "Drift Protocol / Jupiter Perps",
+                    "default_weight": 0.35,
+                    "description": "Arbitrage delta-neutre Spot SOL/JUP/RAY vs Funding Perp Solana (>15% APR).",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "sol_clob_momentum",
+                    "name": "Phoenix & Raydium CLMM OBI Breakout",
+                    "archetype": "CLOB_ORDERFLOW_MOMENTUM",
+                    "native_venue": "Jupiter v6 / Raydium CLMM",
+                    "default_weight": 0.35,
+                    "description": "Capture des déséquilibres L2 (OBI + CVD) et cassures de volatilité en <400ms.",
+                },
+                {
+                    "slot_id": "pod_solana_alpha",
+                    "pod_code": "sol_jito_smart_money",
+                    "name": "Jito Bundle Smart-Money Tracker",
+                    "archetype": "ONCHAIN_WHALE_FLOW",
+                    "native_venue": "Jito Bundles / Jupiter v6",
+                    "default_weight": 0.20,
+                    "description": "Suivi atomique des portefeuilles Solana à fort winrate avec filtre anti-rug HardRiskGate.",
+                },
+                {
+                    "slot_id": "pod_sniper",
+                    "pod_code": "sol_raydium_sniper",
+                    "name": "Raydium Atomic Pool Launch Sniper",
+                    "archetype": "ATOMIC_DEX_SNIPER",
+                    "native_venue": "Raydium Atomic / Jito",
+                    "default_weight": 0.10,
+                    "description": "Exécution atomique sur nouveaux pools Raydium vérifiés (Mint/Freeze révoqués, LP verrouillée).",
+                },
+            ],
+            "leaf-bitcoin": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "btc_basis_carry",
+                    "name": "Bitcoin Spot-Perp & ETF Basis Carry",
+                    "archetype": "BASIS_CASH_AND_CARRY",
+                    "native_venue": "Bitcoin Native / Perp Basis",
+                    "default_weight": 0.45,
+                    "description": "Capture du basis institutionnel BTC Spot vs Perp et prime de liquidité.",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "btc_hash_ribbon_breakout",
+                    "name": "BTC Mempool & Orderflow Breakout",
+                    "archetype": "MACRO_VOL_BREAKOUT",
+                    "native_venue": "Bitcoin L1 / Native Liquidity",
+                    "default_weight": 0.35,
+                    "description": "Breakout directionnel filtré par l'expansion Hash Ribbon, les flux ETF et l'OBI L2.",
+                },
+                {
+                    "slot_id": "pod_solana_alpha",
+                    "pod_code": "btc_thorchain_peg_arb",
+                    "name": "ThorChain Native BTC / wBTC / sBTC Arb",
+                    "archetype": "CROSS_WRAPPER_ARB",
+                    "native_venue": "ThorChain Native Pool",
+                    "default_weight": 0.20,
+                    "description": "Arbitrage de parité entre BTC natif, wBTC et sBTC et suivi des baleines UTXO.",
+                },
+            ],
+            "leaf-ethereum": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "eth_lst_restaking_carry",
+                    "name": "Lido stETH & EigenLayer Restaking Carry",
+                    "archetype": "LST_RESTAKING_CARRY",
+                    "native_venue": "Lido / EigenLayer / Aave v3",
+                    "default_weight": 0.40,
+                    "description": "Portage de rendement stETH + EigenLayer combiné à une jambe de couverture delta-neutre.",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "eth_univ4_clmm_momentum",
+                    "name": "Uniswap v4 Hooks & L2 OBI Momentum",
+                    "archetype": "CLMM_RANGE_MOMENTUM",
+                    "native_venue": "Uniswap v4",
+                    "default_weight": 0.30,
+                    "description": "Momentum sur paires ETH-USDC, UNI-ETH et AAVE-ETH calibré sur le base-fee EIP-1559.",
+                },
+                {
+                    "slot_id": "pod_solana_alpha",
+                    "pod_code": "eth_curve_peg_arb",
+                    "name": "Curve stETH/ETH Peg & Smart-Money Pod",
+                    "archetype": "LST_PEG_ARBITRAGE",
+                    "native_venue": "Curve Finance / Aave v3",
+                    "default_weight": 0.20,
+                    "description": "Arbitrage de convergence sur le peg stETH/ETH et suivi des flux institutionnels.",
+                },
+                {
+                    "slot_id": "pod_sniper",
+                    "pod_code": "eth_mev_liquidation_sniper",
+                    "name": "Flashbots Protect DeFi Liquidation Pod",
+                    "archetype": "MEV_LIQUIDATION_SNIPER",
+                    "native_venue": "Flashbots / Uniswap v4",
+                    "default_weight": 0.10,
+                    "description": "Capture atomique des liquidations DeFi Aave/Morpho lorsque le gas L1 est bas.",
+                },
+            ],
+            "leaf-hyperliquid": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "hype_hlp_funding_carry",
+                    "name": "HyperCore Perp Funding & HLP Basis",
+                    "archetype": "CLOB_FUNDING_CARRY",
+                    "native_venue": "HyperCore L1 CLOB",
+                    "default_weight": 0.35,
+                    "description": "Arbitrage de funding perpétuel sans frais de gas sur le carnet natif Hyperliquid.",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "hype_clob_obi_scalper",
+                    "name": "HyperCore L1 Post-Only OBI Scalper",
+                    "archetype": "SUBSECOND_CLOB_MOMENTUM",
+                    "native_venue": "HyperCore L1 CLOB",
+                    "default_weight": 0.35,
+                    "description": "Exécution Post-Only Maker sur HYPE-USDC et PURR-USDC pilotée par le déséquilibre L2.",
+                },
+                {
+                    "slot_id": "pod_solana_alpha",
+                    "pod_code": "hype_vault_whale_tracker",
+                    "name": "HLP Vault Skew & Top-Trader Flow",
+                    "archetype": "VAULT_POSITION_FLOW",
+                    "native_venue": "HLP Liquidity Vault",
+                    "default_weight": 0.20,
+                    "description": "Suivi temps réel du skew du coffre HLP et des portefeuilles perps à haut Sharpe.",
+                },
+                {
+                    "slot_id": "pod_sniper",
+                    "pod_code": "hype_hyperevm_sniper",
+                    "name": "HyperEVM Spot Auction & Liquidation Pod",
+                    "archetype": "SPOT_PERP_SNIPER",
+                    "native_venue": "HyperEVM / HyperCore",
+                    "default_weight": 0.10,
+                    "description": "Capture des dislocations entre les enchères Spot HyperEVM et le carnet Perp.",
+                },
+            ],
+            "leaf-sui": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "sui_navi_scallop_carry",
+                    "name": "Navi & Scallop Move Lending Carry",
+                    "archetype": "MOVE_YIELD_CARRY",
+                    "native_venue": "Navi Protocol",
+                    "default_weight": 0.30,
+                    "description": "Portage de taux USDC/SUI sur les marchés monétaires Move et basis SUI.",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "sui_deepbook_clob_momentum",
+                    "name": "DeepBook v3 Sub-400ms CLOB Momentum",
+                    "archetype": "MOVE_CLOB_MOMENTUM",
+                    "native_venue": "DeepBook v3 CLOB",
+                    "default_weight": 0.35,
+                    "description": "Breakout sur le carnet d'ordres central natif DeepBook v3 (finalité Mysticeti <400ms).",
+                },
+                {
+                    "slot_id": "pod_solana_alpha",
+                    "pod_code": "sui_cetus_clmm_alpha",
+                    "name": "Cetus CLMM Whale & Range Rebalancer",
+                    "archetype": "CLMM_WHALE_FLOW",
+                    "native_venue": "Cetus CLMM",
+                    "default_weight": 0.25,
+                    "description": "Suivi des flux de baleines sur SUI-USDC, DEEP-SUI et CETUS-SUI.",
+                },
+                {
+                    "slot_id": "pod_sniper",
+                    "pod_code": "sui_object_pool_sniper",
+                    "name": "Sui Move Atomic Pool Sniper",
+                    "archetype": "MOVE_POOL_SNIPER",
+                    "native_venue": "Cetus / DeepBook v3",
+                    "default_weight": 0.10,
+                    "description": "Entrée atomique sur nouvelles poches de liquidité Move vérifiées.",
+                },
+            ],
+            "leaf-paper-sandbox": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "paper_sim_carry",
+                    "name": "Sandbox Simulated Funding Carry Pod",
+                    "archetype": "PAPER_CARRY",
+                    "native_venue": "Paper Engine Simulator",
+                    "default_weight": 0.35,
+                    "description": "Validation sans risque réel des stratégies de portage delta-neutre.",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "paper_sim_momentum",
+                    "name": "Sandbox Adverse-Selection & OBI Pod",
+                    "archetype": "PAPER_MOMENTUM",
+                    "native_venue": "Paper Engine Simulator",
+                    "default_weight": 0.35,
+                    "description": "Test de robustesse des signaux Ichimoku/Fibonacci/OBI avec modèle de sélection adverse.",
+                },
+                {
+                    "slot_id": "pod_solana_alpha",
+                    "pod_code": "paper_sim_whale_alpha",
+                    "name": "Sandbox Smart-Money Replay Pod",
+                    "archetype": "PAPER_ONCHAIN_ALPHA",
+                    "native_venue": "Paper Engine Simulator",
+                    "default_weight": 0.20,
+                    "description": "Simulation de copie de flux on-chain sur données réelles.",
+                },
+                {
+                    "slot_id": "pod_sniper",
+                    "pod_code": "paper_sim_sniper",
+                    "name": "Sandbox Anti-Rug & Pool Sniper Pod",
+                    "archetype": "PAPER_SNIPER",
+                    "native_venue": "Paper Engine Simulator",
+                    "default_weight": 0.10,
+                    "description": "Banc d'essai des filtres de sécurité HardRiskGate sur nouveaux pools.",
+                },
+            ],
+        }
+
+        if lid in catalog:
+            return catalog[lid][:4]
+
+        slug = lid.replace("leaf-", "")
+        return [
+            {
+                "slot_id": "pod_carry",
+                "pod_code": f"{slug}_staking_yield_carry",
+                "name": f"{chain} Native Yield & Basis Carry",
+                "archetype": "ECOSYSTEM_YIELD_CARRY",
+                "native_venue": v1,
+                "default_weight": 0.45,
+                "description": f"Capture du rendement natif et du basis sur l'écosystème {chain} ({v1}).",
+            },
+            {
+                "slot_id": "pod_momentum",
+                "pod_code": f"{slug}_dex_obi_momentum",
+                "name": f"{chain} Native DEX Orderflow Momentum",
+                "archetype": "ECOSYSTEM_ORDERFLOW_MOMENTUM",
+                "native_venue": v1,
+                "default_weight": 0.35,
+                "description": f"Breakout de volatilité et déséquilibre de carnet sur {chain} ({', '.join(spec.get('exclusive_assets', [])[:2])}).",
+            },
+            {
+                "slot_id": "pod_solana_alpha",
+                "pod_code": f"{slug}_onchain_catalyst_alpha",
+                "name": f"{chain} On-Chain Whale & Catalyst Pod",
+                "archetype": "ECOSYSTEM_ONCHAIN_ALPHA",
+                "native_venue": v2,
+                "default_weight": 0.20,
+                "description": f"Détection de flux on-chain et catalyseurs propres à la blockchain {chain}.",
+            },
+        ][:4]
+
     def _init_leaves(self) -> None:
         now_ms = int(time.time() * 1000)
         initial_weights = self.smart_allocate_by_capital_size(self.total_capital_usd)
@@ -1001,6 +1268,7 @@ class HierarchicalFleetManager:
                 if alloc_usd > 0
                 else f"Veille RSS passive sur {spec['chain']} — aucun capital engagé (économie d'OpEx)."
             )
+            rust_pods = self._build_rust_pods_for_leaf(spec)
             self.leaves[lid] = {
                 **spec,
                 "id": lid,
@@ -1011,6 +1279,9 @@ class HierarchicalFleetManager:
                 "risk_posture": posture,
                 "enabled": alloc_usd > 0 and posture != "HIBERNATION",
                 "execution_engine": ", ".join(spec.get("venues", [])[:2]),
+                "rust_pods": rust_pods,
+                "rust_pods_count": len(rust_pods),
+                "max_rust_pods": 4,
                 "last_price_usd": float(TOKEN_PRICES_USD.get(spec["symbol"], 1.0)),
                 "ta_metrics": dict(spec.get("ta_specific_metrics", {})),
                 "sharpe_ratio": 2.45 if alloc_usd > 0 else 1.65,

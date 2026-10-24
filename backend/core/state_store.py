@@ -775,6 +775,57 @@ class HybridStateStore:
             self.last_backtest_result = result
         return result
 
+    def run_rust_backtest_for_leaf(self, leaf_id: str) -> Dict[str, Any]:
+        """
+        Executes the deterministic Rust `BacktestEngine` (`robotrader-node --leaf-id <leaf_id>`)
+        using the target blockchain's adapted Rust Strategy Pods (1..=4 pods max).
+        """
+        if leaf_id == "leaf-solana":
+            return self.run_rust_backtest()
+
+        repo_root = Path(__file__).resolve().parents[2]
+        engine_dir = repo_root / "engine-rs"
+        debug_bin = engine_dir / "target" / "debug" / "robotrader-node"
+        release_bin = engine_dir / "target" / "release" / "robotrader-node"
+
+        if debug_bin.exists():
+            cmd = [str(debug_bin), "--leaf-id", leaf_id]
+        elif release_bin.exists():
+            cmd = [str(release_bin), "--leaf-id", leaf_id]
+        else:
+            cmd = [
+                "cargo",
+                "run",
+                "--quiet",
+                "--bin",
+                "robotrader-node",
+                "--",
+                "--leaf-id",
+                leaf_id,
+            ]
+
+        proc = subprocess.run(
+            cmd,
+            cwd=str(engine_dir) if engine_dir.exists() else None,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+        result: Dict[str, Any] = json.loads(proc.stdout)
+        result["executions_source"] = "rust_leaf_backtest"
+
+        if leaf_id in self.hierarchy.leaves:
+            with self.hierarchy._lock:
+                self.hierarchy.leaves[leaf_id]["last_rust_backtest"] = {
+                    "net_profit_usd": round(float(result.get("net_profit_usd", 0.0)), 2),
+                    "sharpe_ratio": round(float(result.get("sharpe_ratio", 0.0)), 2),
+                    "win_rate_pct": round(float(result.get("win_rate_pct", 0.0)), 1),
+                    "total_trades": int(result.get("total_trades", 0)),
+                    "pod_pnl_attribution": dict(result.get("pod_pnl_attribution", {})),
+                }
+        return result
+
     @staticmethod
     def _sample_stats(executions: List[Dict[str, Any]], pnl_key: str) -> Dict[str, Any]:
         """Win/loss/flat breakdown of one explicitly named population."""

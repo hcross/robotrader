@@ -95,6 +95,21 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         wings = {item["mempalace_wing"] for item in LEAF_ECOSYSTEM_CATALOG}
         self.assertEqual(len(wings), 26)
 
+        for lid in expected_ids:
+            leaf_state = self.store.hierarchy.leaves[lid]
+            self.assertGreaterEqual(len(leaf_state["rust_pods"]), 1)
+            self.assertLessEqual(len(leaf_state["rust_pods"]), 4)
+
+        btc_bt = self.store.run_rust_backtest_for_leaf("leaf-bitcoin")
+        self.assertEqual(btc_bt["leaf_id"], "leaf-bitcoin")
+        self.assertLessEqual(len(btc_bt["ecosystem_pods"]), 4)
+        self.assertGreater(btc_bt["net_profit_usd"], 0.0)
+
+        eth_bt = self.store.run_rust_backtest_for_leaf("leaf-ethereum")
+        self.assertEqual(eth_bt["leaf_id"], "leaf-ethereum")
+        self.assertEqual(len(eth_bt["ecosystem_pods"]), 4)
+        self.assertGreater(eth_bt["net_profit_usd"], 0.0)
+
         sol_rss = EcosystemRSSAggregator.get_feed_for_agent("leaf-solana")
         btc_rss = EcosystemRSSAggregator.get_feed_for_agent("leaf-bitcoin")
         master_rss = EcosystemRSSAggregator.get_feed_for_agent("master")

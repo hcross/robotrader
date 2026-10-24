@@ -78,6 +78,18 @@ pub struct PodAllocation {
     pub max_slippage_bps: Option<u32>,
 }
 
+/// Metadata describing an ecosystem-specific Rust StrategyPod instance (at most 4 per blockchain).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EcosystemPodSpec {
+    pub slot_id: PodId,
+    pub pod_code: String,
+    pub name: String,
+    pub archetype: String,
+    pub native_venue: String,
+    pub default_weight: f64,
+    pub description: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetOverride {
     pub catalyst_score: f64,

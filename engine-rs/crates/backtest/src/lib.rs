@@ -1,15 +1,19 @@
 use robotrader_common::{
-    AssetOverride, DirectionalBias, ExecutionReport, GlobalRegime, MarketEvent, PodAllocation,
-    PodId, PolicyEnvelope, PortfolioState, SolanaTokenSafety,
+    AssetOverride, DirectionalBias, EcosystemPodSpec, ExecutionReport, GlobalRegime, MarketEvent,
+    PodAllocation, PodId, PolicyEnvelope, PortfolioState, SolanaTokenSafety,
 };
 use robotrader_exec_router::{ExecutionMode, SmartExecutionRouter};
 use robotrader_risk_gate::{HardRiskGate, RiskLimits};
-use robotrader_strategies::default_strategy_pods;
+use robotrader_strategies::{
+    ecosystem_pod_specs, strategy_pods_for_leaf, MAX_PODS_PER_BLOCKCHAIN,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestSummary {
+    pub leaf_id: String,
+    pub ecosystem_pods: Vec<EcosystemPodSpec>,
     pub initial_equity_usd: f64,
     pub final_equity_usd: f64,
     pub net_profit_usd: f64,
@@ -44,7 +48,18 @@ impl BacktestEngine {
         events: &[MarketEvent],
         envelope: &PolicyEnvelope,
     ) -> BacktestSummary {
-        let mut pods = default_strategy_pods();
+        self.run_for_leaf("leaf-solana", events, envelope)
+    }
+
+    pub fn run_for_leaf(
+        &self,
+        leaf_id: &str,
+        events: &[MarketEvent],
+        envelope: &PolicyEnvelope,
+    ) -> BacktestSummary {
+        let mut pods = strategy_pods_for_leaf(leaf_id);
+        pods.truncate(MAX_PODS_PER_BLOCKCHAIN);
+        let ecosystem_pods = ecosystem_pod_specs(leaf_id);
         let mut gate = HardRiskGate::new(self.risk_limits.clone());
         let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
         let mut portfolio = PortfolioState::new(self.initial_equity_usd);
@@ -103,6 +118,8 @@ impl BacktestEngine {
         let sharpe_ratio = compute_sharpe(&trade_returns_pct);
 
         BacktestSummary {
+            leaf_id: leaf_id.to_string(),
+            ecosystem_pods,
             initial_equity_usd: self.initial_equity_usd,
             final_equity_usd: portfolio.current_equity_usd,
             net_profit_usd,
@@ -297,6 +314,152 @@ pub fn benchmark_market_stream() -> (Vec<MarketEvent>, PolicyEnvelope) {
     (events, envelope)
 }
 
+fn leaf_market_profile(leaf_id: &str) -> (&'static str, &'static str, f64, f64) {
+    match leaf_id {
+        "leaf-bitcoin" => ("BTC-USD", "wBTC-BTC", 80_775.0, 1.0),
+        "leaf-ethereum" => ("ETH-USDC", "stETH-ETH", 2_368.0, 0.9997),
+        "leaf-sui" => ("SUI-USDC", "DEEP-SUI", 3.15, 0.085),
+        "leaf-hyperliquid" => ("HYPE-USDC", "PURR-USDC", 24.80, 0.34),
+        "leaf-bnb" => ("BNB-USDT", "CAKE-BNB", 612.0, 0.0042),
+        "leaf-xrp" => ("XRP-RLUSD", "XRP-USDT", 2.38, 2.38),
+        "leaf-ton" => ("TON-USDT", "NOT-TON", 5.45, 0.0014),
+        "leaf-tron" => ("TRX-USDT", "USDT-TRX", 0.24, 1.0),
+        "leaf-avalanche" => ("AVAX-USDC", "sAVAX-AVAX", 28.50, 1.12),
+        "leaf-cosmos" => ("ATOM-USDC", "TIA-USDC", 6.80, 5.20),
+        "leaf-aptos" => ("APT-USDC", "stAPT-APT", 9.40, 1.08),
+        "leaf-chainlink" => ("LINK-USDC", "LINK-ETH", 18.20, 0.0077),
+        "leaf-stacks" => ("STX-BTC", "sBTC-BTC", 1.85, 1.0),
+        "leaf-near" => ("NEAR-USDC", "stNEAR-NEAR", 5.10, 1.18),
+        "leaf-cardano" => ("ADA-USDC", "MIN-ADA", 0.78, 0.042),
+        "leaf-polkadot" => ("DOT-USDC", "vDOT-DOT", 5.60, 1.24),
+        "leaf-dogecoin" => ("DOGE-USDT", "DOGE-USDC", 0.19, 0.19),
+        "leaf-icp" => ("ICP-USDC", "ckBTC-ICP", 9.80, 8_240.0),
+        "leaf-canton" => ("CC-USDC", "USYC-USDC", 0.40, 1.04),
+        "leaf-celo" => ("CELO-cUSD", "cEUR-cUSD", 0.68, 1.08),
+        "leaf-tezos" => ("XTZ-USDC", "tzBTC-XTZ", 1.05, 76_900.0),
+        "leaf-flow" => ("FLOW-USDC", "stFLOW-FLOW", 0.72, 1.14),
+        "leaf-eos" => ("EOS-USDT", "REX-EOS", 0.64, 1.05),
+        "leaf-binance-cex" => ("SOL-USDT", "BTC-USDT", 152.40, 80_775.0),
+        "leaf-paper-sandbox" => ("SOL-USDC", "ETH-USDC", 152.40, 2_368.0),
+        _ => ("SOL-USDT", "JUP-USDT", 152.40, 1.24),
+    }
+}
+
+/// Builds a blockchain-isolated benchmark stream and `PolicyEnvelope` for any `leaf_id`
+/// using its adapted Rust Strategy Pods (`<= 4` pods per blockchain).
+pub fn benchmark_market_stream_for_leaf(leaf_id: &str) -> (Vec<MarketEvent>, PolicyEnvelope) {
+    if leaf_id == "leaf-solana" {
+        return benchmark_market_stream();
+    }
+
+    let base_ts = 1_792_180_000_000u64;
+    let specs = ecosystem_pod_specs(leaf_id);
+    let (primary_sym, secondary_sym, primary_px, secondary_px) = leaf_market_profile(leaf_id);
+
+    let mut pod_allocations = HashMap::new();
+    for s in &specs {
+        pod_allocations.insert(
+            s.slot_id.as_str().to_string(),
+            PodAllocation {
+                enabled: true,
+                capital_weight: s.default_weight,
+                directional_bias: Some(DirectionalBias::LongBias),
+                min_funding_apr: Some(0.12),
+                max_slippage_bps: Some(120),
+            },
+        );
+    }
+
+    let mut asset_overrides = HashMap::new();
+    asset_overrides.insert(
+        primary_sym.to_string(),
+        AssetOverride {
+            catalyst_score: 0.84,
+            bias: DirectionalBias::LongBias,
+            max_leverage: 2.0,
+        },
+    );
+    asset_overrides.insert(
+        secondary_sym.to_string(),
+        AssetOverride {
+            catalyst_score: 0.76,
+            bias: DirectionalBias::LongBias,
+            max_leverage: 1.8,
+        },
+    );
+
+    let envelope = PolicyEnvelope {
+        envelope_id: format!("env_{leaf_id}_pods"),
+        issued_at_ms: base_ts,
+        ttl_seconds: 3_600,
+        global_regime: GlobalRegime::RiskOnHighVol,
+        pod_allocations,
+        asset_overrides,
+    };
+
+    let clean_safety = SolanaTokenSafety {
+        mint_authority_revoked: true,
+        freeze_authority_revoked: true,
+        lp_locked_pct: 95.0,
+        top10_holder_pct: 19.0,
+        tx_simulation_success: true,
+    };
+
+    let mut events = vec![
+        // 1. Pod 1 (Carry): Yield / Basis opportunity on primary pair
+        MarketEvent::FundingSnapshot {
+            timestamp_ms: base_ts + 1_000,
+            symbol: primary_sym.to_string(),
+            spot_price: primary_px,
+            perp_price: primary_px * 1.0022,
+            annualized_funding_apr: 0.24,
+        },
+        // 2. Pod 2 (Momentum): L2 Orderbook Imbalance & Volatility Breakout on primary pair
+        MarketEvent::OrderbookTick {
+            timestamp_ms: base_ts + 2_000,
+            symbol: primary_sym.to_string(),
+            mid_price: primary_px * 1.001,
+            bid_volume_top5: 6_200.0,
+            ask_volume_top5: 2_100.0,
+            cvd_delta: 480_000.0,
+            atr_pct: 1.9,
+            breakout_zscore: 2.35,
+        },
+        // 3. Pod 3 (On-Chain Whale / Arbitrage): Verified accumulation on secondary pair
+        MarketEvent::SolanaSmartMoneySwap {
+            timestamp_ms: base_ts + 3_000,
+            symbol: secondary_sym.to_string(),
+            mint: format!("NativePool::{leaf_id}"),
+            price_usd: secondary_px,
+            whale_wallet_winrate: 0.73,
+            buy_volume_usd: 42_000.0,
+            safety: clean_safety.clone(),
+        },
+        // 4. Pod 1 (Carry): Second yield capture on secondary pair
+        MarketEvent::FundingSnapshot {
+            timestamp_ms: base_ts + 4_000,
+            symbol: secondary_sym.to_string(),
+            spot_price: secondary_px,
+            perp_price: secondary_px * 1.0020,
+            annualized_funding_apr: 0.21,
+        },
+    ];
+
+    if specs.iter().any(|s| s.slot_id == PodId::PodSniper) {
+        events.push(MarketEvent::SolanaPoolLaunch {
+            timestamp_ms: base_ts + 5_000,
+            symbol: primary_sym.to_string(),
+            mint: format!("AtomicPool::{leaf_id}"),
+            initial_liquidity_usd: 58_000.0,
+            creator_rug_count: 0,
+            price_usd: primary_px,
+            safety: clean_safety,
+        });
+    }
+
+    (events, envelope)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,5 +475,54 @@ mod tests {
         assert!(summary.net_profit_usd > 0.0);
         assert!(summary.sharpe_ratio > 2.0);
         assert_eq!(summary.pod_pnl_attribution.len(), 4);
+        assert!(summary.ecosystem_pods.len() <= MAX_PODS_PER_BLOCKCHAIN);
+    }
+
+    #[test]
+    fn test_all_26_blockchains_have_at_most_4_adapted_rust_pods() {
+        let engine = BacktestEngine::default();
+        let all_leaves = [
+            "leaf-solana",
+            "leaf-bitcoin",
+            "leaf-ethereum",
+            "leaf-sui",
+            "leaf-hyperliquid",
+            "leaf-bnb",
+            "leaf-xrp",
+            "leaf-ton",
+            "leaf-tron",
+            "leaf-avalanche",
+            "leaf-cosmos",
+            "leaf-aptos",
+            "leaf-chainlink",
+            "leaf-stacks",
+            "leaf-near",
+            "leaf-cardano",
+            "leaf-polkadot",
+            "leaf-dogecoin",
+            "leaf-icp",
+            "leaf-canton",
+            "leaf-celo",
+            "leaf-tezos",
+            "leaf-flow",
+            "leaf-eos",
+            "leaf-binance-cex",
+            "leaf-paper-sandbox",
+        ];
+
+        for leaf_id in all_leaves {
+            let specs = ecosystem_pod_specs(leaf_id);
+            assert!(
+                !specs.is_empty() && specs.len() <= 4,
+                "Leaf {leaf_id} must have between 1 and 4 Rust pods, got {}",
+                specs.len()
+            );
+
+            let (events, envelope) = benchmark_market_stream_for_leaf(leaf_id);
+            let summary = engine.run_for_leaf(leaf_id, &events, &envelope);
+            assert_eq!(summary.leaf_id, leaf_id);
+            assert!(summary.total_trades >= 3, "Leaf {leaf_id} executed too few trades");
+            assert!(summary.net_profit_usd > 0.0, "Leaf {leaf_id} net profit was non-positive");
+        }
     }
 }

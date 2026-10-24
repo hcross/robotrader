@@ -209,6 +209,20 @@ def liquidate_leaf_positions(leaf_id: str, req: LeafLiquidateRequest) -> Dict[st
     )
 
 
+@app.post("/api/v1/leaf/{leaf_id}/backtest")
+def run_leaf_rust_backtest(leaf_id: str) -> Dict[str, Any]:
+    """
+    Runs the Rust `engine-rs` execution & backtest engine on the target blockchain's
+    adapted Strategy Pods (max 4 pods per blockchain).
+    """
+    bt = state_store.run_rust_backtest_for_leaf(leaf_id)
+    return {
+        "status": "completed",
+        "leaf_id": leaf_id,
+        "summary": bt,
+    }
+
+
 @app.post("/api/v1/openrouter/refill")
 def trigger_openrouter_refill(req: OpenRouterRefillRequest) -> Dict[str, Any]:
     total_pnl = sum(

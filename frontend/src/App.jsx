@@ -13,7 +13,7 @@ const resolveApiBase = () => {
 const API_BASE = resolveApiBase();
 
 const PRIMARY_LEAF_TABS = [
-  { id: 'leaf-solana', label: '☀️ Solana (Purifié)', badge: 'P0' },
+  { id: 'leaf-solana', label: '☀️ Solana', badge: 'P0' },
   { id: 'leaf-bitcoin', label: '₿ Bitcoin', badge: 'P0' },
   { id: 'leaf-ethereum', label: 'Ξ Ethereum', badge: 'P0' },
   { id: 'leaf-hyperliquid', label: '⚡ Hyperliquid', badge: 'P0' },

@@ -17,6 +17,8 @@ const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster 
   const [leafDetail, setLeafDetail] = useState(null);
   const [reflecting, setReflecting] = useState(false);
   const [liquidating, setLiquidating] = useState(false);
+  const [runningRustPods, setRunningRustPods] = useState(false);
+  const [rustBacktestResult, setRustBacktestResult] = useState(null);
   const [showLLMModal, setShowLLMModal] = useState(false);
 
   const hierarchyLeaves = statusData?.hierarchy?.leaves || [];
@@ -36,12 +38,30 @@ const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster 
   }, [apiBase, leafId]);
 
   useEffect(() => {
+    setRustBacktestResult(null);
     fetchDetail();
-  }, [fetchDetail, statusData]);
+  }, [fetchDetail, statusData, leafId]);
 
   const leaf = leafDetail?.leaf || summaryLeaf;
   const rssItems = leafDetail?.rss_feed?.items || [];
   const drawers = leafDetail?.mempalace_drawers || [];
+  const rustPods = (leaf.rust_pods || []).slice(0, 4);
+
+  const handleRunRustPodsBacktest = async () => {
+    setRunningRustPods(true);
+    try {
+      const res = await fetch(`${apiBase}/api/v1/leaf/${leafId}/backtest`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRustBacktestResult(data.summary || null);
+        await fetchDetail();
+      }
+    } finally {
+      setRunningRustPods(false);
+    }
+  };
 
   const handleLeafReflect = async () => {
     setReflecting(true);
@@ -109,7 +129,7 @@ const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster 
               </span>
             </div>
             <h2 className="text-lg font-bold text-white mt-1.5">
-              ☀️ Robot Feuille Solana (`leaf-solana`) — Périmètre Purifié : SOL/USDT, JUP/USDT, RAY/USDT, SOL-DEVNET
+              ☀️ Robot Feuille Solana (`leaf-solana`) — Actifs Exclusifs : SOL/USDT, JUP/USDT, RAY/USDT, SOL-DEVNET
             </h2>
             <p className="text-xs text-gray-300 mt-0.5">
               Aucun trading hors-Solana (BTC et ETH ont été intégralement retirés de cette branche et délégués à leurs
@@ -261,6 +281,128 @@ const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster 
             <div className="text-xs text-gray-200 mt-1 line-clamp-3">{leaf.last_hypothesis}</div>
           </div>
         </div>
+      </div>
+
+      {/* Adapted Rust Strategy Pods (max 4 per blockchain) */}
+      <div className="bg-gray-900 p-5 rounded-xl border border-orange-500/30 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Zap className="w-4 h-4 text-orange-400" />
+                🦀 Pods Stratégiques Rust Adaptés à {leaf.chain} (<code>engine-rs</code> • {rustPods.length}/4 max)
+              </h3>
+              <span className="px-2 py-0.5 rounded bg-orange-500/20 text-orange-300 border border-orange-500/30 text-[10px] font-mono">
+                HardRiskGate &lt;50µs • 0 LLM Hot-Path
+              </span>
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Chaque blockchain supportée dispose de ses propres pods Rust compilés (maximum 4 par écosystème) adaptés à
+              ses venues natives ({(leaf.venues || []).join(', ')}).
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleRunRustPodsBacktest}
+            disabled={runningRustPods}
+            className="px-3.5 py-1.5 rounded-lg bg-orange-600/30 hover:bg-orange-600/50 border border-orange-500/50 text-orange-200 text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            {runningRustPods
+              ? 'Exécution Rust en cours...'
+              : `🦀 Exécuter Replay Rust (${rustPods.length} Pods ${leaf.symbol})`}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {rustPods.map((pod, idx) => {
+            const slotPnl =
+              rustBacktestResult?.pod_pnl_attribution?.[pod.slot_id] ??
+              leaf.last_rust_backtest?.pod_pnl_attribution?.[pod.slot_id];
+            return (
+              <div
+                key={pod.pod_code || idx}
+                className="p-3.5 rounded-lg bg-gray-950/80 border border-gray-800 flex flex-col justify-between gap-2"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span className="px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-300 font-mono text-[10px]">
+                        Pod #{idx + 1}
+                      </span>
+                      {pod.name}
+                    </span>
+                    <span className="text-xs font-mono font-bold text-emerald-400">
+                      {(Number(pod.default_weight || 0) * 100).toFixed(0)}% du capital feuille
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] font-mono text-gray-400">
+                    <span>
+                      Code: <code className="text-orange-300">{pod.pod_code}</code>
+                    </span>
+                    <span>•</span>
+                    <span>
+                      Slot: <code className="text-blue-300">{pod.slot_id}</code>
+                    </span>
+                    <span>•</span>
+                    <span>Venue: {pod.native_venue}</span>
+                  </div>
+                  <p className="text-xs text-gray-300 mt-1.5">{pod.description}</p>
+                </div>
+
+                {slotPnl !== undefined && (
+                  <div className="pt-2 border-t border-gray-800/80 flex items-center justify-between text-[11px] font-mono">
+                    <span className="text-gray-400">Attribution Replay Rust (`engine-rs`) :</span>
+                    <span className={Number(slotPnl) >= 0 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+                      {Number(slotPnl) >= 0 ? '+' : ''}${Number(slotPnl).toFixed(2)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {rustBacktestResult && (
+          <div className="p-3.5 rounded-lg bg-gray-950 border border-orange-500/30 text-xs space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-bold text-orange-300">
+                ✅ Résultat Replay Déterministe Rust (`robotrader-node --leaf-id {leafId}`)
+              </span>
+              <div className="flex items-center gap-3 font-mono">
+                <span className="text-emerald-400 font-bold">
+                  PnL Net : +${Number(rustBacktestResult.net_profit_usd || 0).toFixed(2)}
+                </span>
+                <span className="text-gray-300">
+                  Sharpe : <strong>{Number(rustBacktestResult.sharpe_ratio || 0).toFixed(2)}</strong>
+                </span>
+                <span className="text-gray-300">
+                  Win Rate : <strong>{Number(rustBacktestResult.win_rate_pct || 0).toFixed(1)}%</strong>
+                </span>
+                <span className="text-gray-300">
+                  Trades : <strong>{rustBacktestResult.total_trades}</strong>
+                </span>
+              </div>
+            </div>
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {(rustBacktestResult.executions || []).map((ex, i) => (
+                <div
+                  key={i}
+                  className="flex flex-wrap items-center justify-between gap-2 py-1 border-b border-gray-900 font-mono text-[11px]"
+                >
+                  <span className="text-gray-200">
+                    <strong className="text-orange-300">{ex.symbol}</strong> ({ex.side}) —{' '}
+                    <span className="text-gray-400">{ex.rationale}</span>
+                  </span>
+                  <span className={ex.realized_pnl_usd >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                    {ex.realized_pnl_usd >= 0 ? '+' : ''}${Number(ex.realized_pnl_usd || 0).toFixed(2)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Ecosystem-Specific Technical / On-Chain Tools & Dedicated RSS Feeds */}
