@@ -186,8 +186,13 @@ class TranscriptPalace:
                         data = json.loads(line)
                     except Exception:
                         continue
-                    if agent and str(data.get("agent", "")) != agent:
-                        continue
+                    raw_agent = str(data.get("agent", ""))
+                    if agent:
+                        if agent == "Leaf/leaf-solana":
+                            if raw_agent not in ("Leaf/leaf-solana", "Orchestrator/CognitiveLoop"):
+                                continue
+                        elif raw_agent != agent:
+                            continue
                     if model and str(data.get("model_used", "") or data.get("model_requested", "")) != model:
                         continue
                     if thinking_depth and str(data.get("thinking_depth", "")) != thinking_depth:
@@ -199,6 +204,46 @@ class TranscriptPalace:
         total = len(all_items)
         page = all_items[offset : offset + limit]
         return page, total
+
+    def list_facets(self) -> Dict[str, List[str]]:
+        """Returns distinct agents, models, and thinking_depths across the full transcript ledger."""
+        agents: List[str] = []
+        models: List[str] = []
+        depths: List[str] = []
+        seen_a: set[str] = set()
+        seen_m: set[str] = set()
+        seen_d: set[str] = set()
+
+        def _collect(item: Dict[str, Any]) -> None:
+            a = str(item.get("agent", "") or "")
+            if a and a not in seen_a:
+                seen_a.add(a)
+                agents.append(a)
+            m = str(item.get("model_used", "") or item.get("model_requested", "") or "")
+            if m and m not in seen_m:
+                seen_m.add(m)
+                models.append(m)
+            d = str(item.get("thinking_depth", "") or "")
+            if d and d not in seen_d:
+                seen_d.add(d)
+                depths.append(d)
+
+        for e in self.entries:
+            _collect(e.to_dict())
+
+        if self.storage_path.exists():
+            try:
+                for line in reversed(self.storage_path.read_text(encoding="utf-8").splitlines()):
+                    if not line.strip():
+                        continue
+                    try:
+                        _collect(json.loads(line))
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        return {"agents": agents, "models": models, "depths": depths}
 
     def format_recent_transcripts(
         self,

@@ -950,7 +950,8 @@ class HierarchicalFleetManager:
         self.master_interval_sec = 900  # 15-min macro reflection cadence (longer than leaf agents)
         now_ms = int(time.time() * 1000)
         self.last_master_reflection_ms = now_ms
-        self.next_master_reflection_ms = now_ms + self.master_interval_sec * 1000
+        # Run initial Master Orchestrator reflection 8s after boot so its transcript is immediately available
+        self.next_master_reflection_ms = now_ms + 8_000
 
         self.total_capital_usd: float = 25_000.0
         self.min_dry_powder_ratio: float = 0.20  # Keep >= 20% dry powder for safety & opportunities

@@ -92,7 +92,9 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
   const [masterReflecting, setMasterReflecting] = useState(false);
   const [refillingOr, setRefillingOr] = useState(false);
   const [showLLMModal, setShowLLMModal] = useState(false);
+  const [llmModalAgentFilter, setLlmModalAgentFilter] = useState('MasterOrchestrator/MacroLoop');
   const [tierFilter, setTierFilter] = useState('ALL');
+  const masterDrawers = master.palace_drawers || [];
 
   const handleDeposit = async (e) => {
     e.preventDefault();
@@ -268,11 +270,25 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
             </button>
             <button
               type="button"
-              onClick={() => setShowLLMModal(true)}
+              onClick={() => {
+                setLlmModalAgentFilter('MasterOrchestrator/MacroLoop');
+                setShowLLMModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-purple-950/60 hover:bg-purple-900/70 text-purple-200 border border-purple-500/40 text-xs font-semibold transition"
+            >
+              <ScrollText className="w-3.5 h-3.5 text-purple-300" />
+              Transcripts Orchestrateur
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLlmModalAgentFilter('');
+                setShowLLMModal(true);
+              }}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 text-xs transition"
             >
-              <ScrollText className="w-3.5 h-3.5 text-purple-400" />
-              Transcripts MemPalace
+              <ScrollText className="w-3.5 h-3.5 text-gray-400" />
+              Tous les Transcripts
             </button>
           </div>
         </div>
@@ -793,10 +809,79 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
         </div>
       </div>
 
+      {/* Master Orchestrator MemPalace Drawers (wing=master_orchestrator) & Cross-Wing Recall */}
+      <div className="bg-gray-900 p-5 rounded-xl border border-indigo-500/30 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-3">
+          <div>
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-indigo-400" />
+              Journal de Réflexion MemPalace de l&apos;Orchestrateur Maître (<code>wing=master_orchestrator</code>)
+            </h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Historique des thèses macro long terme de l&apos;Orchestrateur et lecture transversale de tous les
+              MemPalaces feuilles.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setLlmModalAgentFilter('MasterOrchestrator/MacroLoop');
+              setShowLLMModal(true);
+            }}
+            className="px-3 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <ScrollText className="w-3.5 h-3.5" />
+            Voir les Prompts &amp; Completions Bruts de l&apos;Orchestrateur
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-300">
+              Dernières Thèses de l&apos;Orchestrateur Maître ({masterDrawers.length})
+            </div>
+            {masterDrawers.slice(0, 3).map((drw) => (
+              <div
+                key={drw.drawer_id}
+                className="p-3 rounded-lg bg-gray-950/80 border border-indigo-500/20 text-xs space-y-1"
+              >
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-mono text-indigo-300 font-semibold">
+                    👑 {drw.model_used} • {drw.thesis_continuity}
+                  </span>
+                  <span className="text-gray-400 font-mono">
+                    {drw.timestamp_ms ? new Date(drw.timestamp_ms).toLocaleTimeString('fr-FR') : ''}
+                  </span>
+                </div>
+                <div className="text-gray-200 font-medium">{drw.hypothesis}</div>
+                {drw.panorama_summary && (
+                  <div className="text-[11px] text-gray-400">Macro : {drw.panorama_summary}</div>
+                )}
+                {drw.invalidation_condition && (
+                  <div className="text-[11px] text-amber-300/90">
+                    Invalidation : {drw.invalidation_condition}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-purple-300">
+              Synthèse Transversale des MemPalaces des Agents Feuilles (Cross-Wing Recall)
+            </div>
+            <pre className="text-[11px] font-mono whitespace-pre-wrap break-words bg-gray-950/90 text-gray-300 p-3 rounded-lg border border-gray-800 max-h-56 overflow-y-auto">
+              {master.cross_wing_digest || 'Aucune synthèse inter-ailes disponible.'}
+            </pre>
+          </div>
+        </div>
+      </div>
+
       <LLMInspectionModal
         apiBase={apiBase}
         open={showLLMModal}
         onClose={() => setShowLLMModal(false)}
+        initialAgentFilter={llmModalAgentFilter}
       />
     </div>
   );

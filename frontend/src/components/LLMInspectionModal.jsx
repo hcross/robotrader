@@ -26,15 +26,47 @@ const statusBadge = (call) => {
   return <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">parse fail</span>;
 };
 
-const kindBadge = (kind) => (
-  <span
-    className={`px-1.5 py-0.5 rounded ${
-      kind === 'reflection' ? 'bg-purple-500/20 text-purple-300' : 'bg-blue-500/20 text-blue-300'
-    }`}
-  >
-    {kind}
-  </span>
-);
+const kindBadge = (call) => {
+  const kind = call.kind;
+  const agent = call.agent || '';
+  if (kind === 'master_reflection' || agent === 'MasterOrchestrator/MacroLoop') {
+    return (
+      <span className="px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200 border border-indigo-400/40 font-semibold text-[10px]">
+        👑 Orchestrateur Maître
+      </span>
+    );
+  }
+  if (agent === 'Leaf/leaf-solana' || agent === 'Orchestrator/CognitiveLoop') {
+    return (
+      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold text-[10px]">
+        ☀️ Agent Solana
+      </span>
+    );
+  }
+  if (kind === 'leaf_reflection' || agent.startsWith('Leaf/')) {
+    return (
+      <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold text-[10px]">
+        🌿 {agent.replace('Leaf/', '') || kind}
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`px-1.5 py-0.5 rounded ${
+        kind === 'reflection' ? 'bg-purple-500/20 text-purple-300' : 'bg-blue-500/20 text-blue-300'
+      }`}
+    >
+      {kind}
+    </span>
+  );
+};
+
+const formatAgentDisplay = (agent) => {
+  if (agent === 'MasterOrchestrator/MacroLoop') return 'MasterOrchestrator/MacroLoop (Portefeuille Maître)';
+  if (agent === 'Orchestrator/CognitiveLoop') return 'Leaf/leaf-solana (Solana • historique)';
+  if (agent === 'Leaf/leaf-solana') return 'Leaf/leaf-solana (Solana)';
+  return agent;
+};
 
 const PromptBlock = ({ label, text }) => (
   <div className="space-y-1">
@@ -80,23 +112,34 @@ const ToolRow = ({ tool }) => (
   </div>
 );
 
-const LLMInspectionModal = ({ apiBase = 'http://localhost:8000', open, onClose }) => {
+const LLMInspectionModal = ({
+  apiBase = 'http://localhost:8000',
+  open,
+  onClose,
+  initialAgentFilter = '',
+}) => {
   const [calls, setCalls] = useState([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [triggeringMaster, setTriggeringMaster] = useState(false);
   const [error, setError] = useState(null);
-  const [agentFilter, setAgentFilter] = useState('');
+  const [agentFilter, setAgentFilter] = useState(initialAgentFilter || '');
   const [modelFilter, setModelFilter] = useState('');
   const [depthFilter, setDepthFilter] = useState('');
   const [expanded, setExpanded] = useState({});
   const [knownValues, setKnownValues] = useState({ agents: [], models: [], depths: [] });
 
   const reqSeqRef = useRef(0);
-  const startedRef = useRef(false);
+
+  useEffect(() => {
+    if (open && initialAgentFilter !== undefined) {
+      setAgentFilter(initialAgentFilter);
+    }
+  }, [open, initialAgentFilter]);
 
   // Anti-stale guard: only the latest fetch may mutate state (repo idiom of the 4s poll).
-  const loadCalls = async (nextOffset, { resetPage = false } = {}) => {
+  const loadCalls = async (nextOffset) => {
     const seq = ++reqSeqRef.current;
     setLoading(true);
     setError(null);
@@ -111,23 +154,53 @@ const LLMInspectionModal = ({ apiBase = 'http://localhost:8000', open, onClose }
       const res = await fetch(`${apiBase}/api/v1/llm/calls?${params.toString()}`);
       const payload = await res.json();
       if (seq !== reqSeqRef.current) return; // stale response
-      setCalls(payload.calls || []);
+      const callList = payload.calls || [];
+      setCalls(callList);
       setTotal(payload.total || 0);
       setOffset(nextOffset);
 
-      // Cumulative option inventory (values observed across queries, first query broad).
-      if (!startedRef.current) {
-        startedRef.current = true;
-        setKnownValues({
-          agents: [...new Set((payload.calls || []).map((c) => c.agent).filter(Boolean))],
-          models: [...new Set((payload.calls || []).map((c) => c.model_used || c.model_requested).filter(Boolean))],
-          depths: [...new Set((payload.calls || []).map((c) => c.thinking_depth).filter(Boolean))],
-        });
-      }
+      const facets = payload.facets || {};
+      setKnownValues((prev) => ({
+        agents: [
+          ...new Set([
+            'MasterOrchestrator/MacroLoop',
+            'Leaf/leaf-solana',
+            ...prev.agents,
+            ...(facets.agents || []),
+            ...callList.map((c) => c.agent).filter(Boolean),
+          ]),
+        ],
+        models: [
+          ...new Set([
+            ...prev.models,
+            ...(facets.models || []),
+            ...callList.map((c) => c.model_used || c.model_requested).filter(Boolean),
+          ]),
+        ],
+        depths: [
+          ...new Set([
+            ...prev.depths,
+            ...(facets.depths || []),
+            ...callList.map((c) => c.thinking_depth).filter(Boolean),
+          ]),
+        ],
+      }));
     } catch (exc) {
       if (seq === reqSeqRef.current) setError(String(exc));
     } finally {
       if (seq === reqSeqRef.current) setLoading(false);
+    }
+  };
+
+  const handleTriggerMasterReflection = async () => {
+    setTriggeringMaster(true);
+    try {
+      await fetch(`${apiBase}/api/v1/master/reflect`, { method: 'POST' });
+      await loadCalls(0);
+    } catch (exc) {
+      setError(String(exc));
+    } finally {
+      setTriggeringMaster(false);
     }
   };
 
@@ -177,6 +250,15 @@ const LLMInspectionModal = ({ apiBase = 'http://localhost:8000', open, onClose }
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={handleTriggerMasterReflection}
+              disabled={triggeringMaster}
+              className="px-2.5 py-1 rounded bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-xs font-semibold flex items-center gap-1 disabled:opacity-50"
+              title="Lancer immédiatement un cycle de réflexion de l'Orchestrateur Maître (Kimi K3.1 Pro)"
+            >
+              👑 {triggeringMaster ? 'Réflexion Orchestrateur…' : '+ Réflexion Orchestrateur'}
+            </button>
+            <button
+              type="button"
               onClick={() => loadCalls(offset)}
               className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs flex items-center gap-1"
               title="Rafraîchir"
@@ -188,6 +270,29 @@ const LLMInspectionModal = ({ apiBase = 'http://localhost:8000', open, onClose }
               <X className="w-4 h-4" />
             </button>
           </div>
+        </div>
+
+        {/* Quick Hierarchy Filter Tabs */}
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-gray-950/60 border-b border-gray-800 text-xs">
+          <span className="text-[11px] text-gray-400 font-medium mr-1">Vue rapide :</span>
+          {[
+            { id: '', label: 'Tous les Transcripts' },
+            { id: 'MasterOrchestrator/MacroLoop', label: '👑 Orchestrateur Maître (Kimi K3.1 Pro)' },
+            { id: 'Leaf/leaf-solana', label: '☀️ Agent Feuille Solana (leaf-solana)' },
+          ].map((tab) => (
+            <button
+              key={tab.id || 'all'}
+              type="button"
+              onClick={() => setAgentFilter(tab.id)}
+              className={`px-2.5 py-1 rounded-md border text-xs font-medium transition ${
+                agentFilter === tab.id
+                  ? 'bg-indigo-600/30 border-indigo-400 text-white shadow-sm'
+                  : 'bg-gray-800/80 border-gray-700 text-gray-300 hover:bg-gray-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-gray-800">
@@ -263,8 +368,17 @@ const LLMInspectionModal = ({ apiBase = 'http://localhost:8000', open, onClose }
           )}
           {calls.map((call) => {
             const isOpen = expanded[call.entry_id];
+            const isMaster =
+              call.agent === 'MasterOrchestrator/MacroLoop' || call.kind === 'master_reflection';
             return (
-              <div key={call.entry_id} className="bg-gray-800/60 rounded border border-gray-700/80">
+              <div
+                key={call.entry_id}
+                className={`rounded border ${
+                  isMaster
+                    ? 'bg-indigo-950/25 border-indigo-500/40'
+                    : 'bg-gray-800/60 border-gray-700/80'
+                }`}
+              >
                 <button
                   type="button"
                   onClick={() => setExpanded((prev) => ({ ...prev, [call.entry_id]: !prev[call.entry_id] }))}
@@ -276,10 +390,12 @@ const LLMInspectionModal = ({ apiBase = 'http://localhost:8000', open, onClose }
                   <span className="font-mono text-xs text-gray-200">
                     {new Date(call.timestamp_ms).toLocaleTimeString('fr-FR')}
                   </span>
-                  {kindBadge(call.kind)}
-                  <span className="text-xs text-gray-300 font-medium">{call.agent}</span>
-                  <span className="text-[10px] font-mono text-gray-500">{call.model_used || call.model_requested}</span>
-                  <span className="text-[10px] text-gray-500 font-mono">{call.thinking_depth}</span>
+                  {kindBadge(call)}
+                  <span className="text-xs text-gray-200 font-medium">
+                    {formatAgentDisplay(call.agent)}
+                  </span>
+                  <span className="text-[10px] font-mono text-gray-400">{call.model_used || call.model_requested}</span>
+                  <span className="text-[10px] text-gray-400 font-mono">{call.thinking_depth}</span>
                   {statusBadge(call)}
                   <span className="ml-auto flex items-center gap-3 font-mono text-[10px] text-gray-400">
                     <span title="Tokens prompt / completion">

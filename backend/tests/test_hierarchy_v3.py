@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from backend.agents.orchestrator import OrchestratorAgent
 from backend.core.hierarchy import (
@@ -10,13 +12,26 @@ from backend.core.hierarchy import (
 )
 from backend.core.memory_palace import StrategyMemoryPalace
 from backend.core.state_store import HybridStateStore
+from backend.core.transcript_palace import transcript_palace
 from backend.tools.rss_tools import EcosystemRSSAggregator
 
 
 class TestHierarchicalArchitectureV3(unittest.TestCase):
     def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._orig_transcript_path = transcript_palace.storage_path
+        self._orig_transcript_entries = list(transcript_palace.entries)
+        transcript_palace.storage_path = Path(self._tmpdir.name) / "transcript.jsonl"
+        transcript_palace.entries = []
+
         self.store = HybridStateStore()
+        self.store.palace.storage_path = Path(self._tmpdir.name) / "palace.jsonl"
         self.orchestrator = OrchestratorAgent(store=self.store)
+
+    def tearDown(self) -> None:
+        transcript_palace.storage_path = self._orig_transcript_path
+        transcript_palace.entries = self._orig_transcript_entries
+        self._tmpdir.cleanup()
 
     def test_solana_leaf_purification_excludes_non_solana_assets(self) -> None:
         """
@@ -200,6 +215,23 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
             limit=5, wing="master_orchestrator"
         )
         self.assertGreaterEqual(len(master_drawers), 1)
+
+        sol_res = self.orchestrator.run_strategic_reflection(
+            force=True, trigger_source="UNIT_TEST"
+        )
+        self.assertEqual(sol_res["status"], "completed")
+
+        from backend.core.transcript_palace import transcript_palace
+
+        facets = transcript_palace.list_facets()
+        self.assertIn("MasterOrchestrator/MacroLoop", facets["agents"])
+        self.assertIn("Leaf/leaf-solana", facets["agents"])
+
+        master_calls, master_total = transcript_palace.list_entries(
+            agent="MasterOrchestrator/MacroLoop"
+        )
+        self.assertGreaterEqual(master_total, 1)
+        self.assertEqual(master_calls[0]["kind"], "master_reflection")
 
     def test_profit_gated_openrouter_auto_refill(self) -> None:
         """

@@ -190,6 +190,17 @@ class BaseWarmAgent:
                     }
                 )
                 if not content:
+                    if finish_reason == "length":
+                        return CallResult(
+                            "",
+                            model_slug,
+                            p_tok,
+                            c_tok,
+                            int((time.perf_counter() - total_start) * 1000),
+                            error="empty_content_truncated",
+                            finish_reason=finish_reason,
+                            truncated=True,
+                        )
                     return None
                 return CallResult(
                     str(content).strip(),
@@ -238,11 +249,16 @@ class BaseWarmAgent:
                 max(max_tokens * TRUNCATION_ESCALATION_FACTOR, eff_floor),
             )
             if escalated <= max_tokens:
+                if not result.raw_resp:
+                    continue
                 return finish(result)
             retry = attempt(model_slug, escalated, "escalated")
+            chosen = retry if (retry and retry.raw_resp) else (result if result.raw_resp else None)
+            if chosen is None:
+                continue
             # Keep the retry even when still truncated: it is at least as complete
             # as the first attempt, and `truncated` stays visible to the caller.
-            return finish(retry or result)
+            return finish(chosen)
 
         return CallResult(
             None,

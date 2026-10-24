@@ -292,6 +292,8 @@ class OrchestratorAgent(BaseWarmAgent):
 
             reflection_meta = {
                 "trigger_source": trigger_source,
+                "leaf_id": "leaf-solana",
+                "wing": "leaf_solana",
                 "base_interval_sec": base_interval,
                 "urgency_level": urgency,
                 "output_contract": output_contract,
@@ -315,7 +317,7 @@ class OrchestratorAgent(BaseWarmAgent):
                 if p_tok > 0 or c_tok > 0:
                     self.cost_guard.record_usage(
                         {
-                            "agent": "Orchestrator/CognitiveLoop",
+                            "agent": "Leaf/leaf-solana",
                             "model": used_model,
                             "prompt_tokens": p_tok,
                             "completion_tokens": c_tok,
@@ -323,8 +325,8 @@ class OrchestratorAgent(BaseWarmAgent):
                     )
                 transcript_palace.add_entry(
                     record_llm_call(
-                        agent="Orchestrator/CognitiveLoop",
-                        kind="reflection",
+                        agent="Leaf/leaf-solana",
+                        kind="leaf_reflection",
                         thinking_depth=thinking_depth,
                         model_requested=model_key,
                         result=result,
@@ -341,8 +343,8 @@ class OrchestratorAgent(BaseWarmAgent):
                 # inspection shows the skipped cycle instead of an opaque silence.
                 transcript_palace.add_entry(
                     record_llm_call(
-                        agent="Orchestrator/CognitiveLoop",
-                        kind="reflection",
+                        agent="Leaf/leaf-solana",
+                        kind="leaf_reflection",
                         thinking_depth=thinking_depth,
                         model_requested=model_key,
                         result=CallResult(None, model_key, 0, 0, 0, error="llm_skipped_budget"),
@@ -627,10 +629,10 @@ class OrchestratorAgent(BaseWarmAgent):
                     user_prompt=user_prompt,
                     system_prompt=sys_prompt,
                     preferred_model=master_model,
-                    max_tokens=700,
+                    max_tokens=2200,
                     temperature=0.2,
-                    escalation_floor=900,
-                    max_escalation_tokens=1100,
+                    escalation_floor=2800,
+                    max_escalation_tokens=3600,
                 )
                 used_model = result.model_used
                 p_tok = result.prompt_tokens
@@ -661,7 +663,27 @@ class OrchestratorAgent(BaseWarmAgent):
                             {"name": "fetch_macro_rss", "duration_ms": 12, "ok": True, "error": ""},
                             {"name": "recall_all_leaf_mempalaces", "duration_ms": 4, "ok": True, "error": ""},
                         ],
-                        meta={"trigger_source": trigger_source, "refill_check": refill_check.get("status")},
+                        meta={"trigger_source": trigger_source, "wing": "master_orchestrator", "refill_check": refill_check.get("status")},
+                    )
+                )
+            else:
+                transcript_palace.add_entry(
+                    record_llm_call(
+                        agent="MasterOrchestrator/MacroLoop",
+                        kind="master_reflection",
+                        thinking_depth="MASTER_LONG_TERM",
+                        model_requested=master_model,
+                        result=CallResult(None, master_model, 0, 0, 0, error="llm_skipped_budget"),
+                        system_prompt=sys_prompt,
+                        user_prompt=user_prompt,
+                        parsed_ok=False,
+                        cost_usd=0.0,
+                        tool_calls=[
+                            {"name": "fetch_macro_rss", "duration_ms": 12, "ok": True, "error": ""},
+                            {"name": "recall_all_leaf_mempalaces", "duration_ms": 4, "ok": True, "error": ""},
+                        ],
+                        meta={"trigger_source": trigger_source, "wing": "master_orchestrator", "refill_check": refill_check.get("status")},
+                        status="llm_skipped_budget",
                     )
                 )
 

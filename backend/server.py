@@ -244,7 +244,13 @@ def list_llm_calls(
         model=model or None,
         thinking_depth=depth or None,
     )
-    return {"calls": page, "total": total, "offset": offset, "limit": limit}
+    return {
+        "calls": page,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "facets": transcript_palace.list_facets(),
+    }
 
 
 @app.post("/api/v1/cognitive/reflect")

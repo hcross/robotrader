@@ -282,10 +282,15 @@ class HybridStateStore:
         and computes Ichimoku, RSI(14), Fibonacci levels, Bollinger/ATR, and Social Panorama.
         Returns `tool_timings` (per tool-call wall-clock, ms) for transcript instrumentation.
         """
-        from ..tools.exchange_tools import BinanceTool
         from ..tools.ta_tools import SocialMacroPanoramaTool, TechnicalAnalysisTool
 
-        binance = BinanceTool()
+        binance = None
+        try:
+            from ..tools.exchange_tools import BinanceTool
+
+            binance = BinanceTool()
+        except Exception:
+            binance = None
         snapshots: Dict[str, Dict[str, Any]] = {}
         tool_timings: List[Dict[str, Any]] = []
         fallback_bases = {"SOL/USDT": 182.5, "JUP/USDT": 1.18, "RAY/USDT": 2.45}
@@ -293,6 +298,8 @@ class HybridStateStore:
             fetch_start = time.perf_counter()
             candles = None
             try:
+                if binance is None:
+                    raise RuntimeError("ccxt_unavailable_using_solana_dex_synth")
                 candles = binance.exchange.fetch_ohlcv(sym, timeframe="15m", limit=60)
                 tool_timings.append(
                     {"name": f"fetch_ohlcv:{sym}", "duration_ms": int((time.perf_counter() - fetch_start) * 1000), "ok": True, "error": ""}
