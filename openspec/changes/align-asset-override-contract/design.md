@@ -55,8 +55,9 @@ required by the R2 follow-up:
 | Rust fixtures | `engine-rs/crates/backtest/src/lib.rs` | `AssetOverride` and `OrderbookTick` constructors; optional values stay absent. |
 | Python contract | `backend/core/schemas.py` | Resolve the TTL from the contract file; safe-baseline constructor uses it. |
 | Python paper model | `backend/core/state_store.py` | Short RSI threshold uses `min_rsi_short`. |
-| Tests | `engine-rs/crates/common/tests/`, `engine-rs/crates/strategies/tests/`, `backend/tests/` | Rust contract and pod tests, Python round-trip, ingestion, TTL check. |
-| CI | `.github/workflows/ci.yml` | Include `contracts/**` and run the single-source check. |
+| Tests | `engine-rs/crates/common/tests/`, `engine-rs/crates/strategies/tests/`, `backend/tests/` | Rust contract and pod tests, Python round-trip, ingestion, TTL check, no-codegen guard. |
+| CI | `.github/workflows/ci.yml` | Include `contracts/**`, install Rust, prebuild `robotrader-node`, run the single-source check. |
+| Docker | `Dockerfile.backend` | Copy `contracts/` into the builder (`/build/contracts`) and the runtime (`/app/contracts`). |
 | Docs | `AGENTS.md`, `README.md` | List all eleven keys, optional `rsi_14`, strict decode. |
 
 No Redis key, REST/WS payload, database schema, vault path, or dependency
@@ -170,7 +171,11 @@ exclusive, so at most one intent is emitted per event.
 `OBI <= -t` for a short each imply the magnitude condition, while the branch
 sign prevents a long from passing on strongly negative OBI (or a short on
 strongly positive OBI). The directional form therefore strengthens, and does
-not contradict, the SPEC magnitude wording.
+not contradict, the SPEC magnitude wording. Task 6.2 pins the sign asymmetry
+explicitly: a long with `OBI == -t` and a short with `OBI == +t` must emit no
+intent. No spec clarification is escalated, because every approved scenario
+remains satisfied and the directional rule is the implementation of the
+magnitude condition.
 
 The rationale keeps its current prefix and appends `RSI=INACTIVE` when an
 override exists and `rsi_14` is absent, or `RSI={:.1}` when the value is present.
@@ -197,12 +202,21 @@ SAFE_BASELINE_TTL_SECONDS=900
   skipping `.git/`, `target/`, `node_modules/`, `.worktrees/`, `openspec/`,
   `docs/`, and `.sdlc/`, and scans code and config files only (`.conf`, `.cfg`,
   `.toml`, `.yaml`, `.yml`, `.json`, `.env`, `.rs`, `.py`, `.sh`); Markdown is
-  excluded so plan and documentation examples are not declarations. It treats a
-  declaration as an occurrence of the identifier followed by `=` or `:` and a
-  numeric literal. It requires exactly one such declaration, in
-  `<root>/contracts/policy_contract.conf`, and exits non-zero naming the
-  duplicate file otherwise. References such as the Rust constant binding and the
-  Python resolution call are not numeric declarations and are not flagged.
+  excluded so plan and documentation examples are not declarations. It excludes
+  itself, strips `#` and `//` line comments and Python triple-quoted docstrings
+  before matching, and treats a declaration as an occurrence of the identifier
+  followed by `=` or `:` and a numeric literal. It requires exactly one such
+  declaration, in `<root>/contracts/policy_contract.conf`, and exits non-zero
+  naming the duplicate file otherwise. References such as the Rust constant
+  binding and the Python resolution call are not numeric declarations and are
+  not flagged. The contract comment names both runtimes but never repeats the
+  assignment.
+- Exemptions are explicit, not implicit: the check carries
+  `EXEMPT_DEFAULTS = {("backend/core/schemas.py", "from_dict", 900),
+  ("backend/core/schemas.py", "default_active", 900)}` and reports that list,
+  and `backend/tests/test_contract_single_source.py` asserts both exemptions
+  still equal the contract value. The identifier-only predicate would not flag a
+  bare `900`, so the test is what keeps the exemption honest.
 - `backend/tests/test_contract_single_source.py` runs the check against the real
   root and against a temporary root containing a copy of the contract plus a
   second declaration, asserting exit 0 and named failure respectively.
@@ -247,8 +261,8 @@ and `rsi_14` presence and absence.
 | **The RSI guard is inactive until a warm-path producer exists.** Overbought or oversold entries can pass when `rsi_14` is absent. -> `OrderIntent.rationale` carries `RSI=INACTIVE`, making the bypass observable; the producer is a documented follow-up. The guard activates automatically once a producer supplies the field. |
 | **TP/SL defaults become much tighter for override-bearing symbols.** `0.45%` and `0.30%` replace the ATR-derived values; no current code enforces them, so the backtest PnL is unchanged. -> The values are pinned by tests and documented as intent-only until issue #4. Issue #4 must revisit whether the bps defaults are appropriate once enforcement lands. |
 | **The compile-time contract scan is fragile if the file format changes.** A malformed or moved `contracts/policy_contract.conf` fails the build or the check. -> A unit test asserts the parsed constant equals `900`, the check names the contract file, and `contracts/**` is in the CI path filter. |
-| **The Python round-trip test depends on a Rust build.** A cold CI job compiles `robotrader-node` inside the Python suite. -> The test uses the existing debug binary when present and otherwise `cargo run` with a bounded timeout, mirroring the existing bridge test. Task 1.4 installs the stable Rust toolchain in the Python CI job so the test runs there instead of failing or being skipped. |
-| **Backtest bridge counts drift because new gates change momentum entries.** The Python bridge test asserts `total_trades == 6`, `rejected_orders == 1`, and `total_trades == 4`. -> Fixtures leave all optional override fields absent, so the OBI threshold is relaxed but the existing OBI values still pass, RSI is inactive, and no zone or invalidation gate applies. The TP/SL values are carried on the intent but the router computes PnL from `expected_edge_bps`, so counts and profit are preserved. Re-baseline only with the Rust backtest output attached as evidence. |
+| **The Python round-trip test depends on a Rust build.** A cold CI job compiles `robotrader-node` inside the Python suite. -> Task 1.4 installs the stable Rust toolchain with `Swatinem/rust-cache` and prebuilds `cargo build --bin robotrader-node` before the Python tests, so `engine-rs/target/debug/robotrader-node` exists. Task 6.4 uses that path first and sets a 300 s timeout for the `cargo run` fallback, covering a cold build instead of the 30 s bridge timeout. |
+| **Backtest bridge counts drift because new gates change momentum entries.** The Python bridge test asserts `total_trades == 6`, `rejected_orders == 1`, and `total_trades == 4`. -> The two paths differ but agree in effect: the four Rust fixtures set all optional override fields to `None`, while the Python bridge (`PolicyEnvelope.default_active()`) emits explicit defaults through `to_dict()` (`entry_obi_threshold=0.08`, `max_rsi_long=70.0`, `min_rsi_short=30.0`, `take_profit_bps=45.0`, `stop_loss_bps=30.0`, and `None` USD zones). In both paths the effective OBI threshold is 0.08, the existing OBI values still pass, RSI is inactive because `rsi_14` is absent, no zone or invalidation gate applies, and the router computes PnL from `expected_edge_bps`. Counts and profit are preserved. Task 6.3 pins the Python defaults; re-baseline only with the Rust backtest output attached as evidence. |
 | **A persisted Redis policy blob contains an unknown key.** Python `from_dict` constructs `AssetOverride(**v)` and raises on unknown keys. -> The in-repo producer emits only declared keys; the warm path republishes a fresh envelope on startup and falls back to the safe baseline on expiry. No Redis key or TTL shape changes, so rollback needs no data repair. |
 | **Documentation keeps advertising the old seven-rule contract.** `AGENTS.md` and `README.md` omit `min_rsi_short` today. -> Both are explicit DEV deliverables and list all eleven keys, strict decoding, and the optional `rsi_14`. |
 
@@ -277,7 +291,11 @@ Deployment order:
    pass at the PR head.
 2. Merge, then rebuild both runtimes together with `docker compose up --build -d`
    (single monorepo image; Rust binary and Python backend ship from the same
-   commit).
+   commit). `Dockerfile.backend` must copy `contracts/` to `/build/contracts`
+   before `cargo build` (the `include_str!` path) and to `/app/contracts` in the
+   runtime stage (the Python import path). The compose bind mount
+   `./backend:/app/backend` does not shadow `/app/contracts`, so the baked
+   contract file stays visible under uvicorn.
 3. No Redis migration: no key, TTL, or payload-shape change. The warm path
    republishes the active envelope on startup; expiry still falls back to the
    safe baseline.
@@ -292,9 +310,12 @@ Rollback (concrete):
 2. `docker compose up --build -d` to rebuild the Rust binary and Python backend
    from the reverted commit.
 3. No data repair: Redis holds no new key or shape, and no migration ran.
-4. Verify the reverted binary accepts the still-current Python envelope:
+4. Verify the reverted binary and image still resolve the contract file:
    `engine-rs/target/debug/robotrader-node --policy-json "$(python3 -c '...')"`
-   exits 0. Old Rust ignores the eight extra keys.
+   exits 0, and `docker compose run --rm --no-deps backend python -c
+   "from backend.core.schemas import SAFE_BASELINE_TTL_SECONDS"` exits 0. Old
+   Rust ignores the eight extra keys; the reverted Python ignores the new
+   contract file.
 5. Restore service by re-running the backtest bridge test and
    `curl -fsS http://localhost:8000/api/v1/status`.
 
