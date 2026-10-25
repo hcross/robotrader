@@ -12,10 +12,10 @@ import unittest
 from pathlib import Path
 
 from backend.core.schemas import AssetOverride, PodAllocation, PolicyEnvelope
+from backend.core.state_store import resolve_robotrader_binary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENGINE_DIR = REPO_ROOT / "engine-rs"
-DEBUG_BINARY = ENGINE_DIR / "target" / "debug" / "robotrader-node"
 
 ELEVEN_OVERRIDE_KEYS = {
     "catalyst_score",
@@ -33,17 +33,7 @@ ELEVEN_OVERRIDE_KEYS = {
 
 
 def _roundtrip_command() -> list:
-    if DEBUG_BINARY.exists():
-        return [str(DEBUG_BINARY), "--contract-roundtrip"]
-    return [
-        "cargo",
-        "run",
-        "--quiet",
-        "--bin",
-        "robotrader-node",
-        "--",
-        "--contract-roundtrip",
-    ]
+    return [str(resolve_robotrader_binary(ENGINE_DIR)), "--contract-roundtrip"]
 
 
 def _run_rust_roundtrip(payload: str) -> subprocess.CompletedProcess:
