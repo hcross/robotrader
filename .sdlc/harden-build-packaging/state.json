@@ -18,17 +18,17 @@
   "human_gates": [
     "merge"
   ],
-  "status": "triage",
+  "status": "spec-review",
   "pr": null,
   "areas": [],
   "stages": {
     "spec": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "changes_requested",
+      "rounds": 1,
+      "last_verdict": "CHANGES_REQUESTED",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "1fb15ce5721a286c3644bb06b71763545c76ceed",
+      "updated_at": "2026-10-25T22:00:39Z"
     },
     "plan": {
       "status": "pending",
