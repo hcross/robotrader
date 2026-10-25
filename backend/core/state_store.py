@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+from .errors import RustBinaryNotFoundError
 from .hierarchy import HierarchicalFleetManager
 from .memory_palace import PalaceDrawer, StrategyMemoryPalace
 from .schemas import AssetOverride, CatalystSignal, PolicyEnvelope
@@ -49,6 +50,23 @@ def _redis_cmd(redis_url: str, *args: str) -> Optional[str]:
     except Exception:
         return None
     return None
+
+
+def resolve_robotrader_binary(engine_dir: Path) -> Path:
+    """Select the ``robotrader-node`` binary with debug-first precedence.
+
+    A fresh local debug build must win over a stale release build; the runtime
+    image ships only the release binary, so release is the fallback. No compiler
+    is invoked: a missing binary raises ``RustBinaryNotFoundError`` and callers
+    must build it explicitly before serving requests.
+    """
+    debug_binary = engine_dir / "target" / "debug" / "robotrader-node"
+    release_binary = engine_dir / "target" / "release" / "robotrader-node"
+    if debug_binary.exists():
+        return debug_binary
+    if release_binary.exists():
+        return release_binary
+    raise RustBinaryNotFoundError([debug_binary, release_binary])
 
 
 class HybridStateStore:
@@ -748,23 +766,11 @@ class HybridStateStore:
         effective_policy = policy or self.get_effective_policy()
         repo_root = Path(__file__).resolve().parents[2]
         engine_dir = repo_root / "engine-rs"
-        binary_path = engine_dir / "target" / "debug" / "robotrader-node"
+        binary_path = resolve_robotrader_binary(engine_dir)
 
         policy_json = json.dumps(effective_policy.to_dict())
 
-        if binary_path.exists():
-            cmd = [str(binary_path), "--policy-json", policy_json]
-        else:
-            cmd = [
-                "cargo",
-                "run",
-                "--quiet",
-                "--bin",
-                "robotrader-node",
-                "--",
-                "--policy-json",
-                policy_json,
-            ]
+        cmd = [str(binary_path), "--policy-json", policy_json]
 
         proc = subprocess.run(
             cmd,
@@ -791,24 +797,9 @@ class HybridStateStore:
 
         repo_root = Path(__file__).resolve().parents[2]
         engine_dir = repo_root / "engine-rs"
-        debug_bin = engine_dir / "target" / "debug" / "robotrader-node"
-        release_bin = engine_dir / "target" / "release" / "robotrader-node"
+        binary_path = resolve_robotrader_binary(engine_dir)
 
-        if debug_bin.exists():
-            cmd = [str(debug_bin), "--leaf-id", leaf_id]
-        elif release_bin.exists():
-            cmd = [str(release_bin), "--leaf-id", leaf_id]
-        else:
-            cmd = [
-                "cargo",
-                "run",
-                "--quiet",
-                "--bin",
-                "robotrader-node",
-                "--",
-                "--leaf-id",
-                leaf_id,
-            ]
+        cmd = [str(binary_path), "--leaf-id", leaf_id]
 
         proc = subprocess.run(
             cmd,

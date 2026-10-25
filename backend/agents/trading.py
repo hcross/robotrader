@@ -27,7 +27,13 @@ class MetaAllocatorAgent(BaseWarmAgent):
             return self.update_pod_allocations(message.content).to_dict()
         return None
 
-    def apply_regime_preset(self, preset: str) -> PolicyEnvelope:
+    def apply_regime_preset(self, preset: str, commit: bool = True) -> PolicyEnvelope:
+        """Build the preset envelope; commit it to the store unless told otherwise.
+
+        ``commit=False`` lets a caller validate the envelope (for example with a
+        backtest) before making it the effective policy. ``SET_REGIME`` keeps the
+        default eager commit.
+        """
         now_ms = int(time.time() * 1000)
         preset_upper = preset.upper()
 
@@ -36,7 +42,8 @@ class MetaAllocatorAgent(BaseWarmAgent):
             env.envelope_id = f"env_defensive_{now_ms}"
             env.pod_allocations["pod_carry"].capital_weight = 0.70
             env.pod_allocations["pod_momentum"].capital_weight = 0.15
-            self.store.set_policy(env)
+            if commit:
+                self.store.set_policy(env)
             return env
 
         if preset_upper in ("FULL_SWARM", "AGGRESSIVE_SNIPER"):
@@ -53,13 +60,15 @@ class MetaAllocatorAgent(BaseWarmAgent):
                 min_funding_apr=None,
                 max_slippage_bps=120,
             )
-            self.store.set_policy(env)
+            if commit:
+                self.store.set_policy(env)
             return env
 
         # Default: RISK_ON_HIGH_VOL (Pods 1, 2, 3 active; Pod 4 Sniper disabled)
         env = PolicyEnvelope.default_active(now_ms)
         env.envelope_id = f"env_risk_on_{now_ms}"
-        self.store.set_policy(env)
+        if commit:
+            self.store.set_policy(env)
         return env
 
     def update_pod_allocations(self, updates: Dict[str, Dict[str, Any]]) -> PolicyEnvelope:

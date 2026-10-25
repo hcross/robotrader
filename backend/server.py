@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .agents.orchestrator import OrchestratorAgent
+from .core.errors import RustBinaryNotFoundError, rust_binary_not_found_handler
 from .core.health import health_router
 from .core.hierarchy import CrossChainTreasuryRouter
 from .core.schemas import Message
@@ -28,6 +29,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# One handler covers direct and transitive callers (including /api/v1/chat):
+# every endpoint that needs the Rust backtest binary returns the same 503 JSON
+# detail. /ws/chat is a WebSocket and is deliberately outside this HTTP contract.
+app.add_exception_handler(RustBinaryNotFoundError, rust_binary_not_found_handler)
 
 app.include_router(health_router)
 
@@ -321,8 +327,12 @@ def run_backtest() -> Dict[str, Any]:
 
 @app.post("/api/v1/policy/regime")
 def set_regime(req: RegimeRequest) -> Dict[str, Any]:
-    env = orchestrator.meta_allocator.apply_regime_preset(req.preset)
+    # Build the envelope without committing it: the preset becomes the effective
+    # policy only after the backtest succeeds, so a missing binary leaves the
+    # previous envelope in force.
+    env = orchestrator.meta_allocator.apply_regime_preset(req.preset, commit=False)
     bt = state_store.run_rust_backtest(env)
+    state_store.set_policy(env)
     return {
         "status": "updated",
         "policy_envelope": env.to_dict(),

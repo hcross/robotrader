@@ -27,3 +27,7 @@ spec:
               value: {{ .Values.env.openrouterApiKey | quote }}
             - name: SOLANA_RPC_URL
               value: {{ .Values.env.solanaRpcUrl | quote }}
+            - name: REDIS_URL
+              value: {{ .Values.env.redisUrl | quote }}
+            - name: MAX_DAILY_LLM_BUDGET_USD
+              value: {{ include "robotrader.maxDailyLlmBudgetUsd" . | quote }}

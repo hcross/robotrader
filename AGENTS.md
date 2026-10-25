@@ -86,7 +86,9 @@ cd engine-rs && cargo test
 ```
 
 ### 2. Run Python Warm-Path & Architecture Tests
+The suite is an integration suite: build the Rust engine binary first.
 ```bash
+cargo build --manifest-path engine-rs/Cargo.toml --bin robotrader-node
 PYTHONPATH=. python3 -m unittest discover -s backend/tests -v
 ```
 
