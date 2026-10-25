@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "change_id": "fix-fabricated-metrics",
+  "title": "Stop rendering fabricated metrics and seeded memory as measured",
+  "issue": 7,
+  "lane": "L",
+  "lane_reason": "Cross-stack backend+frontend+docs integrity change; >10 files; no money/risk path but needs SPEC+PLAN",
+  "lane_change": null,
+  "branch": "sdlc/7-fix-fabricated-metrics",
+  "worktree": ".worktrees/7-fix-fabricated-metrics",
+  "base_branch": "master",
+  "base_sha": "ef4de8a1eb9054d98ec8a566cc6e571574804cb4",
+  "created_at": "2026-10-25T21:53:19Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "triage",
+  "pr": null,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/7-fix-fabricated-metrics"
+}
