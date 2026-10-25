@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import statistics
 import subprocess
 import threading
 import time
@@ -10,10 +11,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+from . import provenance
 from .errors import RustBinaryNotFoundError
-from .hierarchy import HierarchicalFleetManager
+from .hierarchy import ATTRIBUTED_LIVE_LEAF_IDS, HierarchicalFleetManager
 from .memory_palace import PalaceDrawer, StrategyMemoryPalace
 from .schemas import AssetOverride, CatalystSignal, PolicyEnvelope
+
+TESTNET_SOURCE_DETAIL = (
+    "binance spot testnet + solana devnet wallet and order telemetry, refreshed by the live worker"
+)
 
 
 def _redis_cmd(redis_url: str, *args: str) -> Optional[str]:
@@ -365,10 +371,18 @@ class HybridStateStore:
 
     def get_testnet_telemetry(self) -> Dict[str, Any]:
         if not self.is_testnet_mode:
-            return {"enabled": False}
+            # No numeric performance field in the disabled branch: the block
+            # still declares its population so a consumer never promotes it.
+            return {
+                "enabled": False,
+                "source": provenance.METRIC_SOURCES[0],
+                "source_detail": TESTNET_SOURCE_DETAIL,
+            }
         with self._lock:
             return {
                 "enabled": True,
+                "source": provenance.METRIC_SOURCES[0],
+                "source_detail": TESTNET_SOURCE_DETAIL,
                 "solana_cluster": self.solana_cluster,
                 "solana_address": self.testnet_wallet_snapshot.get("solana_address")
                 or os.getenv("SOLANA_PUBLIC_KEY", ""),
@@ -377,7 +391,6 @@ class HybridStateStore:
                 ),
                 "solana_tx_count": self.solana_devnet_tx_count,
                 "solana_gas_spent_sol": round(self.solana_devnet_gas_sol, 6),
-                "solana_onchain_pnl_sol": 0.0,
                 "binance_free_usdt": round(
                     float(self.testnet_wallet_snapshot.get("binance_free_usdt", 10000.0)), 2
                 ),
@@ -386,7 +399,6 @@ class HybridStateStore:
                 ),
                 "binance_open_positions": dict(self.testnet_positions),
                 "binance_realized_pnl_usd": round(self.testnet_cex_realized_pnl_usd, 4),
-                "simulated_model_pnl_usd": round(self.live_pnl_usd, 2),
             }
 
     def start_live_worker(self, interval_sec: float = 10.0) -> None:
@@ -782,6 +794,8 @@ class HybridStateStore:
         )
         result: Dict[str, Any] = json.loads(proc.stdout)
         result["executions_source"] = "backtest_fixture"
+        result["source"] = provenance.METRIC_SOURCES[2]  # FIXTURE
+        result["source_detail"] = "engine-rs deterministic replay (synthetic scenario)"
 
         with self._lock:
             self.last_backtest_result = result
@@ -810,7 +824,13 @@ class HybridStateStore:
             timeout=30,
         )
         result: Dict[str, Any] = json.loads(proc.stdout)
-        result["executions_source"] = "rust_leaf_backtest"
+        # A per-leaf replay is the deterministic fixture population run for one
+        # leaf; it is not a fourth population token.
+        result["executions_source"] = "backtest_fixture"
+        result["source"] = provenance.METRIC_SOURCES[2]  # FIXTURE
+        result["source_detail"] = (
+            "engine-rs deterministic leaf replay (robotrader-node --leaf-id)"
+        )
 
         if leaf_id in self.hierarchy.leaves:
             with self.hierarchy._lock:
@@ -820,6 +840,8 @@ class HybridStateStore:
                     "win_rate_pct": round(float(result.get("win_rate_pct", 0.0)), 1),
                     "total_trades": int(result.get("total_trades", 0)),
                     "pod_pnl_attribution": dict(result.get("pod_pnl_attribution", {})),
+                    "source": result["source"],
+                    "source_detail": result["source_detail"],
                 }
         return result
 
@@ -832,6 +854,11 @@ class HybridStateStore:
         losses = sum(1 for p in pnls if p < 0)
         flat = trades - wins - losses
         stamps = [int(e.get("timestamp_ms", 0)) for e in executions if e.get("timestamp_ms")]
+        sharpe_ratio: Optional[float] = None
+        if trades >= 2:
+            sample_std = statistics.stdev(pnls)
+            if sample_std > 0:
+                sharpe_ratio = round((sum(pnls) / trades) / sample_std, 4)
         return {
             "pnl_key": pnl_key,
             "trades": trades,
@@ -839,10 +866,30 @@ class HybridStateStore:
             "losses": losses,
             "flat": flat,
             "win_rate_pct": round(100.0 * wins / trades, 1) if trades else None,
+            "sharpe_ratio": sharpe_ratio,
             "pnl_usd": round(sum(pnls), 4),
             "from_ms": min(stamps) if stamps else None,
             "to_ms": max(stamps) if stamps else None,
         }
+
+    def measured_realized_pnl_usd(self) -> float:
+        """Measured realized PnL over the attributed live rows, null-safe.
+
+        The persisted execution ledger is filtered to the Solana ecosystem at
+        load, so every retained row belongs to the single attributed leaf. A
+        ``None`` row contributes nothing; no paper term and no floor is applied.
+        """
+        if "leaf-solana" not in ATTRIBUTED_LIVE_LEAF_IDS:
+            return 0.0
+        with self._lock:
+            rows = list(self.live_executions)
+        total = 0.0
+        for row in rows:
+            value = row.get("realized_pnl_usd")
+            if value is None:
+                continue
+            total += float(value)
+        return round(total, 4)
 
     def get_population_metrics(self, backtest: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -888,7 +935,8 @@ class HybridStateStore:
 
         return {
             "backtest_fixture": {
-                "source": "engine-rs deterministic replay (synthetic scenario)",
+                "source": provenance.METRIC_SOURCES[2],  # FIXTURE
+                "source_detail": "engine-rs deterministic replay (synthetic scenario)",
                 "initial_equity_usd": initial,
                 "final_equity_usd": round(float(bt.get("final_equity_usd", initial)), 2),
                 "cumulative_pnl_usd": round(float(bt.get("net_profit_usd", 0.0)), 2),
@@ -902,7 +950,8 @@ class HybridStateStore:
                 "pod_pnl_attribution": dict(bt.get("pod_pnl_attribution", {})),
             },
             "paper_model": {
-                "source": "simulated_pnl_usd (L2 slippage + adverse-selection paper model)",
+                "source": provenance.METRIC_SOURCES[1],  # SIMULATED
+                "source_detail": "simulated_pnl_usd (L2 slippage + adverse-selection paper model)",
                 "note": "simulated_pnl_usd deducts half-spread, volatility impact, fees and adverse selection when trading against L2 OBI, momentum or RSI extremes",
                 "initial_equity_usd": initial,
                 "final_equity_usd": round(initial + paper_pnl, 2),
@@ -914,7 +963,8 @@ class HybridStateStore:
                 "recent": paper_recent,
             },
             "live_testnet": {
-                "source": "realized_pnl_usd (testnet/devnet orders)",
+                "source": provenance.METRIC_SOURCES[0],  # MEASURED
+                "source_detail": "realized_pnl_usd (testnet/devnet orders)",
                 "cumulative_cex_pnl_usd": round(cex_realized, 4),
                 "recent": self._sample_stats(live, "realized_pnl_usd"),
             },

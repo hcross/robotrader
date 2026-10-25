@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .agents.orchestrator import OrchestratorAgent
+from .core import provenance
 from .core.errors import RustBinaryNotFoundError, rust_binary_not_found_handler
 from .core.health import health_router
 from .core.hierarchy import CrossChainTreasuryRouter
@@ -112,7 +113,12 @@ def get_system_status() -> Dict[str, Any]:
     catalysts = [c.to_dict() for c in state_store.recent_catalysts]
 
     # One ledger, one declared source: never interleave fixture rows with live ones.
-    executions = live_window if live_window else list(bt.get("executions", []))
+    executions_source = "live_testnet" if live_window else "backtest_fixture"
+    row_source = provenance.execution_rows_source(executions_source)
+    executions = [
+        {**row, "source": row_source}
+        for row in (live_window if live_window else list(bt.get("executions", [])))
+    ]
     hierarchy_snap = state_store.hierarchy.get_hierarchy_snapshot(
         cost_status=cost_status,
         solana_populations=populations,
@@ -121,6 +127,7 @@ def get_system_status() -> Dict[str, Any]:
     return {
         "architecture": "hybrid_rust_python_v2",
         "hierarchy_version": "v3_hierarchical_multi_ecosystem",
+        "contract_version": 2,
         "kill_switch": {
             "active": state_store.kill_switch_active,
             "reason": state_store.kill_switch_reason,
@@ -134,7 +141,7 @@ def get_system_status() -> Dict[str, Any]:
             "paper_model": populations["paper_model"],
             "live_testnet": populations["live_testnet"],
             "executions": executions,
-            "executions_source": "live_testnet" if live_window else "backtest_fixture",
+            "executions_source": executions_source,
         },
         "catalysts": catalysts,
         "cost_guard": cost_status,
@@ -206,7 +213,9 @@ def trigger_master_reflection() -> Dict[str, Any]:
 
 @app.get("/api/v1/leaf/{leaf_id}")
 def get_leaf_detail(leaf_id: str) -> Dict[str, Any]:
-    return state_store.hierarchy.get_leaf_detail(leaf_id)
+    return state_store.hierarchy.get_leaf_detail(
+        leaf_id, populations=state_store.get_population_metrics()
+    )
 
 
 @app.post("/api/v1/leaf/{leaf_id}/reflect")
@@ -222,6 +231,7 @@ def update_leaf_mandate(leaf_id: str, req: LeafMandateRequest) -> Dict[str, Any]
         leaf_id=leaf_id,
         risk_posture=req.risk_posture,
         allocated_capital_usd=req.allocated_capital_usd,
+        populations=state_store.get_population_metrics(),
     )
 
 
@@ -248,12 +258,8 @@ def run_leaf_rust_backtest(leaf_id: str) -> Dict[str, Any]:
 
 @app.post("/api/v1/openrouter/refill")
 def trigger_openrouter_refill(req: OpenRouterRefillRequest) -> Dict[str, Any]:
-    total_pnl = sum(
-        float(lf.get("realized_pnl_usd", 0.0))
-        for lf in state_store.hierarchy.leaves.values()
-    ) + float(state_store.live_pnl_usd)
     return orchestrator.cost_guard.trigger_openrouter_refill(
-        realized_trading_pnl_usd=max(125.0, total_pnl),
+        realized_trading_pnl_usd=state_store.measured_realized_pnl_usd(),
         requested_amount_usd=req.amount_usd,
         force=req.force,
     )

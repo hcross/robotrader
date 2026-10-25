@@ -6,6 +6,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from .provenance import (
+    BOOTSTRAP_DRAWER_SOURCE,
+    DRAWER_SOURCES,
+    eligible_drawer_source,
+    normalise_drawer_fields,
+)
+
 
 @dataclass
 class PalaceDrawer:
@@ -32,31 +39,38 @@ class PalaceDrawer:
     wakeup_reason: str = "Cycle périodique standard"
     tokens_used: int = 0
     cost_usd: float = 0.0
+    source: str = BOOTSTRAP_DRAWER_SOURCE
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> PalaceDrawer:
-        return cls(
-            drawer_id=str(data.get("drawer_id", f"drw_{int(time.time() * 1000)}")),
-            timestamp_ms=int(data.get("timestamp_ms", int(time.time() * 1000))),
-            wing=str(data.get("wing", "strategy_ledger")),
-            room=str(data.get("room", "active_theses")),
-            model_used=str(data.get("model_used", "deepseek/deepseek-v4.1-flash")),
-            thinking_depth=str(data.get("thinking_depth", "DEEP_THESIS")),
-            thesis_continuity=str(data.get("thesis_continuity", "CONFIRMED")),
-            global_regime=str(data.get("global_regime", "TRENDING_BULL")),
-            panorama_summary=str(data.get("panorama_summary", "")),
-            ta_confluence_notes=str(data.get("ta_confluence_notes", "")),
-            hypothesis=str(data.get("hypothesis", "")),
-            invalidation_condition=str(data.get("invalidation_condition", "")),
-            compiled_rules_summary=dict(data.get("compiled_rules_summary", {})),
-            next_wakeup_sec=int(data.get("next_wakeup_sec", 120)),
-            wakeup_reason=str(data.get("wakeup_reason", "")),
-            tokens_used=int(data.get("tokens_used", 0)),
-            cost_usd=float(data.get("cost_usd", 0.0)),
+        payload = normalise_drawer_fields(
+            {
+                "drawer_id": str(data.get("drawer_id", f"drw_{int(time.time() * 1000)}")),
+                "timestamp_ms": int(data.get("timestamp_ms", int(time.time() * 1000))),
+                "wing": str(data.get("wing", "strategy_ledger")),
+                "room": str(data.get("room", "active_theses")),
+                "model_used": str(data.get("model_used", "")),
+                "thinking_depth": str(data.get("thinking_depth", "DEEP_THESIS")),
+                "thesis_continuity": str(data.get("thesis_continuity", "INITIAL")),
+                "global_regime": str(data.get("global_regime", "TRENDING_BULL")),
+                "panorama_summary": str(data.get("panorama_summary", "")),
+                "ta_confluence_notes": str(data.get("ta_confluence_notes", "")),
+                "hypothesis": str(data.get("hypothesis", "")),
+                "invalidation_condition": str(data.get("invalidation_condition", "")),
+                "compiled_rules_summary": dict(data.get("compiled_rules_summary", {})),
+                "next_wakeup_sec": int(data.get("next_wakeup_sec", 120)),
+                "wakeup_reason": str(data.get("wakeup_reason", "")),
+                "tokens_used": int(data.get("tokens_used", 0)),
+                "cost_usd": float(data.get("cost_usd", 0.0)),
+                "source": data.get("source"),
+            }
         )
+        # A legacy line carries no `source`: it is read back as BOOTSTRAP with
+        # its fabricated model telemetry stripped, never promoted to LLM.
+        return cls(**payload)
 
 
 class StrategyMemoryPalace:
@@ -106,6 +120,10 @@ class StrategyMemoryPalace:
         self.drawers = loaded[:200]
 
     def add_drawer(self, drawer: PalaceDrawer) -> PalaceDrawer:
+        # Normalise before the append and the Redis mirror: a BOOTSTRAP drawer
+        # can never carry model telemetry or a prior-thesis claim.
+        for key, value in normalise_drawer_fields(drawer.to_dict()).items():
+            setattr(drawer, key, value)
         self.drawers.insert(0, drawer)
         self.drawers = self.drawers[:200]
 
@@ -133,6 +151,38 @@ class StrategyMemoryPalace:
             filtered = [d for d in self.drawers if (wing is None or d.wing == wing)]
         return [d.to_dict() for d in filtered[:limit]]
 
+    def _recall_eligible(self, limit: int = 4, wing: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Continuity-eligible drawers, filtered **before** the per-wing limit.
+
+        Scanning the full list first means an older ``LLM`` thesis is not hidden
+        by newer ``BOOTSTRAP`` seeds. ``recall_recent`` stays unfiltered so the
+        REST surfaces still return bootstrap drawers with their badge.
+        """
+        if wing in ("leaf_solana", "strategy_ledger"):
+            filtered = [
+                d
+                for d in self.drawers
+                if d.wing in ("leaf_solana", "strategy_ledger") and eligible_drawer_source(d.source)
+            ]
+        else:
+            filtered = [
+                d
+                for d in self.drawers
+                if (wing is None or d.wing == wing) and eligible_drawer_source(d.source)
+            ]
+        return [d.to_dict() for d in filtered[:limit]]
+
+    def fallback_continuity(self, wing: str) -> str:
+        """Continuity a deterministic fallback may claim for ``wing``.
+
+        ``INITIAL`` unless the same wing already holds a real ``LLM`` drawer, in
+        which case that drawer's state is reused and never escalated.
+        """
+        for drawer in self.drawers:
+            if drawer.wing == wing and drawer.source == DRAWER_SOURCES[0]:
+                return drawer.thesis_continuity
+        return "INITIAL"
+
     def recall_across_wings(
         self, wings: Optional[List[str]] = None, per_wing_limit: int = 2
     ) -> Dict[str, List[Dict[str, Any]]]:
@@ -143,7 +193,7 @@ class StrategyMemoryPalace:
         return {w: self.recall_recent(limit=per_wing_limit, wing=w) for w in target_wings}
 
     def format_continuity_prompt(self, limit: int = 3, wing: Optional[str] = None) -> str:
-        recent = self.recall_recent(limit=limit, wing=wing)
+        recent = self._recall_eligible(limit=limit, wing=wing)
         if not recent:
             return "Aucune thèse antérieure enregistrée dans le Strategy Palace (Premier cycle d'initialisation)."
         lines: List[str] = []
@@ -165,12 +215,17 @@ class StrategyMemoryPalace:
     ) -> str:
         """Compact summary of all leaf agents' MemPalace wings for the Master Orchestrator."""
         eff_limit = limit_per_wing if limit_per_wing is not None else per_wing_limit
-        across = self.recall_across_wings(wings=wings, per_wing_limit=eff_limit)
+        target_wings = wings or sorted(
+            {d.wing for d in self.drawers if d.wing != "master_orchestrator"}
+        )
         blocks: List[str] = []
-        for w, items in across.items():
-            if not items:
+        for w in target_wings:
+            eligible = [
+                d for d in self.drawers if d.wing == w and eligible_drawer_source(d.source)
+            ][:eff_limit]
+            if not eligible:
                 continue
-            top = items[0]
+            top = eligible[0].to_dict()
             blocks.append(
                 f"- [{w}] ({top.get('thesis_continuity')} | {top.get('model_used')}): "
                 f"{top.get('hypothesis', '')[:180]} | Invalidation: {top.get('invalidation_condition', '')[:120]}"

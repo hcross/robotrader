@@ -8,23 +8,45 @@
 
 ---
 
+## Provenance legend (new text — English)
+
+**Figure block (trading performance)**: any table row, bullet item, or paragraph that states at least one numeric trading-performance value. Every trading-performance figure block in §1 and §3 carries, or is grouped under, its population and source:
+
+| Label | Population | Meaning |
+|---|---|---|
+| `[FIXTURE]` | `backtest_fixture` | Deterministic `engine-rs` replay on a synthetic scenario. |
+| `[SIMULATED]` | `paper_model` | L2 slippage + adverse-selection paper simulation. |
+| `[MEASURED]` | `live_testnet` | Binance Spot Testnet / Solana Devnet orders actually realised. |
+
+Only the `[MEASURED]` `live_testnet` figures in §3.3 are measured trading results. Leaf-level and treasury aggregates use the retained **recent 200-row window** (`live_testnet.recent`); `engine_metrics.live_testnet.cumulative_cex_pnl_usd` remains the lifetime CEX figure, so the two bases may diverge after eviction.
+
+The inference-cost tables in §2 and §4 measure OpenRouter token spend. They are **operational cost measurements**, outside the three trading populations, and are not forced into the trading enums.
+
+**Language note**: the pre-existing French body of this document is a recorded legacy exception. New text added by the integrity change is written in English; the repository's English-only convention applies to new content.
+
+---
+
 ## 1. Synthèse Exécutive
 
-Durant la campagne de test intensif de l'architecture hiérarchique Robotrader v3, la facture réelle OpenRouter a atteint **~$2.00 USD** (`4 413 015` jetons consommés sur `325` cycles cognitifs).
+Durant la campagne de test intensif de l'architecture hiérarchique Robotrader v3, la facture réelle OpenRouter a atteint **~$2.00 USD** (`4 413 015` jetons consommés sur `325` cycles cognitifs) — *operational inference-cost measurement, outside the three trading populations*.
+
+**Only the `[MEASURED]` `live_testnet` figures in §3.3 are measured trading results. No fixture or simulated figure below is a product performance, a realized return, or a live trading result.**
 
 L'audit révèle un contraste net entre :
 1. **L'excellence du moteur d'exécution et de trading (`engine-rs` & `paper_model`)** :
-   - **Zéro latence LLM dans le Hot-Path** (`< 50µs` par tick en Rust).
-   - **Backtest déterministe Rust (`backtest_fixture`)** : **100% de taux de réussite** sur la branche Solana (`+$22.78` nets sur 6 trades, Sharpe annualisé **`28.22`**, Max Drawdown **`0.0%`**, `1` rug pull `SCAM-SOL` bloqué par `HardRiskGate`), et validation des **pods Rust adaptés (`<= 4` par blockchain)** sur l'intégralité des **26 écosystèmes**.
-   - **Simulation Paper-Money réaliste (`paper_model`, 1 500 trades lifetime)** : **`+$1,155.52` de PnL net cumulé (`+11.55%` sur `$10,000`)**, **56.3% de win rate** (`845` gains / `624` pertes / `31` neutres) malgré l'application stricte du slippage L2 et de la sélection adverse.
-2. **Une sur-fréquence et une inflation de contexte dans la boucle cognitive Warm-Path (`~$2.00` dépensés)** :
+   - **Zéro latence LLM dans le Hot-Path** (`< 50µs` par tick en Rust) — *operational latency measurement*.
+   - **Backtest déterministe Rust (`backtest_fixture`) [FIXTURE]** : **100% de taux de réussite** sur la branche Solana (`+$22.78` nets sur 6 trades, Sharpe annualisé **`28.22`**, Max Drawdown **`0.0%`**, `1` rug pull `SCAM-SOL` bloqué par `HardRiskGate`), et validation des **pods Rust adaptés (`<= 4` par blockchain)** sur l'intégralité des **26 écosystèmes**. All figures in this bullet are `[FIXTURE]`.
+   - **Simulation Paper-Money réaliste (`paper_model`) [SIMULATED]** : **`+$1,155.52` de PnL net cumulé (`+11.55%` sur `$10,000`)**, **56.3% de win rate** (`845` gains / `624` pertes / `31` neutres) malgré l'application stricte du slippage L2 et de la sélection adverse. All figures in this bullet are `[SIMULATED]`.
+2. **Une sur-fréquence et une inflation de contexte dans la boucle cognitive Warm-Path (`~$2.00` dépensés)** — *operational inference-cost measurement* :
    - Le robot feuille Solana se réveillait toutes les **30s à 45s** pour ré-analyser des bougies **15 minutes (`900s`)**, envoyant **~8 300 jetons d'entrée** par appel et doublant la consommation lors des escalades de troncature (`115` retries), tandis que `CostGuard` sous-estimait les tarifs OpenRouter d'un facteur ~10x et perdait son compteur à chaque redémarrage de conteneur.
 
-Les **4 correctifs structurels** mis en œuvre à l'issue de cet audit réduisent le coût d'inférence horaire d'un **facteur 25x à 40x** (`~$0.02/heure` en mode actif continu contre `~$0.65/heure` auparavant) et placent l'auto-scheduler en **pause par défaut au démarrage (`$0.00/heure`)**.
+Les **4 correctifs structurels** mis en œuvre à l'issue de cet audit réduisent le coût d'inférence horaire d'un **facteur 25x à 40x** (`~$0.02/heure` en mode actif continu contre `~$0.65/heure` auparavant) et placent l'auto-scheduler en **pause par défaut au démarrage (`$0.00/heure`)** — *operational inference-cost measurement, outside the three trading populations*.
 
 ---
 
 ## 2. Anatomie Financière des ~$2.00 d'Inférence OpenRouter
+
+> Operational inference-cost measurement — outside the three trading populations. Source labels `[FIXTURE]` / `[SIMULATED]` / `[MEASURED]` do not apply to this section.
 
 ### 2.1 Répartition exacte par modèle et par agent (`transcript_ledger.jsonl`)
 
@@ -54,7 +76,9 @@ Les **4 correctifs structurels** mis en œuvre à l'issue de cet audit réduisen
 
 Conformément à l'invariant d'isolation des métriques, Robotrader v3 sépare strictement ses trois populations d'évaluation :
 
-### 3.1 Population 1 — Backtest Déterministe Rust (`backtest_fixture`, `engine-rs` `<50µs`)
+### 3.1 Population 1 — Backtest Déterministe Rust (`backtest_fixture`, `engine-rs` `<50µs`) [`FIXTURE`]
+
+> Source: `[FIXTURE]` — every numeric trading figure in this subsection is the output of a deterministic `engine-rs` replay on a synthetic scenario. It is not realized, live, or product performance.
 
 - **Branche Solana (`leaf-solana`, 4 pods Rust natifs)** :
   - **Capital initial** : `$10,000.00` -> **Capital final** : **`$10,022.78`** (**`+0.228%`** sur la séquence de référence)
@@ -72,7 +96,9 @@ Conformément à l'invariant d'isolation des métriques, Robotrader v3 sépare s
   - Chaque écosystème dispose désormais de ses propres pods Rust compilés dans `engine-rs` (`crates/strategies/src/lib.rs`) et testables individuellement via `POST /api/v1/leaf/{leaf_id}/backtest`.
   - Exemple `leaf-bitcoin` (3 pods Rust : `btc_etf_basis_carry`, `btc_halving_l2_momentum`, `btc_utxo_whale_accumulator`) : `4` trades, `100%` win rate, **`+$20.47`**, Sharpe **`34.25`**, Max DD **`0.0%`**.
 
-### 3.2 Population 2 — Simulation Continue avec Slippage L2 & Sélection Adverse (`paper_model`)
+### 3.2 Population 2 — Simulation Continue avec Slippage L2 & Sélection Adverse (`paper_model`) [`SIMULATED`]
+
+> Source: `[SIMULATED]` — every numeric trading figure in this subsection is produced by the L2 slippage + adverse-selection paper model. It is not realized or live profit.
 
 Le moteur `paper_model` applique sur chaque tick un modèle de microstructure pénalisant les entrées tardives (RSI élevé, spread L2, friction de sélection adverse) :
 
@@ -92,7 +118,9 @@ Le moteur `paper_model` applique sur chaque tick un modèle de microstructure p�
 
 *Observation* : La fenêtre récente de 200 trades (`-$35.33`, win rate `49.5%`) s'explique par le maintien temporaire d'un biais `LONG_BIAS` alors que le carnet L2 `SOL/USDT` s'était inversé (`OBI = -0.571` à `$85.56`). Cela démontre que le simulateur `paper_model` n'est pas complaisant et sanctionne fidèlement tout retard d'invalidation.
 
-### 3.3 Population 3 — Exécution Réelle Testnet (`live_testnet` : Binance Spot Testnet + Solana Devnet)
+### 3.3 Population 3 — Exécution Réelle Testnet (`live_testnet` : Binance Spot Testnet + Solana Devnet) [`MEASURED`]
+
+> Source: `[MEASURED]` — these are the only measured trading results in this document. The window figures use the retained recent 200-row window; the CEX cumulative figure is a lifetime figure.
 
 - **Exécutions dans la fenêtre active** : `200` (`16` gains / `22` pertes / `162` transactions Devnet self-transfer neutres)
 - **PnL CEX Testnet réalisé** : `-$4.6036` cumulé (`-$0.1539` sur la fenêtre récente), lié au spread bid-ask du carnet Binance Spot Testnet à faible liquidité.
@@ -101,6 +129,8 @@ Le moteur `paper_model` applique sur chaque tick un modèle de microstructure p�
 ---
 
 ## 4. Les 4 Ajustements Structurels Mis en Place (Réduction OpEx 25x–40x)
+
+> Operational inference-cost measurement — outside the three trading populations. The table below compares inference spend, not trading performance.
 
 | # | Ajustement | Avant (Session à $2.00) | Après (Configuration Optimisée) | Gain d'OpEx |
 | :---: | :--- | :--- | :--- | :---: |

@@ -13,6 +13,8 @@ import {
   ChevronsRight,
 } from 'lucide-react';
 import LLMInspectionModal from './LLMInspectionModal';
+import SourceBadge from './SourceBadge';
+import { formatMetric, formatOperational } from '../lib/provenance';
 
 const POD_META = {
   pod_carry: {
@@ -33,11 +35,14 @@ const POD_META = {
   },
 };
 
-const StatCard = ({ title, value, subtitle, icon: Icon, color }) => (
+const StatCard = ({ title, value, subtitle, icon: Icon, color, source }) => (
   <div className="bg-gray-900 p-4 rounded-lg shadow border border-gray-800">
-    <div className="flex items-center justify-between mb-1">
+    <div className="flex items-center justify-between mb-1 gap-2">
       <h3 className="text-gray-400 text-xs font-medium uppercase tracking-wider">{title}</h3>
-      <Icon className={`w-4 h-4 ${color}`} />
+      <div className="flex items-center gap-1.5">
+        {source !== undefined && <SourceBadge source={source} />}
+        <Icon className={`w-4 h-4 ${color}`} />
+      </div>
     </div>
     <p className="text-2xl font-bold text-white">{value}</p>
     {subtitle && <p className="text-xs text-gray-400 mt-1">{subtitle}</p>}
@@ -62,7 +67,16 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
   const liveRecent = livePop.recent || {};
   const attribution = paper.pod_pnl_attribution || {};
   const executions = metrics.executions || [];
-  const executionsSource = metrics.executions_source || 'backtest_fixture';
+  const executionsSource = metrics.executions_source;
+  // A missing executions_source is unattributed, never backtest_fixture.
+  const executionRowSource =
+    executionsSource === 'live_testnet'
+      ? 'MEASURED'
+      : executionsSource === 'paper_model'
+        ? 'SIMULATED'
+        : executionsSource === 'backtest_fixture'
+          ? 'FIXTURE'
+          : null;
   const catalysts = statusData?.catalysts || [];
   const costGuard = statusData?.cost_guard || {};
   const testnetTelemetry = statusData?.testnet_telemetry;
@@ -77,19 +91,6 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
   const startIndex = (safePage - 1) * pageSize;
   const endIndex = Math.min(startIndex + pageSize, totalExecutions);
   const paginatedExecutions = executions.slice(startIndex, endIndex);
-
-  // A missing metric renders as "—", never as a plausible-looking zero.
-  const fmtMoney = (v) =>
-    v === null || v === undefined
-      ? '—'
-      : `$${Number(v).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const fmtSignedMoney = (v) =>
-    v === null || v === undefined
-      ? '—'
-      : `${Number(v) >= 0 ? '+' : '-'}$${Math.abs(Number(v)).toFixed(2)}`;
-  const fmtPct = (v) =>
-    v === null || v === undefined ? '—' : `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(2)}%`;
-  const fmtRate = (v) => (v === null || v === undefined ? '—' : `${Number(v).toFixed(1)}%`);
 
   const handlePageSizeChange = (e) => {
     const newSize = Number(e.target.value);
@@ -131,36 +132,40 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
         <StatCard
           title="Equity Modèle Paper (cumul)"
-          value={fmtMoney(paper.final_equity_usd)}
-          subtitle={`PnL paper: ${fmtSignedMoney(paper.cumulative_pnl_usd)} (${fmtPct(paper.total_return_pct)}) · Win rate ${fmtRate(paperRecent.win_rate_pct ?? paperRecent.positive_edge_share_pct)} (${paperRecent.wins ?? 0}G/${paperRecent.losses ?? 0}P sur ${paperRecent.trades ?? 0} · Vie: ${paperLifetime.trades ?? paperRecent.trades ?? 0} trades)`}
+          value={formatMetric(paper.final_equity_usd, paper.source, 'money')}
+          subtitle={`PnL paper: ${formatMetric(paper.cumulative_pnl_usd, paper.source, 'signedMoney')} (${formatMetric(paper.total_return_pct, paper.source, 'percent')}) · Win rate ${formatMetric(paperRecent.win_rate_pct ?? paperRecent.positive_edge_share_pct, paper.source, 'rate')} (${formatMetric(paperRecent.wins, paper.source, 'integer')}G/${formatMetric(paperRecent.losses, paper.source, 'integer')}P sur ${formatMetric(paperRecent.trades, paper.source, 'integer')} · Vie: ${formatMetric(paperLifetime.trades ?? paperRecent.trades, paper.source, 'integer')} trades)`}
           icon={DollarSign}
           color="text-emerald-400"
+          source={paper.source}
         />
         <StatCard
           title="Live Testnet (réel)"
-          value={fmtSignedMoney(liveRecent.pnl_usd)}
-          subtitle={`Win rate ${fmtRate(liveRecent.win_rate_pct)} (${liveRecent.wins ?? 0} gains / ${liveRecent.losses ?? 0} pertes / ${liveRecent.flat ?? 0} nuls) · PnL réalisé`}
+          value={formatMetric(liveRecent.pnl_usd, livePop.source, 'signedMoney')}
+          subtitle={`Win rate ${formatMetric(liveRecent.win_rate_pct, livePop.source, 'rate')} (${formatMetric(liveRecent.wins, livePop.source, 'integer')} gains / ${formatMetric(liveRecent.losses, livePop.source, 'integer')} pertes / ${formatMetric(liveRecent.flat, livePop.source, 'integer')} nuls) · PnL réalisé`}
           icon={Activity}
           color="text-cyan-400"
+          source={livePop.source}
         />
         <StatCard
           title="Fixture Backtest Rust"
-          value={Number(bt.sharpe_ratio || 0).toFixed(2)}
-          subtitle={`Sharpe · Win rate ${fmtRate(bt.win_rate_pct)} (${bt.trades ?? 0} trades) · Net ${fmtSignedMoney(bt.cumulative_pnl_usd)}`}
+          value={formatMetric(bt.sharpe_ratio, bt.source, 'number')}
+          subtitle={`Sharpe · Win rate ${formatMetric(bt.win_rate_pct, bt.source, 'rate')} (${formatMetric(bt.trades, bt.source, 'integer')} trades) · Net ${formatMetric(bt.cumulative_pnl_usd, bt.source, 'signedMoney')}`}
           icon={TrendingUp}
           color="text-blue-400"
+          source={bt.source}
         />
         <StatCard
           title="HardRiskGate (&lt;50µs)"
-          value={`${bt.rejected_orders || 0} Rug Bloqué`}
-          subtitle={`Max DD fixture: ${Number(bt.max_drawdown_pct || 0).toFixed(2)}% / Limite 3.0%`}
+          value={`${formatMetric(bt.rejected_orders, bt.source, 'integer')} Rug Bloqué`}
+          subtitle={`Max DD fixture: ${formatMetric(bt.max_drawdown_pct, bt.source, 'number')}% / Limite 3.0%`}
           icon={Shield}
           color="text-amber-400"
+          source={bt.source}
         />
         <StatCard
           title="CostGuard &amp; Profondeur LLM"
-          value={`$${Number(costGuard.total_spent_usd || 0).toFixed(5)}`}
-          subtitle={`Mode: ${costGuard.thinking_depth || 'DEEP_THESIS'} | Reste: $${Number(costGuard.remaining_usd ?? 5).toFixed(3)}/j`}
+          value={formatOperational(costGuard.total_spent_usd, 'cost')}
+          subtitle={`Mode: ${costGuard.thinking_depth || 'DEEP_THESIS'} | Reste: ${formatOperational(costGuard.remaining_usd, 'cost')}/j`}
           icon={Cpu}
           color="text-purple-400"
         />
@@ -190,16 +195,21 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
               <div className="flex items-center justify-between mb-1">
                 <span className="font-semibold text-white">Solana {testnetTelemetry.solana_cluster?.toUpperCase()} (On-Chain)</span>
                 <span className="font-mono text-emerald-400 font-bold">
-                  {Number(testnetTelemetry.solana_balance_sol || 0).toFixed(5)} SOL
+                  {formatOperational(testnetTelemetry.solana_balance_sol, 'number')} SOL
                 </span>
               </div>
               <p className="text-gray-400 text-[11px] leading-relaxed">
-                Plus-value on-chain : <strong className="text-gray-200">0.00 SOL</strong> (pas de DEX Jupiter/Jito sur Devnet — auto-transferts de validation RPC).
+                Plus-value on-chain : non mesurée (pas de DEX Jupiter/Jito sur Devnet — auto-transferts de validation RPC).
               </p>
               <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-800 text-[11px] text-gray-400">
-                <span>Transactions signées : <strong className="text-white">{testnetTelemetry.solana_tx_count || 0}</strong></span>
+                <span>
+                  Transactions signées :{' '}
+                  <strong className="text-white">
+                    {formatOperational(testnetTelemetry.solana_tx_count, 'integer')}
+                  </strong>
+                </span>
                 <span className="text-amber-400">
-                  Gas réseau consommé : -{Number(testnetTelemetry.solana_gas_spent_sol || 0).toFixed(6)} SOL
+                  Gas réseau consommé : -{formatOperational(testnetTelemetry.solana_gas_spent_sol, 'number')} SOL
                 </span>
               </div>
             </div>
@@ -208,7 +218,7 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
               <div className="flex items-center justify-between mb-1">
                 <span className="font-semibold text-white">Binance Spot Testnet (Carnet L2 Réel)</span>
                 <span className="font-mono text-emerald-400 font-bold">
-                  {Number(testnetTelemetry.binance_free_usdt || 0).toLocaleString()} USDT
+                  {formatOperational(testnetTelemetry.binance_free_usdt, 'number')} USDT
                 </span>
               </div>
               <p className="text-gray-400 text-[11px] leading-relaxed">
@@ -227,13 +237,20 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
                 </span>
                 <span
                   className={
-                    Number(testnetTelemetry.binance_realized_pnl_usd || 0) >= 0
-                      ? 'text-emerald-400 font-semibold'
-                      : 'text-red-400 font-semibold'
+                    typeof testnetTelemetry.binance_realized_pnl_usd === 'number'
+                      ? testnetTelemetry.binance_realized_pnl_usd >= 0
+                        ? 'text-emerald-400 font-semibold'
+                        : 'text-red-400 font-semibold'
+                      : 'text-gray-500 font-semibold'
                   }
                 >
-                  PnL Réel CEX : {Number(testnetTelemetry.binance_realized_pnl_usd || 0) >= 0 ? '+' : ''}
-                  {Number(testnetTelemetry.binance_realized_pnl_usd || 0).toFixed(4)} USDT
+                  PnL Réel CEX :{' '}
+                  {formatMetric(
+                    testnetTelemetry.binance_realized_pnl_usd,
+                    testnetTelemetry.source,
+                    'signedMoney'
+                  )}{' '}
+                  USDT <SourceBadge source={testnetTelemetry.source} />
                 </span>
               </div>
             </div>
@@ -241,18 +258,26 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
 
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px]">
             <div className="bg-gray-900/90 px-3 py-2 rounded border border-gray-800">
-              <div className="text-gray-500">PnL réalisé (fenêtre {liveRecent.trades ?? 0})</div>
-              <div className="font-mono font-bold text-sm text-gray-100">{fmtSignedMoney(liveRecent.pnl_usd)}</div>
+              <div className="text-gray-500">
+                PnL réalisé (fenêtre {formatMetric(liveRecent.trades, livePop.source, 'integer')})
+              </div>
+              <div className="font-mono font-bold text-sm text-gray-100">
+                {formatMetric(liveRecent.pnl_usd, livePop.source, 'signedMoney')}
+              </div>
             </div>
             <div className="bg-gray-900/90 px-3 py-2 rounded border border-gray-800">
               <div className="text-gray-500">Win rate réel (sur PnL réalisé)</div>
               <div className="font-mono font-bold text-sm text-gray-100">
-                {fmtRate(liveRecent.win_rate_pct)} · {liveRecent.wins ?? 0}/{liveRecent.trades ?? 0}
+                {formatMetric(liveRecent.win_rate_pct, livePop.source, 'rate')} ·{' '}
+                {formatMetric(liveRecent.wins, livePop.source, 'integer')}/
+                {formatMetric(liveRecent.trades, livePop.source, 'integer')}
               </div>
             </div>
             <div className="bg-gray-900/90 px-3 py-2 rounded border border-gray-800">
               <div className="text-gray-500">PnL paper cumulé (autre population)</div>
-              <div className="font-mono font-bold text-sm text-amber-300">{fmtSignedMoney(paper.cumulative_pnl_usd)}</div>
+              <div className="font-mono font-bold text-sm text-amber-300">
+                {formatMetric(paper.cumulative_pnl_usd, paper.source, 'signedMoney')}
+              </div>
             </div>
           </div>
         </div>
@@ -273,7 +298,7 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {Object.entries(POD_META).map(([podKey, meta]) => {
             const alloc = allocations[podKey] || { enabled: false, capital_weight: 0 };
-            const pnl = Number(attribution[podKey] || 0);
+            const pnl = attribution[podKey];
             return (
               <div
                 key={podKey}
@@ -300,10 +325,19 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
                   <span className="text-gray-400">
                     Biais : <strong className="text-gray-200">{alloc.directional_bias || 'NEUTRAL'}</strong>
                   </span>
-                  <span className={pnl >= 0 ? 'text-emerald-400 font-semibold' : 'text-red-400 font-semibold'}>
+                  <span
+                    className={
+                      typeof pnl === 'number'
+                        ? pnl >= 0
+                          ? 'text-emerald-400 font-semibold'
+                          : 'text-red-400 font-semibold'
+                        : 'text-gray-500 font-semibold'
+                    }
+                  >
                     {isTestnetMode ? 'PnL Modèle : ' : 'PnL : '}
-                    {pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`}
+                    {formatMetric(pnl, paper.source, 'signedMoney')}
                   </span>
+                  <SourceBadge source={paper.source} />
                 </div>
               </div>
             );
@@ -316,14 +350,18 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <div>
             <h3 className="text-base font-semibold text-white">
-              {executionsSource === 'live_testnet'
+              {executionRowSource === 'MEASURED'
                 ? 'Journal d’Exécution Live (Testnet / Devnet)'
-                : 'Replay Déterministe (`engine-rs`)'}
+                : executionRowSource === 'FIXTURE'
+                  ? 'Replay Déterministe (`engine-rs`)'
+                  : 'Journal d’Exécution (source non attribuée)'}
             </h3>
             <p className="text-xs text-gray-400 mt-0.5">
-              {executionsSource === 'live_testnet'
+              {executionRowSource === 'MEASURED'
                 ? `${totalExecutions > 0 ? `Affichage ${startIndex + 1}–${endIndex} sur ${totalExecutions} ordres` : 'Aucun ordre enregistré'} — colonne PnL : realized_pnl_usd`
-                : `${totalExecutions > 0 ? `Affichage ${startIndex + 1}–${endIndex} sur ${totalExecutions} ordres` : 'Aucun ordre enregistré'} — fixture synthétique, aucun ordre live`}
+                : executionRowSource === 'FIXTURE'
+                  ? `${totalExecutions > 0 ? `Affichage ${startIndex + 1}–${endIndex} sur ${totalExecutions} ordres` : 'Aucun ordre enregistré'} — fixture synthétique, aucun ordre live`
+                  : `${totalExecutions > 0 ? `Affichage ${startIndex + 1}–${endIndex} sur ${totalExecutions} ordres` : 'Aucun ordre enregistré'} — provenance absente, PnL non attribué`}
             </p>
           </div>
 
@@ -357,7 +395,10 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
                 <th className="pb-2 pr-3">Sens</th>
                 <th className="pb-2 pr-3">Notional</th>
                 <th className="pb-2 pr-3">
-                  {isTestnetMode ? 'PnL Réel (vs Modèle Paper)' : 'PnL Réalisé'}
+                  <span className="flex items-center gap-1.5">
+                    {isTestnetMode ? 'PnL Réel (vs Modèle Paper)' : 'PnL Réalisé'}
+                    <SourceBadge source={executionRowSource} />
+                  </span>
                 </th>
                 <th className="pb-2">Signal Quant / Rationale</th>
               </tr>
@@ -377,8 +418,9 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
 
                 const isDevnetTx = isTestnetMode && ex.venue === 'SOLANA_DEVNET_ONCHAIN';
                 const isBinanceTestnet = isTestnetMode && ex.venue === 'BINANCE_TESTNET_LIVE';
-                const realPnl = Number(ex.realized_pnl_usd || 0);
-                const simPnl = Number(ex.simulated_pnl_usd ?? ex.realized_pnl_usd ?? 0);
+                const realPnl = ex.realized_pnl_usd;
+                const simPnl = ex.simulated_pnl_usd ?? ex.realized_pnl_usd;
+                const rowSource = ex.source ?? executionRowSource;
 
                 return (
                   <tr key={`${ex.timestamp_ms || 'row'}-${startIndex + idx}`} className="border-b border-gray-800/60">
@@ -400,30 +442,51 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
                       {isDevnetTx ? (
                         <div className="flex flex-col">
                           <span className="text-gray-300 font-medium">
-                            0.00 SOL <span className="text-[10px] text-amber-400">(Gas -0.000005)</span>
+                            {formatMetric(realPnl, rowSource, 'number')} SOL{' '}
+                            <span className="text-[10px] text-amber-400">(Gas -0.000005)</span>
                           </span>
-                          <span className={`text-[10px] ${simPnl >= 0 ? 'text-purple-300' : 'text-red-400'}`}>
-                            Modèle Paper : {simPnl >= 0 ? `+$${simPnl.toFixed(2)}` : `-$${Math.abs(simPnl).toFixed(2)}`}
+                          <span
+                            className={`text-[10px] ${
+                              typeof simPnl === 'number' && simPnl >= 0
+                                ? 'text-purple-300'
+                                : 'text-red-400'
+                            }`}
+                          >
+                            Modèle Paper : {formatMetric(simPnl, rowSource, 'signedMoney')}
                           </span>
                         </div>
                       ) : isBinanceTestnet ? (
                         <div className="flex flex-col">
                           {ex.pnl_type === 'TESTNET_OPEN_LONG' ? (
-                            <span className="text-blue-300 font-medium">Position ouverte (0.00$)</span>
+                            <span className="text-blue-300 font-medium">
+                              Position ouverte ({formatMetric(0.0, rowSource, 'money')})
+                            </span>
                           ) : ex.pnl_type === 'TESTNET_CLOSE_LONG' ? (
-                            <span className={realPnl >= 0 ? 'text-emerald-400 font-semibold' : 'text-red-400 font-semibold'}>
-                              Réel : {realPnl >= 0 ? `+$${realPnl.toFixed(4)}` : `-$${Math.abs(realPnl).toFixed(4)}`}
+                            <span
+                              className={
+                                typeof realPnl === 'number' && realPnl >= 0
+                                  ? 'text-emerald-400 font-semibold'
+                                  : 'text-red-400 font-semibold'
+                              }
+                            >
+                              Réel : {formatMetric(realPnl, rowSource, 'signedMoney')}
                             </span>
                           ) : (
                             <span className="text-gray-300 font-medium">Ordre exécuté (Spot)</span>
                           )}
-                          <span className={`text-[10px] ${simPnl >= 0 ? 'text-purple-300' : 'text-red-400'}`}>
-                            Modèle Paper : {simPnl >= 0 ? `+$${simPnl.toFixed(2)}` : `-$${Math.abs(simPnl).toFixed(2)}`}
+                          <span
+                            className={`text-[10px] ${
+                              typeof simPnl === 'number' && simPnl >= 0
+                                ? 'text-purple-300'
+                                : 'text-red-400'
+                            }`}
+                          >
+                            Modèle Paper : {formatMetric(simPnl, rowSource, 'signedMoney')}
                           </span>
                         </div>
                       ) : (
                         <span className="text-emerald-400 font-semibold">
-                          +${realPnl.toFixed(2)}
+                          {formatMetric(realPnl, rowSource, 'signedMoney')}
                         </span>
                       )}
                     </td>
@@ -667,11 +730,13 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
                           {drw.thesis_continuity}
                         </span>
                         <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono text-[10px]">
-                          {drw.model_used}
+                          {drw.model_used || 'no model call'}
                         </span>
+                        <SourceBadge source={drw.source} />
                         <span className="text-[10px] text-gray-400">
-                          ({drw.thinking_depth} • {drw.tokens_used || 0} tok • $
-                          {Number(drw.cost_usd || 0).toFixed(6)})
+                          ({drw.thinking_depth} •{' '}
+                          {formatMetric(drw.tokens_used, drw.source, 'integer')} tok •{' '}
+                          {formatMetric(drw.cost_usd, drw.source, 'cost')})
                         </span>
                       </div>
                       <span className="text-[11px] text-emerald-400 font-medium">

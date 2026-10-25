@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from ..core import provenance
 from ..core.agent import BaseWarmAgent
 from ..core.schemas import CatalystSignal, Message
 from ..core.state_store import HybridStateStore, state_store
@@ -60,6 +61,8 @@ class QuantAuditorAgent(BaseWarmAgent):
         )
         return {
             "auditor": self.agent_name,
+            "source": provenance.METRIC_SOURCES[2],  # FIXTURE
+            "source_detail": "engine-rs deterministic replay (robotrader-node backtest)",
             "total_trades": bt.get("total_trades", 0),
             "rejected_rug_orders": bt.get("rejected_orders", 0),
             "net_profit_usd": round(float(bt.get("net_profit_usd", 0.0)), 2),
@@ -67,7 +70,11 @@ class QuantAuditorAgent(BaseWarmAgent):
             "avg_slippage_bps": round(avg_slippage_bps, 2),
             "total_fees_usd": round(float(bt.get("total_fees_usd", 0.0)), 2),
             "pod_pnl_attribution": bt.get("pod_pnl_attribution", {}),
-            "verdict": "HEALTHY_EDGE" if float(bt.get("sharpe_ratio", 0.0)) >= 1.5 else "REVIEW_REQUIRED",
+            "verdict": (
+                "FIXTURE_HEALTHY_EDGE"
+                if float(bt.get("sharpe_ratio", 0.0)) >= 1.5
+                else "FIXTURE_REVIEW_REQUIRED"
+            ),
         }
 
 
