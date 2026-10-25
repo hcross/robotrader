@@ -182,9 +182,16 @@ generate `.sdlc/<change-id>/merge-dossier.md`.
 Finally, invoke the `user-validate` skill with the dossier (never a bare prose
 question). The human decides merge, request changes, or abandon.
 
-**You never merge.** Even if the human says "merge it", the merge is performed
-by the human or explicitly delegated in writing; record the delegation in the
-issue.
+**You never merge on your own initiative.** Even when the human says "merge it",
+the merge is performed by the human or through the explicit delegation path:
+
+```bash
+scripts/sdlc/sdlc.sh merge <change-id> --delegated-by "<operator / reference>"
+```
+
+The command records the delegation in the issue and PR, refuses on any red gate,
+and never bypasses an escalation. A safety/security escalation still stops the
+merge.
 
 ## 8. Escalation
 

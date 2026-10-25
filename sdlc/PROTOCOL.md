@@ -405,6 +405,29 @@ Default policy: `SDLC_HUMAN_GATES=merge`.
 - The merge dossier is the decision surface: ≤ 5 minutes, Review Card + evidence + risk + rollback.
 - Mandatory escalations apply regardless of policy.
 
+### 11.1 Full-auto delegation
+
+An operator may delegate the merge explicitly, in writing. The conductor then uses:
+
+```bash
+scripts/sdlc/sdlc.sh merge <change-id> --delegated-by "<operator / reference>"
+```
+
+The command refuses unless:
+
+- `merge-ready` is green at the current PR head;
+- every required stage is `APPROVE` with no open blocker/major;
+- CI checks are green;
+- the PR is not a draft and is mergeable;
+- no escalation is recorded.
+
+It records the delegation in `state.json` and on the PR, merges, fast-forwards
+the base branch, archives the OpenSpec change, commits the ledger, closes the
+issue, and removes the worktree.
+
+It never bypasses a failing gate. A safety/security escalation still requires a
+human decision, even under full-auto.
+
 ---
 
 ## 12. CLI compatibility
@@ -434,6 +457,7 @@ scripts/sdlc/sdlc.sh check <change-id>          # OpenSpec + spec + verdict lint
 scripts/sdlc/sdlc.sh verdict <change-id> <stage> <round> <file>
 scripts/sdlc/sdlc.sh pr <change-id> [--number <n>]  # link the PR (auto-detect by branch)
 scripts/sdlc/sdlc.sh merge-ready <change-id>    # gates + dossier
+scripts/sdlc/sdlc.sh merge <change-id> --delegated-by "<operator>"  # full-auto merge
 scripts/sdlc/sdlc.sh escalate <change-id> --reason <reason>
 scripts/sdlc/run-agent.sh <role> <brief-file>   # cold agent, headless
 ```

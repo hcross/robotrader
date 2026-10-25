@@ -174,6 +174,24 @@ Then:
 3. The human merges. If an agent merges, it needs explicit written delegation
    recorded in the issue.
 
+### 7.1 Full-auto merge
+
+```bash
+scripts/sdlc/sdlc.sh merge <change-id> --delegated-by "<operator / reference>"
+```
+
+The command re-runs `merge-ready`, then refuses unless:
+
+- every required verdict is `APPROVE` at the PR head;
+- no open blocker/major exists;
+- CI checks are green;
+- the PR is ready and mergeable;
+- no escalation is recorded.
+
+It records the delegation in `state.json` and on the PR, merges, pulls the base
+branch, archives the OpenSpec change, commits the ledger, closes the issue, and
+removes the worktree. A safety/security escalation still stops the merge.
+
 ## 8. Escalation playbook
 
 | Trigger | Human sees | Default recommendation |

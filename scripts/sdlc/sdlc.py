@@ -577,7 +577,17 @@ def cmd_check(args: argparse.Namespace) -> int:
 
     if state["lane"] in {"S", "L"}:
         if common.openspec_available():
-            proc = common.run(["openspec", "validate", args.change, "--strict", "--json"], check=False)
+            change_dir = common.openspec_change_dir(args.change)
+            openspec_root = (
+                change_dir.parents[2]
+                if len(change_dir.parents) >= 3
+                else common.REPO_ROOT
+            )
+            proc = common.run(
+                ["openspec", "validate", args.change, "--strict", "--json"],
+                cwd=openspec_root,
+                check=False,
+            )
             print(proc.stdout, end="")
             if proc.returncode != 0:
                 print(proc.stderr, end="", file=sys.stderr)
@@ -730,10 +740,166 @@ def cmd_merge_ready(args: argparse.Namespace) -> int:
             "ready": True,
             "change_id": args.change,
             "dossier": str(common.runtime_dir(args.change) / "merge-dossier.md"),
-            "next": "dispatch sdlc-merge-verifier, then user-validate",
+            "next": "dispatch sdlc-merge-verifier, then merge (delegated) or human gate",
         },
         indent=2,
     ))
+    return 0
+
+
+def cmd_merge(args: argparse.Namespace) -> int:
+    """Merge a merge-ready PR under an explicit, recorded delegation.
+
+    This is the only path that lets an agent merge. It refuses unless every
+    automated gate is green and the delegation is named in writing.
+    """
+    if not args.delegated_by or not args.delegated_by.strip():
+        common.die("auto-merge requires --delegated-by '<operator / reference>'")
+
+    ready = cmd_merge_ready(
+        argparse.Namespace(change=args.change, allow_open_tasks=False)
+    )
+    if ready != 0:
+        common.die("merge-ready gate failed; refusing to merge")
+
+    state = common.load_state(args.change)
+    if state.get("escalation"):
+        common.die("change is escalated; human decision required")
+    if state["status"] != "merge-ready":
+        common.die(f"status is {state['status']!r}, expected merge-ready")
+    if not state.get("pr"):
+        common.die("no PR linked; run `sdlc.sh pr <change>` first")
+    if not common.gh_available():
+        common.die("gh CLI is required for auto-merge")
+
+    pr = str(state["pr"])
+    view = common.run(
+        ["gh", "pr", "view", pr, "--json", "state,isDraft,headRefOid,mergeable"],
+        check=False,
+    )
+    if view.returncode != 0:
+        common.die(f"cannot read PR #{pr}: {view.stderr.strip()}")
+    info = json.loads(view.stdout or "{}")
+    if info.get("state") != "OPEN":
+        common.die(f"PR #{pr} state is {info.get('state')!r}, expected OPEN")
+    if info.get("mergeable") not in (None, "MERGEABLE", "UNKNOWN"):
+        common.die(f"PR #{pr} is not mergeable: {info.get('mergeable')}")
+    if info.get("isDraft"):
+        common.run(["gh", "pr", "ready", pr])
+        common.log("PR marked ready for review")
+
+    checks = common.run(["gh", "pr", "checks", pr], check=False)
+    if checks.returncode != 0:
+        detail = (checks.stdout + checks.stderr).lower()
+        if "no checks reported" in detail:
+            common.die("no CI checks reported; refusing full-auto merge without CI evidence")
+        common.die(f"CI is not green on PR #{pr}")
+
+    delegation = {
+        "by": args.delegated_by.strip(),
+        "at": common.now_iso(),
+        "mode": "full-auto",
+        "pr": state["pr"],
+        "head_sha": info.get("headRefOid"),
+    }
+    state["merge_delegation"] = delegation
+    common.save_state(args.change, state)
+    common.gh(
+        [
+            "pr",
+            "comment",
+            pr,
+            "--body",
+            f"SDLC full-auto merge delegated by {delegation['by']} at {delegation['at']}.",
+        ],
+        check=False,
+    )
+
+    merge = common.run(
+        ["gh", "pr", "merge", pr, "--merge", "--delete-branch"], check=False
+    )
+    if merge.returncode != 0:
+        verify = common.run(["gh", "pr", "view", pr, "--json", "state"], check=False)
+        merged = (
+            verify.returncode == 0
+            and json.loads(verify.stdout or "{}").get("state") == "MERGED"
+        )
+        if not merged:
+            common.die(f"PR merge failed:\n{merge.stderr or merge.stdout}")
+
+    main = common.main_repo_root()
+    base = state["base_branch"]
+    pull = common.run(["git", "-C", str(main), "pull", "--ff-only", "origin", base], check=False)
+    if pull.returncode != 0:
+        common.warn(f"could not fast-forward {base}; archive may be skipped")
+
+    if state["lane"] in {"S", "L"} and common.openspec_available():
+        change_dir = main / "openspec" / "changes" / args.change
+        if change_dir.exists():
+            common.run(["openspec", "archive", args.change, "--yes"], cwd=main, check=False)
+        else:
+            common.warn("OpenSpec change not present in the main checkout; archive skipped")
+
+    state["status"] = "merged"
+    dest = main / ".sdlc" / args.change
+    current_runtime = common.runtime_dir(args.change)
+    if current_runtime.resolve() != dest.resolve():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(current_runtime, dest, dirs_exist_ok=True)
+    dest.mkdir(parents=True, exist_ok=True)
+    write_file(dest / "state.json", json.dumps(state, indent=2, ensure_ascii=False) + "\n")
+
+    common.run(
+        ["git", "-C", str(main), "add", "openspec", f".sdlc/{args.change}"],
+        check=False,
+    )
+    dirty = common.run(["git", "-C", str(main), "status", "--porcelain"], check=False)
+    if dirty.stdout.strip():
+        common.run(
+            [
+                "git",
+                "-C",
+                str(main),
+                "commit",
+                "-m",
+                f"chore({args.change}): archive merged change",
+                "-m",
+                "Co-Authored-By: Claude Code <noreply@anthropic.com>",
+            ],
+            check=False,
+        )
+        common.run(["git", "-C", str(main), "push", "origin", base], check=False)
+
+    if state.get("issue"):
+        common.gh(
+            [
+                "issue",
+                "close",
+                str(state["issue"]),
+                "--comment",
+                f"Merged under full-auto delegation by {delegation['by']}.",
+            ],
+            check=False,
+        )
+
+    worktree = Path(state.get("worktree_abs", state["worktree"]))
+    if worktree != main and worktree.exists():
+        common.run(
+            ["git", "-C", str(main), "worktree", "remove", str(worktree), "--force"],
+            check=False,
+        )
+
+    print(
+        json.dumps(
+            {
+                "change_id": args.change,
+                "merged": True,
+                "pr": state["pr"],
+                "delegated_by": delegation["by"],
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -897,6 +1063,15 @@ def main(argv: list[str]) -> int:
     p.add_argument("change")
     p.add_argument("--allow-open-tasks", action="store_true")
     p.set_defaults(func=cmd_merge_ready)
+
+    p = sub.add_parser("merge", help="merge under an explicit recorded delegation")
+    p.add_argument("change")
+    p.add_argument(
+        "--delegated-by",
+        required=True,
+        help="operator or reference that explicitly authorized the merge",
+    )
+    p.set_defaults(func=cmd_merge)
 
     p = sub.add_parser("escalate", help="record a human escalation")
     p.add_argument("change")

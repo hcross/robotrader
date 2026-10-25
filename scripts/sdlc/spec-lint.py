@@ -319,9 +319,12 @@ def lint(
     if skip_openspec:
         report.note("openspec validate: skipped (--skip-openspec)")
     elif common.openspec_available():
+        openspec_root = (
+            change_dir.parents[2] if len(change_dir.parents) >= 3 else common.REPO_ROOT
+        )
         proc = subprocess.run(
             ["openspec", "validate", change_id, "--strict", "--json"],
-            cwd=str(common.REPO_ROOT),
+            cwd=str(openspec_root),
             text=True,
             capture_output=True,
         )
