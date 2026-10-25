@@ -1,9 +1,13 @@
 FROM rust:slim-bookworm AS engine-builder
 
 WORKDIR /build/engine-rs
+# `contracts/` must be at /build/contracts: `robotrader-common` includes it at
+# compile time via `include_str!("../../../../contracts/policy_contract.conf")`.
+COPY contracts /build/contracts
 COPY engine-rs/Cargo.toml ./Cargo.toml
+COPY engine-rs/Cargo.lock ./Cargo.lock
 COPY engine-rs/crates ./crates
-RUN cargo build --release --bin robotrader-node
+RUN cargo build --release --locked --bin robotrader-node
 
 FROM python:3.11-slim
 
@@ -21,6 +25,10 @@ RUN poetry config virtualenvs.create false \
 
 # Copy compiled Rust hot-path / replay binary
 COPY --from=engine-builder /build/engine-rs/target/release/robotrader-node /app/engine-rs/target/debug/robotrader-node
+
+# Copy the shared policy contract for the Python import path (backend/core/schemas.py).
+# The compose bind mount `./backend:/app/backend` does not shadow /app/contracts.
+COPY contracts ./contracts
 
 # Copy Python Warm-Path & Control Plane code
 COPY backend ./backend

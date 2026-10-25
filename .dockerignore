@@ -3,6 +3,5 @@
 __pycache__
 *.pyc
 engine-rs/target
-engine-rs/Cargo.lock
 frontend/node_modules
 frontend/dist

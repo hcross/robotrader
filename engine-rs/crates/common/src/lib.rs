@@ -1,6 +1,66 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Shared policy contract file, resolved at compile time so `safe_baseline()`
+/// stays allocation-free on the `HardRiskGate` fallback path.
+const POLICY_CONTRACT: &str = include_str!("../../../../contracts/policy_contract.conf");
+
+/// Scans a `key=value` contract file for `key` and returns its decimal value.
+/// Returns `0` when the key is absent so a malformed contract fails loudly at
+/// the assertion in the test suite rather than silently inventing a TTL.
+const fn contract_u64(contents: &str, key: &[u8]) -> u64 {
+    let haystack = contents.as_bytes();
+    let mut cursor = 0;
+    while cursor + key.len() <= haystack.len() {
+        let mut offset = 0;
+        let mut matched = true;
+        while offset < key.len() {
+            if haystack[cursor + offset] != key[offset] {
+                matched = false;
+                break;
+            }
+            offset += 1;
+        }
+        if matched {
+            let mut value_start = cursor + key.len();
+            while value_start < haystack.len()
+                && (haystack[value_start] == b' ' || haystack[value_start] == b'\t')
+            {
+                value_start += 1;
+            }
+            if value_start < haystack.len()
+                && (haystack[value_start] == b'=' || haystack[value_start] == b':')
+            {
+                value_start += 1;
+                while value_start < haystack.len()
+                    && (haystack[value_start] == b' ' || haystack[value_start] == b'\t')
+                {
+                    value_start += 1;
+                }
+                let mut value = 0u64;
+                let mut digits = 0u32;
+                while value_start < haystack.len()
+                    && haystack[value_start] >= b'0'
+                    && haystack[value_start] <= b'9'
+                {
+                    value = value * 10 + (haystack[value_start] - b'0') as u64;
+                    value_start += 1;
+                    digits += 1;
+                }
+                if digits > 0 {
+                    return value;
+                }
+            }
+        }
+        cursor += 1;
+    }
+    0
+}
+
+/// Safe-baseline TTL, single-sourced from `contracts/policy_contract.conf`.
+pub const SAFE_BASELINE_TTL_SECONDS: u64 =
+    contract_u64(POLICY_CONTRACT, b"SAFE_BASELINE_TTL_SECONDS");
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PodId {
@@ -71,6 +131,7 @@ pub enum DirectionalBias {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PodAllocation {
     pub enabled: bool,
     pub capital_weight: f64,
@@ -155,15 +216,33 @@ pub struct SignedTransferReceipt {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AssetOverride {
     pub catalyst_score: f64,
     pub bias: DirectionalBias,
     pub max_leverage: f64,
+    #[serde(default)]
+    pub support_zone_usd: Option<f64>,
+    #[serde(default)]
+    pub resistance_zone_usd: Option<f64>,
+    #[serde(default)]
+    pub invalidation_price_usd: Option<f64>,
+    #[serde(default)]
+    pub entry_obi_threshold: Option<f64>,
+    #[serde(default)]
+    pub max_rsi_long: Option<f64>,
+    #[serde(default)]
+    pub min_rsi_short: Option<f64>,
+    #[serde(default)]
+    pub take_profit_bps: Option<f64>,
+    #[serde(default)]
+    pub stop_loss_bps: Option<f64>,
 }
 
 /// Signed, TTL-bounded policy envelope published by the Warm-Path AI Meta-Controller.
 /// If expired, the Hot-Path automatically falls back to `PolicyEnvelope::safe_baseline`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PolicyEnvelope {
     pub envelope_id: String,
     pub issued_at_ms: u64,
@@ -225,7 +304,7 @@ impl PolicyEnvelope {
         Self {
             envelope_id: "safe_baseline_fallback".to_string(),
             issued_at_ms: now_ms,
-            ttl_seconds: 86_400,
+            ttl_seconds: SAFE_BASELINE_TTL_SECONDS,
             global_regime: GlobalRegime::LowVolCarry,
             pod_allocations,
             asset_overrides: HashMap::new(),
@@ -284,6 +363,8 @@ pub enum MarketEvent {
         cvd_delta: f64,
         atr_pct: f64,
         breakout_zscore: f64,
+        #[serde(default)]
+        rsi_14: Option<f64>,
     },
     #[serde(alias = "SOLANA_SMART_MONEY_SWAP")]
     OnchainSmartMoneySwap {
