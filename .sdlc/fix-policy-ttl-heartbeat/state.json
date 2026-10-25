@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "change_id": "fix-policy-ttl-heartbeat",
+  "title": "Stop the policy heartbeat from extending TTL authority",
+  "issue": 8,
+  "lane": "S",
+  "lane_reason": "Autonomous 8a slice: heartbeat and restore TTL only; no signing/auth/CORS/kill-switch",
+  "lane_change": null,
+  "branch": "sdlc/8-fix-policy-ttl-heartbeat",
+  "worktree": ".worktrees/8-fix-policy-ttl-heartbeat",
+  "base_branch": "master",
+  "base_sha": "9b14359c0f696acdfdacb9390f6d85f1f740e997",
+  "created_at": "2026-10-25T23:02:00Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev",
+  "pr": 17,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "30525f67ca738e754f3fe8301e578b03f58c1ad0",
+      "updated_at": "2026-10-25T23:06:23Z"
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/8-fix-policy-ttl-heartbeat"
+}
