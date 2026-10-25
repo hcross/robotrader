@@ -128,6 +128,7 @@ impl StrategyPod for MomentumPod {
             cvd_delta,
             atr_pct,
             breakout_zscore,
+            rsi_14,
             ..
         } = event
         else {
@@ -141,11 +142,61 @@ impl StrategyPod for MomentumPod {
 
         // Orderbook Imbalance in [-1.0, +1.0]
         let obi = (bid_volume_top5 - ask_volume_top5) / total_book;
-        let catalyst_boost = envelope
-            .asset_overrides
-            .get(symbol)
+        let asset_override = envelope.asset_overrides.get(symbol);
+        let catalyst_boost = asset_override
             .map(|o| o.catalyst_score)
             .unwrap_or(0.5);
+
+        // An override replaces the pod's configured OBI threshold; absent values
+        // resolve to the Python default. Without an override the pod keeps its own.
+        let effective_obi_threshold = match asset_override {
+            Some(rule) => rule.entry_obi_threshold.unwrap_or(0.08),
+            None => self.obi_threshold,
+        };
+
+        // The RSI guard activates only when the override exists and `rsi_14` is
+        // supplied. The absent case is observable in the intent rationale.
+        let rsi_passes_long = match (asset_override, *rsi_14) {
+            (Some(rule), Some(rsi)) => rsi <= rule.max_rsi_long.unwrap_or(70.0),
+            _ => true,
+        };
+        let rsi_passes_short = match (asset_override, *rsi_14) {
+            (Some(rule), Some(rsi)) => rsi >= rule.min_rsi_short.unwrap_or(30.0),
+            _ => true,
+        };
+        let rsi_tag = match (asset_override.is_some(), *rsi_14) {
+            (true, None) => " RSI=INACTIVE".to_string(),
+            (_, Some(rsi)) => format!(" RSI={:.1}", rsi),
+            (false, None) => String::new(),
+        };
+
+        let support_passes = asset_override
+            .and_then(|o| o.support_zone_usd)
+            .map_or(true, |support| *mid_price >= support);
+        let resistance_passes = asset_override
+            .and_then(|o| o.resistance_zone_usd)
+            .map_or(true, |resistance| *mid_price <= resistance);
+        let invalidation_passes_long = asset_override
+            .and_then(|o| o.invalidation_price_usd)
+            .map_or(true, |level| *mid_price > level);
+        let invalidation_passes_short = asset_override
+            .and_then(|o| o.invalidation_price_usd)
+            .map_or(true, |level| *mid_price < level);
+
+        // With an override the envelope supplies TP/SL distances (bps / 100);
+        // without one the pod keeps its ATR-derived distances.
+        let stop_loss_pct = match asset_override {
+            Some(rule) => rule.stop_loss_bps.unwrap_or(30.0) / 100.0,
+            None => (*atr_pct * 0.9).clamp(0.8, 3.0),
+        };
+        let long_take_profit_pct = match asset_override {
+            Some(rule) => rule.take_profit_bps.unwrap_or(45.0) / 100.0,
+            None => (*atr_pct * 2.2).clamp(1.8, 7.5),
+        };
+        let short_take_profit_pct = match asset_override {
+            Some(rule) => rule.take_profit_bps.unwrap_or(45.0) / 100.0,
+            None => (*atr_pct * 2.1).clamp(1.8, 7.0),
+        };
 
         let pod_bias = envelope
             .pod_allocations
@@ -154,10 +205,13 @@ impl StrategyPod for MomentumPod {
             .unwrap_or(DirectionalBias::Neutral);
 
         // Long Breakout condition
-        if obi >= self.obi_threshold
+        if obi >= effective_obi_threshold
             && *cvd_delta > 0.0
             && *breakout_zscore >= self.min_breakout_zscore
             && pod_bias != DirectionalBias::ShortBias
+            && rsi_passes_long
+            && support_passes
+            && invalidation_passes_long
         {
             let expected_edge_bps =
                 22.0 + (obi * 40.0) + (*breakout_zscore * 6.0) + (catalyst_boost * 18.0);
@@ -174,21 +228,24 @@ impl StrategyPod for MomentumPod {
                 expected_edge_bps,
                 max_slippage_bps: 20,
                 requested_leverage: 2.0,
-                stop_loss_pct: (*atr_pct * 0.9).clamp(0.8, 3.0),
-                take_profit_pct: (*atr_pct * 2.2).clamp(1.8, 7.5),
+                stop_loss_pct,
+                take_profit_pct: long_take_profit_pct,
                 token_safety: None,
                 rationale: format!(
-                    "Momentum Long: OBI +{:.2}, z={:.2}, catalyst={:.2}",
-                    obi, breakout_zscore, catalyst_boost
+                    "Momentum Long: OBI +{:.2}, z={:.2}, catalyst={:.2}{}",
+                    obi, breakout_zscore, catalyst_boost, rsi_tag
                 ),
             }];
         }
 
         // Short Breakdown condition
-        if obi <= -self.obi_threshold
+        if obi <= -effective_obi_threshold
             && *cvd_delta < 0.0
             && *breakout_zscore <= -self.min_breakout_zscore
             && pod_bias != DirectionalBias::LongBias
+            && rsi_passes_short
+            && resistance_passes
+            && invalidation_passes_short
         {
             let expected_edge_bps =
                 22.0 + (obi.abs() * 40.0) + (breakout_zscore.abs() * 6.0);
@@ -205,12 +262,12 @@ impl StrategyPod for MomentumPod {
                 expected_edge_bps,
                 max_slippage_bps: 20,
                 requested_leverage: 2.0,
-                stop_loss_pct: (*atr_pct * 0.9).clamp(0.8, 3.0),
-                take_profit_pct: (*atr_pct * 2.1).clamp(1.8, 7.0),
+                stop_loss_pct,
+                take_profit_pct: short_take_profit_pct,
                 token_safety: None,
                 rationale: format!(
-                    "Momentum Short: OBI {:.2}, z={:.2}",
-                    obi, breakout_zscore
+                    "Momentum Short: OBI {:.2}, z={:.2}{}",
+                    obi, breakout_zscore, rsi_tag
                 ),
             }];
         }

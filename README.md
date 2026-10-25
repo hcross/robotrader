@@ -91,12 +91,23 @@ The warm-path AI calculates high-grade mathematical indicators on live Binance 1
   - `INVALIDATED`: Price breached invalidation conditions; full defensive pivot.
 
 ### 4. Compiled Mechanical Rules in Hot-Path
-The warm-path LLM translates abstract market theses into concrete numerical rules written to `PolicyEnvelope.asset_overrides`:
-- `entry_obi_threshold` (e.g. `+0.14` L2 book imbalance required before entry)
-- `max_rsi_long` (e.g. reject long entry if RSI > 70.0)
-- `support_zone_usd` & `resistance_zone_usd`
-- `invalidation_price_usd`
-- `take_profit_bps` & `stop_loss_bps`
+The warm-path LLM translates abstract market theses into concrete numerical rules written to `PolicyEnvelope.asset_overrides`. All eleven keys survive the Rust decode, and policy decoding is strict (`deny_unknown_fields`), so an undeclared key halts the node instead of being silently dropped.
+
+| Key | Effect in `MomentumPod` / `HardRiskGate` |
+|---|---|
+| `catalyst_score` | Required. Momentum edge and win-probability boost. |
+| `bias` | Required. Carried directional bias. |
+| `max_leverage` | Required. Clamps the intent leverage in `HardRiskGate`. |
+| `support_zone_usd` | Long entry requires `mid_price >= support_zone_usd`. |
+| `resistance_zone_usd` | Short entry requires `mid_price <= resistance_zone_usd`. |
+| `invalidation_price_usd` | Long requires `mid_price > level`; short requires `mid_price < level`. |
+| `entry_obi_threshold` | Directional gate: long `OBI >= t`, short `OBI <= -t`; absent resolves to `0.08`. |
+| `max_rsi_long` | Long requires `rsi_14 <= max_rsi_long`; absent resolves to `70.0`. |
+| `min_rsi_short` | Short requires `rsi_14 >= min_rsi_short`; absent resolves to `30.0`. |
+| `take_profit_bps` | `take_profit_pct = take_profit_bps / 100.0`; absent resolves to `45.0` (`0.45%`). |
+| `stop_loss_bps` | `stop_loss_pct = stop_loss_bps / 100.0`; absent resolves to `30.0` (`0.30%`). |
+
+`MarketEvent::OrderbookTick.rsi_14` is optional. Until a warm-path producer emits it, an override-bearing symbol reports `RSI=INACTIVE` in the intent rationale rather than silently passing the guard. TP/SL distances are populated on the intent only; risk-gate enforcement belongs to issue #4.
 
 ### 5. Candle-Aligned Scheduler & Default-Paused LLM Spend (`$0.00/h` at Boot)
 - Background LLM scheduling is **paused by default at startup** (`ENABLE_AUTO_LLM_SCHEDULER=false`, `$0.00/h`) so starting the stack never incurs unexpected OpenRouter spend. It can be toggled live from the Command Center header (`Auto-Scheduler LLM : PAUSE ($0.00/h)` / `ACTIF`) or via `POST /api/v1/cognitive/scheduler`.

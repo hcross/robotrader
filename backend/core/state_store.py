@@ -434,6 +434,7 @@ class HybridStateStore:
         spread_bps: float = 2.5,
         entry_obi_threshold: float = 0.08,
         max_rsi_long: float = 68.0,
+        min_rsi_short: float = 30.0,
         venue: str = "BINANCE_TESTNET_LIVE",
         pod_id: str = "pod_momentum",
     ) -> Dict[str, float]:
@@ -460,8 +461,8 @@ class HybridStateStore:
         rsi_exhaustion_bps = 0.0
         if direction > 0 and rsi_val > max_rsi_long:
             rsi_exhaustion_bps = min(22.0, (rsi_val - max_rsi_long) * 1.6 + 8.0)
-        elif direction < 0 and rsi_val < (100.0 - max_rsi_long):
-            rsi_exhaustion_bps = min(22.0, ((100.0 - max_rsi_long) - rsi_val) * 1.6 + 8.0)
+        elif direction < 0 and rsi_val < min_rsi_short:
+            rsi_exhaustion_bps = min(22.0, (min_rsi_short - rsi_val) * 1.6 + 8.0)
         adverse_selection_bps = round(adverse_obi_bps + adverse_mom_bps + rsi_exhaustion_bps, 2)
 
         # 3. Gross directional/maker alpha
@@ -580,6 +581,7 @@ class HybridStateStore:
                     spread_bps=6.0,
                     entry_obi_threshold=sol_rule.entry_obi_threshold if sol_rule else 0.08,
                     max_rsi_long=sol_rule.max_rsi_long if sol_rule else 68.0,
+                    min_rsi_short=sol_rule.min_rsi_short if sol_rule else 30.0,
                     venue="SOLANA_DEVNET_ONCHAIN",
                     pod_id=chosen_pod,
                 )
@@ -649,6 +651,7 @@ class HybridStateStore:
             spread_bps=spread_bps,
             entry_obi_threshold=rule.entry_obi_threshold if rule else 0.08,
             max_rsi_long=rule.max_rsi_long if rule else 68.0,
+            min_rsi_short=rule.min_rsi_short if rule else 30.0,
             venue="BINANCE_TESTNET_LIVE",
             pod_id=pod_Key,
         )
