@@ -10,25 +10,18 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from backend.core.state_store import resolve_robotrader_binary
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENGINE_DIR = REPO_ROOT / "engine-rs"
-DEBUG_BINARY = ENGINE_DIR / "target" / "debug" / "robotrader-node"
 
 # Must match `base_ts` in engine-rs/crates/backtest/src/lib.rs.
 BASE_TS_MS = 1_792_180_000_000
 
 
 def _policy_command(policy: dict) -> list:
-    binary = DEBUG_BINARY if DEBUG_BINARY.exists() else None
-    if binary is not None:
-        return [str(binary), "--policy-json", json.dumps(policy)]
     return [
-        "cargo",
-        "run",
-        "--quiet",
-        "--bin",
-        "robotrader-node",
-        "--",
+        str(resolve_robotrader_binary(ENGINE_DIR)),
         "--policy-json",
         json.dumps(policy),
     ]

@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "change_id": "harden-build-packaging",
+  "title": "Harden build, packaging, and test chain",
+  "issue": 9,
+  "lane": "L",
+  "lane_reason": "Infra-only deterministic fixes; no contract/money/risk/vault path",
+  "lane_change": {
+    "from": "S",
+    "to": "L",
+    "reason": "In-scope work estimated at 14-15 files; Helm structure, shared binary resolver, and CI Helm job require a PLAN."
+  },
+  "branch": "sdlc/9-harden-build-packaging",
+  "worktree": ".worktrees/9-harden-build-packaging",
+  "base_branch": "master",
+  "base_sha": "ef4de8a1eb9054d98ec8a566cc6e571574804cb4",
+  "created_at": "2026-10-25T21:52:57Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev-review",
+  "pr": 14,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "2a7f0350c6915cbbff25dc2ec1620d5993ec2170",
+      "updated_at": "2026-10-25T22:07:22Z"
+    },
+    "plan": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-plan-reviewer",
+      "last_sha": "2f57e0f0d346b120e1aabec13fbdaa81f986a9fd",
+      "updated_at": "2026-10-25T22:20:27Z"
+    },
+    "dev": {
+      "status": "changes_requested",
+      "rounds": 1,
+      "last_verdict": "CHANGES_REQUESTED",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "0e2074758b12402bdfb5ba68d9e4a6e6d0e205e5",
+      "updated_at": "2026-10-25T22:38:29Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/9-harden-build-packaging"
+}

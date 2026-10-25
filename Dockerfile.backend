@@ -23,8 +23,10 @@ COPY backend/pyproject.toml backend/poetry.lock ./
 RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --no-root
 
-# Copy compiled Rust hot-path / replay binary
-COPY --from=engine-builder /build/engine-rs/target/release/robotrader-node /app/engine-rs/target/debug/robotrader-node
+# Copy compiled Rust hot-path / replay binary at the release path only. The
+# backend resolver is debug-first with a release fallback, so the container
+# never needs (or ships) a `target/debug` copy.
+COPY --from=engine-builder /build/engine-rs/target/release/robotrader-node /app/engine-rs/target/release/robotrader-node
 
 # Copy the shared policy contract for the Python import path (backend/core/schemas.py).
 # The compose bind mount `./backend:/app/backend` does not shadow /app/contracts.

@@ -6,6 +6,7 @@ on:
       - "engine-rs/**"
       - "backend/**"
       - "frontend/**"
+      - "charts/**"
       - "contracts/**"
       - "scripts/check_contract_single_source.py"
       - "Dockerfile*"
@@ -16,6 +17,7 @@ on:
       - "engine-rs/**"
       - "backend/**"
       - "frontend/**"
+      - "charts/**"
       - "contracts/**"
       - "scripts/check_contract_single_source.py"
       - "Dockerfile*"
@@ -48,20 +50,83 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: engine-rs
+      - name: Build robotrader-node before the suite
+        run: cargo build --manifest-path engine-rs/Cargo.toml --bin robotrader-node
       - name: Install dependencies
         working-directory: backend
         run: |
           pip install poetry
           poetry install --no-root
-      - name: Build robotrader-node for the contract round-trip transport
-        working-directory: engine-rs
-        run: cargo build --bin robotrader-node
       - name: Contract single-source check
         run: python3 scripts/check_contract_single_source.py --root .
       - name: Architecture and unit tests
         working-directory: backend
         run: |
           PYTHONPATH=.. poetry run python -m unittest discover -s tests -v
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.3
+      - name: helm lint
+        run: helm lint charts/robotrader
+      - name: helm template
+        run: helm template charts/robotrader
+      - name: Assert default, empty, and ingress renders
+        shell: bash
+        run: |
+          set -euo pipefail
+          rendered="$(helm template charts/robotrader)"
+          grep -q 'name: OPENROUTER_API_KEY' <<<"$rendered"
+          grep -q 'name: SOLANA_RPC_URL' <<<"$rendered"
+          grep -q 'name: REDIS_URL' <<<"$rendered"
+          grep -q 'name: MAX_DAILY_LLM_BUDGET_USD' <<<"$rendered"
+          grep -q 'targetPort: 8000' <<<"$rendered"
+          budget="$(awk '/name: MAX_DAILY_LLM_BUDGET_USD/{getline; gsub(/[" ]/, "", $2); print $2}' <<<"$rendered")"
+          python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > 0 else 1)' "$budget"
+          test "$(grep -c 'kind: Deployment' <<<"$rendered")" -eq 1
+          test "$(grep -c 'kind: Service' <<<"$rendered")" -eq 1
+          test "$(grep -c 'kind: Ingress' <<<"$rendered" || true)" -eq 0
+          empty="$(helm template charts/robotrader --set env.maxDailyLlmBudgetUsd="")"
+          empty_budget="$(awk '/name: MAX_DAILY_LLM_BUDGET_USD/{getline; gsub(/[" ]/, "", $2); print $2}' <<<"$empty")"
+          test "$empty_budget" = "5.0"
+          ingress="$(helm template charts/robotrader --set ingress.enabled=true --set ingress.host=robotrader.example.test --set ingress.path=/)"
+          test "$(grep -c 'kind: Ingress' <<<"$ingress")" -eq 1
+          grep -q 'host: "robotrader.example.test"' <<<"$ingress"
+          svc="$(helm template charts/robotrader --show-only templates/service.yaml)"
+          dep="$(helm template charts/robotrader --show-only templates/deployment.yaml)"
+          for label in 'app.kubernetes.io/name: robotrader' 'app.kubernetes.io/instance: release-name'; do
+            grep -qF "$label" <<<"$svc"
+            grep -qF "$label" <<<"$dep"
+          done
+      - name: Reject invalid budgets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if helm template charts/robotrader --set env.maxDailyLlmBudgetUsd=-1 >/dev/null 2>&1; then
+            echo "expected a negative budget to fail" >&2
+            exit 1
+          fi
+          if helm template charts/robotrader --set env.maxDailyLlmBudgetUsd=0 >/dev/null 2>&1; then
+            echo "expected a zero budget to fail" >&2
+            exit 1
+          fi
+          if helm template charts/robotrader --set-string env.maxDailyLlmBudgetUsd=abc >/dev/null 2>&1; then
+            echo "expected a non-numeric budget to fail" >&2
+            exit 1
+          fi
+      - name: Assert documented values
+        shell: bash
+        run: |
+          set -euo pipefail
+          values="$(helm show values charts/robotrader)"
+          grep -q 'redisUrl: ""' <<<"$values"
+          grep -q 'maxDailyLlmBudgetUsd: 5.0' <<<"$values"
+          grep -q '# redisUrl:' <<<"$values"
+          grep -q '# maxDailyLlmBudgetUsd:' <<<"$values"
 
   frontend:
     runs-on: ubuntu-latest

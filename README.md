@@ -208,7 +208,10 @@ cd engine-rs && cargo test
 ```
 
 #### Python Architecture & Cognitive Tests
+The Python suite is an integration suite: build the Rust engine binary before
+running it.
 ```bash
+cargo build --manifest-path engine-rs/Cargo.toml --bin robotrader-node
 PYTHONPATH=. python3 -m unittest discover -s backend/tests -v
 ```
 
