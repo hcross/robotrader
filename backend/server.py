@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .agents.orchestrator import OrchestratorAgent
+from .core.health import health_router
 from .core.hierarchy import CrossChainTreasuryRouter
 from .core.schemas import Message
 from .core.state_store import state_store
@@ -27,6 +28,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(health_router)
 
 orchestrator = OrchestratorAgent(store=state_store)
 state_store.start_live_worker(interval_sec=10.0)

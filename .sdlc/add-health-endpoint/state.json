@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "change_id": "add-health-endpoint",
+  "title": "Add read-only health endpoint",
+  "issue": 11,
+  "lane": "S",
+  "lane_reason": "Additive API endpoint, one service, no money/risk/vault path, about 3 files",
+  "lane_change": null,
+  "branch": "sdlc/11-add-health-endpoint",
+  "worktree": ".worktrees/11-add-health-endpoint",
+  "base_branch": "master",
+  "base_sha": "332b7dfbc90675cebbe0f1cbd5c3084180da1dd9",
+  "created_at": "2026-10-25T21:40:25Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev",
+  "pr": 12,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "8aa620f07851802d8e6e2e7dee9de47991f21d37",
+      "updated_at": "2026-10-25T21:45:15Z"
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/11-add-health-endpoint"
+}
