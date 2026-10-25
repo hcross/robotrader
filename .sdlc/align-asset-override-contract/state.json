@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "change_id": "align-asset-override-contract",
+  "title": "Align the AssetOverride contract across Rust and Python",
+  "issue": 10,
+  "lane": "L",
+  "lane_reason": "Cross-language contract repair; breaking deny_unknown_fields; Rust+Python; needs SPEC+PLAN",
+  "lane_change": null,
+  "branch": "sdlc/10-align-asset-override-contract",
+  "worktree": ".worktrees/10-align-asset-override-contract",
+  "base_branch": "master",
+  "base_sha": "ef4de8a1eb9054d98ec8a566cc6e571574804cb4",
+  "created_at": "2026-10-25T21:53:37Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev-review",
+  "pr": 13,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "5bc41cddcf0ec84c9901bfe89cf68e959fc786b9",
+      "updated_at": "2026-10-25T22:02:53Z"
+    },
+    "plan": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-plan-reviewer",
+      "last_sha": "7e6ee05715aaf898f62bce8f1dfd3abbc92a032a",
+      "updated_at": "2026-10-25T22:13:41Z"
+    },
+    "dev": {
+      "status": "changes_requested",
+      "rounds": 1,
+      "last_verdict": "CHANGES_REQUESTED",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "c0e8435513fc0ba8e817ba8297fbfa4af9eb241c",
+      "updated_at": "2026-10-25T22:25:06Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/10-align-asset-override-contract"
+}

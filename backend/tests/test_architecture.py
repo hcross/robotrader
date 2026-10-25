@@ -34,9 +34,32 @@ class TestHybridArchitectureV2(unittest.TestCase):
         self.assertTrue(self.orchestrator.cost_guard.budget_exhausted)
 
     def test_python_to_rust_backtest_bridge_and_regime_switching(self) -> None:
+        # Capture the envelope the bridge serializes for Rust, before the binary runs.
+        captured_policy = {}
+        real_run_rust_backtest = self.store.run_rust_backtest
+
+        def capture_policy(*args, **kwargs):
+            captured_policy["policy"] = self.store.get_effective_policy()
+            return real_run_rust_backtest(*args, **kwargs)
+
+        self.store.run_rust_backtest = capture_policy
+
         # 1. Full swarm regime (all 4 pods active)
         resp_full = self.orchestrator.process_user_command("set full swarm")
         self.assertEqual(resp_full["action"], "REGIME_UPDATED")
+
+        bridge_policy = captured_policy["policy"]
+        for symbol in ("SOL-USDT", "JUP-USDT"):
+            rule = bridge_policy.asset_overrides[symbol]
+            self.assertEqual(rule.entry_obi_threshold, 0.08)
+            self.assertEqual(rule.max_rsi_long, 70.0)
+            self.assertEqual(rule.min_rsi_short, 30.0)
+            self.assertEqual(rule.take_profit_bps, 45.0)
+            self.assertEqual(rule.stop_loss_bps, 30.0)
+            self.assertIsNone(rule.support_zone_usd)
+            self.assertIsNone(rule.resistance_zone_usd)
+            self.assertIsNone(rule.invalidation_price_usd)
+
         bt_full = resp_full["backtest"]
         self.assertEqual(bt_full["total_trades"], 6)
         self.assertEqual(bt_full["rejected_orders"], 1)  # Rug token rejected

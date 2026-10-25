@@ -204,6 +204,14 @@ pub fn benchmark_market_stream() -> (Vec<MarketEvent>, PolicyEnvelope) {
             catalyst_score: 0.85,
             bias: DirectionalBias::LongBias,
             max_leverage: 2.5,
+            support_zone_usd: None,
+            resistance_zone_usd: None,
+            invalidation_price_usd: None,
+            entry_obi_threshold: None,
+            max_rsi_long: None,
+            min_rsi_short: None,
+            take_profit_bps: None,
+            stop_loss_bps: None,
         },
     );
     asset_overrides.insert(
@@ -212,6 +220,14 @@ pub fn benchmark_market_stream() -> (Vec<MarketEvent>, PolicyEnvelope) {
             catalyst_score: 0.78,
             bias: DirectionalBias::LongBias,
             max_leverage: 2.0,
+            support_zone_usd: None,
+            resistance_zone_usd: None,
+            invalidation_price_usd: None,
+            entry_obi_threshold: None,
+            max_rsi_long: None,
+            min_rsi_short: None,
+            take_profit_bps: None,
+            stop_loss_bps: None,
         },
     );
 
@@ -261,6 +277,7 @@ pub fn benchmark_market_stream() -> (Vec<MarketEvent>, PolicyEnvelope) {
             cvd_delta: 620_000.0,
             atr_pct: 2.1,
             breakout_zscore: 2.45,
+            rsi_14: None,
         },
         // 3. Pod 3: Verified Smart-Money whale accumulation on JUP
         MarketEvent::OnchainSmartMoneySwap {
@@ -310,6 +327,7 @@ pub fn benchmark_market_stream() -> (Vec<MarketEvent>, PolicyEnvelope) {
             cvd_delta: 310_000.0,
             atr_pct: 2.5,
             breakout_zscore: 2.30,
+            rsi_14: None,
         },
     ];
 
@@ -379,6 +397,14 @@ pub fn benchmark_market_stream_for_leaf(leaf_id: &str) -> (Vec<MarketEvent>, Pol
             catalyst_score: 0.84,
             bias: DirectionalBias::LongBias,
             max_leverage: 2.0,
+            support_zone_usd: None,
+            resistance_zone_usd: None,
+            invalidation_price_usd: None,
+            entry_obi_threshold: None,
+            max_rsi_long: None,
+            min_rsi_short: None,
+            take_profit_bps: None,
+            stop_loss_bps: None,
         },
     );
     asset_overrides.insert(
@@ -387,6 +413,14 @@ pub fn benchmark_market_stream_for_leaf(leaf_id: &str) -> (Vec<MarketEvent>, Pol
             catalyst_score: 0.76,
             bias: DirectionalBias::LongBias,
             max_leverage: 1.8,
+            support_zone_usd: None,
+            resistance_zone_usd: None,
+            invalidation_price_usd: None,
+            entry_obi_threshold: None,
+            max_rsi_long: None,
+            min_rsi_short: None,
+            take_profit_bps: None,
+            stop_loss_bps: None,
         },
     );
 
@@ -427,6 +461,7 @@ pub fn benchmark_market_stream_for_leaf(leaf_id: &str) -> (Vec<MarketEvent>, Pol
             cvd_delta: 480_000.0,
             atr_pct: 1.9,
             breakout_zscore: 2.35,
+            rsi_14: None,
         },
         // 3. Pod 3 (On-Chain Whale / Arbitrage): Verified accumulation on secondary pair
         MarketEvent::OnchainSmartMoneySwap {

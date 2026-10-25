@@ -126,6 +126,36 @@ class TestPerformancePopulations(unittest.TestCase):
         self.assertLess(loss_eval["net_edge_bps"], 0.0)
         self.assertGreater(loss_eval["adverse_selection_bps"], 20.0)
 
+    def test_paper_short_rsi_threshold_uses_min_rsi_short(self) -> None:
+        # Short at RSI 40: min_rsi_short=45 applies a 16 bps exhaustion penalty,
+        # while the old `100 - max_rsi_long` (= 30) derivation applied none.
+        with_min_rsi_short = HybridStateStore.compute_paper_execution_pnl(
+            notional_usd=100.0,
+            fee_usd=0.036,
+            side="SELL",
+            obi=-0.28,
+            price_change_bps=-8.0,
+            rsi_val=40.0,
+            spread_bps=2.0,
+            entry_obi_threshold=0.08,
+            max_rsi_long=70.0,
+            min_rsi_short=45.0,
+        )
+        with_legacy_threshold = HybridStateStore.compute_paper_execution_pnl(
+            notional_usd=100.0,
+            fee_usd=0.036,
+            side="SELL",
+            obi=-0.28,
+            price_change_bps=-8.0,
+            rsi_val=40.0,
+            spread_bps=2.0,
+            entry_obi_threshold=0.08,
+            max_rsi_long=70.0,
+            min_rsi_short=30.0,
+        )
+        self.assertAlmostEqual(with_min_rsi_short["adverse_selection_bps"], 16.0)
+        self.assertEqual(with_legacy_threshold["adverse_selection_bps"], 0.0)
+
     def test_paper_lifetime_counters_persist_beyond_200_window(self) -> None:
         for i in range(205):
             sim = 0.10 if i % 2 == 0 else -0.05
