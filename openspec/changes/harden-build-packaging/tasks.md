@@ -43,11 +43,11 @@ Helm, Docker, CI, and dependency cleanup. Every task stays inside one session.
 ## 6. Dependency cleanup and follow-up
 
 - [x] 6.1 Remove `litellm` from `backend/pyproject.toml`, delete `backend/config.py`, regenerate `backend/poetry.lock` with `poetry -C backend lock`, and confirm the lock has no `litellm` package block and no module imports `litellm` or `backend.config`. Record in the evidence that `strands-agents`'s extra metadata still names `litellm`; that label is package metadata, not a resolved dependency, and satisfying a literal string-absence reading would require removing `strands-agents`, which requirement 11 forbids. (covers: litellm is absent; backend config module is removed; Lockfile is consistent; No module imports the removed dependency or config)
-- [ ] 6.2 Keep `strands-agents` declared and record the wire-or-remove follow-up in the issue logbook and the PR body, citing `docs/agents.md` and ADR-0001 that still claim it. Evidence source: the issue comment and PR body, checked with `gh issue view 9` and `gh pr view`. (covers: strands-agents remains declared; Follow-up is recorded)
+- [x] 6.2 Keep `strands-agents` declared and record the wire-or-remove follow-up in the issue logbook and the PR body, citing `docs/agents.md` and ADR-0001 that still claim it. Evidence source: the issue comment and PR body, checked with `gh issue view 9` and `gh pr view`. (covers: strands-agents remains declared; Follow-up is recorded)
 
 ## 7. End-to-end verification
 
-- [ ] 7.1 Run every command in `## Verification` from the repository root and attach the output to the issue and the PR as evidence. (covers: all eleven requirements)
+- [x] 7.1 Run every command in `## Verification` from the repository root and attach the output to the issue and the PR as evidence. (covers: all eleven requirements)
 
 ## Verification
 
