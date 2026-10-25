@@ -8,9 +8,9 @@ Helm, Docker, CI, and dependency cleanup. Every task stays inside one session.
 
 - [ ] 1.1 Add `resolve_robotrader_binary(engine_dir)` to `backend/core/state_store.py`: return `engine-rs/target/debug/robotrader-node` when present, otherwise `engine-rs/target/release/robotrader-node`, otherwise raise the typed error; never spawn a compiler. Refactor `run_rust_backtest` onto it. (covers: Debug build is used when present; Fresh debug build wins over release; Release is used as the fallback; No compiler is invoked)
 - [ ] 1.2 Route `run_rust_backtest_for_leaf` through the same resolver, keeping the existing `leaf-solana` delegation to `run_rust_backtest`. (covers: Both methods use the selected binary)
-- [ ] 1.3 Add `backend/core/errors.py` with `RustBinaryNotFoundError` and the global handler returning HTTP 503 with `application/json` and a `detail` containing both candidate paths and `cargo build --release --manifest-path engine-rs/Cargo.toml --bin robotrader-node`; register it on the FastAPI app in `backend/server.py` and leave `/ws/chat` untouched. (covers: Actionable missing-binary error; Read endpoints return the uniform 503; Leaf backtest returns the uniform 503; Backtest mutation endpoint returns the uniform 503)
-- [ ] 1.4 Make `/api/v1/policy/regime` build the preset with `apply_regime_preset(preset, commit=False)` and call `set_policy` only after the backtest succeeds; keep `/api/v1/risk/kill` and `/chat` regime changes eager. (covers: Policy regime does not apply on a missing binary; Kill switch applies despite the missing binary; Chat commands return the uniform 503)
-- [ ] 1.5 Add `backend/tests/test_missing_binary.py`: in-process resolver precedence over temporary engine directories, handler response shape, and a subprocess integration test (the `test_health.py` isolation pattern) that patches the resolver and exercises `/status`, `/hierarchy`, `/backtest/run`, the leaf backtest, `/policy/regime`, `/risk/kill`, `/chat`, and `/api/v1/health`. (covers: Read endpoints; Leaf backtest; Backtest mutation; Policy regime; Kill switch; Chat commands; Health and process survive a missing binary)
+- [ ] 1.3 Add `backend/core/errors.py` with the pure `RustBinaryNotFoundError` and a global handler that lazy-imports `JSONResponse` inside the function and returns HTTP 503 with `application/json` and a `detail` containing both candidate paths and `cargo build --release --manifest-path engine-rs/Cargo.toml --bin robotrader-node`; register the handler on the FastAPI app in `backend/server.py` and leave `/ws/chat` untouched. The lazy import keeps `state_store.py` free of a module-level web dependency. (covers: Actionable missing-binary error; Read endpoints return the uniform 503; Leaf backtest returns the uniform 503; Backtest mutation endpoint returns the uniform 503)
+- [ ] 1.4 Add `commit: bool = True` to `MetaAllocatorAgent.apply_regime_preset` in `backend/agents/trading.py`, committing with `set_policy` only when true so `handle_message`/`SET_REGIME` stays eager; make `/api/v1/policy/regime` pass `commit=False` and call `set_policy` only after the backtest succeeds; keep `/api/v1/risk/kill` and `/chat` regime changes eager. (covers: Policy regime does not apply on a missing binary; Kill switch applies despite the missing binary; Chat commands return the uniform 503)
+- [ ] 1.5 Add `backend/tests/test_missing_binary.py`: in-process resolver precedence over temporary engine directories (asserting no `subprocess.run`/`Popen` call when missing and the same binary for both methods), handler response shape, and a subprocess integration test (the `test_health.py` isolation pattern) that patches the resolver and exercises `/status`, `/hierarchy`, `/backtest/run`, the leaf backtest, `/policy/regime`, `/risk/kill`, `/chat`, and `/api/v1/health`. The child resets `kill_switch_active` and the policy before each case and runs `/risk/kill` last; the parent asserts `backend.server` is not in `sys.modules`; daemon workers in the child are tolerated because the child exits after its assertions. Add a case proving `SET_REGIME` still commits while `/policy/regime` does not. (covers: Read endpoints; Leaf backtest; Backtest mutation; Policy regime; Kill switch; Chat commands; Health and process survive a missing binary)
 
 ## 2. Python package markers and documented test procedure
 
@@ -20,7 +20,7 @@ Helm, Docker, CI, and dependency cleanup. Every task stays inside one session.
 
 ## 3. Helm chart
 
-- [ ] 3.1 Add `charts/robotrader/templates/_helpers.tpl` defining `robotrader.fullname`, `robotrader.labels`, `robotrader.selectorLabels`, and `robotrader.maxDailyLlmBudgetUsd` with the `5.0` fallback and `printf "%.1f"` formatting. (covers: Default render succeeds; Lint succeeds)
+- [ ] 3.1 Add `charts/robotrader/templates/_helpers.tpl` defining `robotrader.fullname`, `robotrader.labels`, `robotrader.selectorLabels`, and `robotrader.maxDailyLlmBudgetUsd` with the empty/absent `5.0` fallback, the `float64` + `le 0` `fail` guard for non-numeric/zero/negative values, and `printf "%.1f"` formatting for valid values. (covers: Default render succeeds; Lint succeeds)
 - [ ] 3.2 Add `charts/robotrader/templates/service.yaml` using `.Values.service.type`, `.Values.service.port`, numeric `targetPort: 8000`, and the same selector labels as the pod template. (covers: Service matches the deployment pods)
 - [ ] 3.3 Add `charts/robotrader/templates/ingress.yaml`, rendered only when `.Values.ingress.enabled` is true, using `networking.k8s.io/v1` and the configured host and path. (covers: Ingress renders when enabled; No Ingress when disabled)
 - [ ] 3.4 Extend `charts/robotrader/templates/deployment.yaml` with `REDIS_URL` and `MAX_DAILY_LLM_BUDGET_USD`, preserving `OPENROUTER_API_KEY` and `SOLANA_RPC_URL`. (covers: Default environment values are valid; Explicit environment overrides are rendered; Empty budget override falls back to a valid number)
@@ -35,15 +35,15 @@ Helm, Docker, CI, and dependency cleanup. Every task stays inside one session.
 
 ## 5. CI
 
-- [ ] 5.1 Add the Rust toolchain and `cargo build --manifest-path engine-rs/Cargo.toml --bin robotrader-node` to the Python job before dependency installation, and run discovery from the repository root with `PYTHONPATH=. poetry -C backend run python -m unittest discover -s backend/tests -v`. (covers: Python CI job builds the binary before the suite)
+- [ ] 5.1 Add the Rust toolchain and a repository-root `cargo build --manifest-path engine-rs/Cargo.toml --bin robotrader-node` step to the Python job before dependency installation. Keep the discovery step in its existing `working-directory: backend` form with `PYTHONPATH=.. poetry run python -m unittest discover -s tests -v`; do not use `poetry -C backend` with `-s backend/tests`, because Poetry changes cwd. The root-level `PYTHONPATH=. python3 -m unittest discover -s backend/tests -v` command remains the documented local procedure. (covers: Python CI job builds the binary before the suite)
 - [ ] 5.2 Add `charts/**` to `pull_request.paths` and `push.paths` in `.github/workflows/ci.yml`. (covers: Chart-only change triggers the Helm job; Existing CI jobs and triggers are retained)
-- [ ] 5.3 Add the `helm` job with pinned Helm `v4.2.3`, `helm lint charts/robotrader`, `helm template charts/robotrader`, `helm show values` key/comment assertions, and the empty-budget render assertion. (covers: Chart-only change triggers the Helm job; Helm regression fails CI; Existing CI jobs and triggers are retained; Helm version is pinned; Default environment values are valid)
+- [ ] 5.3 Add the `helm` job with pinned Helm `v4.2.3`, `helm lint charts/robotrader`, `helm template charts/robotrader`, `helm show values` key/comment assertions, and render assertions for the empty override (`5.0`) plus the non-numeric and negative `fail` cases. (covers: Chart-only change triggers the Helm job; Helm regression fails CI; Existing CI jobs and triggers are retained; Helm version is pinned; Default environment values are valid)
 - [ ] 5.4 Confirm `.github/workflows/sdlc-checks.yml` is unchanged by the branch. (covers: Existing CI jobs and triggers are retained)
 
 ## 6. Dependency cleanup and follow-up
 
-- [ ] 6.1 Remove `litellm` from `backend/pyproject.toml`, delete `backend/config.py`, regenerate `backend/poetry.lock` with `poetry -C backend lock`, and confirm the lock has no `litellm` package block and no module imports `litellm` or `backend.config`. (covers: litellm is absent; backend config module is removed; Lockfile is consistent; No module imports the removed dependency or config)
-- [ ] 6.2 Keep `strands-agents` declared and record the wire-or-remove follow-up in the issue logbook and the PR body, citing the documentation and ADR-0001 that still claim it. (covers: strands-agents remains declared; Follow-up is recorded)
+- [ ] 6.1 Remove `litellm` from `backend/pyproject.toml`, delete `backend/config.py`, regenerate `backend/poetry.lock` with `poetry -C backend lock`, and confirm the lock has no `litellm` package block and no module imports `litellm` or `backend.config`. Record in the evidence that `strands-agents`'s extra metadata still names `litellm`; that label is package metadata, not a resolved dependency, and satisfying a literal string-absence reading would require removing `strands-agents`, which requirement 11 forbids. (covers: litellm is absent; backend config module is removed; Lockfile is consistent; No module imports the removed dependency or config)
+- [ ] 6.2 Keep `strands-agents` declared and record the wire-or-remove follow-up in the issue logbook and the PR body, citing `docs/agents.md` and ADR-0001 that still claim it. Evidence source: the issue comment and PR body, checked with `gh issue view 9` and `gh pr view`. (covers: strands-agents remains declared; Follow-up is recorded)
 
 ## 7. End-to-end verification
 
@@ -69,11 +69,18 @@ Expected: exit 0; every `test_*.py` module under `backend/tests` is listed; no
 ```bash
 PYTHONPATH=. python3 -m unittest backend.tests.test_missing_binary -v
 ```
-Expected: exit 0; resolver precedence cases pass; the 503 `detail` contains both
-candidate paths and the `--manifest-path` build command; `/api/v1/health` stays
-200 while the other endpoints return 503; `/policy/regime` leaves the effective
-policy unchanged; `/risk/kill` leaves the kill switch active; `/chat` keeps the
-applied regime.
+Expected: exit 0; resolver precedence cases pass; the missing-binary case asserts
+no `subprocess.run` or `Popen` call; both `run_rust_backtest` and
+`run_rust_backtest_for_leaf` select the same binary; the 503 `detail` contains
+both candidate paths and the `--manifest-path` build command; `/api/v1/health`
+stays 200 while the other endpoints return 503; `/policy/regime` leaves the
+effective policy unchanged; `/risk/kill` leaves the kill switch active; `/chat`
+keeps the applied regime; `SET_REGIME` still commits; the parent test asserts
+`backend.server` is not in `sys.modules`.
+
+The discovery command is run under the CI Python 3.11 and the local `python3`
+version; both must exit 0 and report no `Start directory is not importable`
+error (evidence: the CI log and the local run).
 
 ### Helm
 
@@ -87,6 +94,20 @@ helm template charts/robotrader
 ```
 Expected: exit 0; exactly one `kind: Deployment` and one `kind: Service`; no
 `kind: Ingress`.
+
+```bash
+rendered="$(helm template charts/robotrader)"
+grep -q 'name: OPENROUTER_API_KEY' <<<"$rendered"
+grep -q 'name: SOLANA_RPC_URL' <<<"$rendered"
+grep -q 'name: REDIS_URL' <<<"$rendered"
+grep -q 'name: MAX_DAILY_LLM_BUDGET_USD' <<<"$rendered"
+budget="$(awk '/name: MAX_DAILY_LLM_BUDGET_USD/{getline; gsub(/[" ]/, "", $2); print $2}' <<<"$rendered")"
+python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > 0 else 1)' "$budget"
+test "$(grep -c 'kind: Ingress' <<<"$rendered" || true)" -eq 0
+```
+Expected: every command exits 0; the default render keeps the OpenRouter and
+Solana environment, provides `REDIS_URL` and a positive numeric
+`MAX_DAILY_LLM_BUDGET_USD`, and renders no Ingress.
 
 ```bash
 helm template charts/robotrader --set ingress.enabled=true \
@@ -106,6 +127,16 @@ value `7.5`.
 helm template charts/robotrader --set env.maxDailyLlmBudgetUsd=""
 ```
 Expected: `MAX_DAILY_LLM_BUDGET_USD` value `"5.0"`.
+
+Negative validation cases (each must exit non-zero with the `fail` message, not
+render `%!f(...)`):
+
+```bash
+helm template charts/robotrader --set env.maxDailyLlmBudgetUsd=-1
+helm template charts/robotrader --set-string env.maxDailyLlmBudgetUsd=abc
+```
+Expected: both exit non-zero; the message names `env.maxDailyLlmBudgetUsd` and
+requires a positive number.
 
 ```bash
 helm show values charts/robotrader
@@ -129,22 +160,43 @@ docker build -f Dockerfile.backend -t robotrader:verify .
 Expected: exit 0.
 
 ```bash
+! grep -qx 'engine-rs/Cargo.lock' .dockerignore
+grep -q 'engine-rs/Cargo.toml' Dockerfile.backend
+grep -q 'engine-rs/Cargo.lock' Dockerfile.backend
+grep -q -- '--locked' Dockerfile.backend
+grep -q -- '--release' Dockerfile.backend
+```
+Expected: all exit 0; the lock is in the build context, the builder copies it
+before the crates, and the build is locked and release.
+
+```bash
 docker run --rm --entrypoint sh robotrader:verify -c \
   'test -x /app/engine-rs/target/release/robotrader-node && test ! -e /app/engine-rs/target/debug/robotrader-node'
 ```
 Expected: exit 0.
 
-Controlled negative check for the stale-lock failure (restores the manifest
-afterwards):
+Controlled negative check for the stale-lock failure. It is hermetic (`mktemp`,
+`EXIT` trap, clean-tree precondition and post-check). The local `--locked` run is
+a faithful proxy for the Docker builder: the builder's only relevant step is the
+same `cargo build --release --locked` on the same manifest and lockfile, with the
+base image and `COPY` adding no resolution behaviour.
 
 ```bash
-cp engine-rs/crates/node/Cargo.toml /tmp/robotrader-node-Cargo.toml.bak
-printf '\nthiserror.workspace = true\n' >> engine-rs/crates/node/Cargo.toml
-cargo build --release --locked --manifest-path engine-rs/Cargo.toml --bin robotrader-node
-cp /tmp/robotrader-node-Cargo.toml.bak engine-rs/crates/node/Cargo.toml
+manifest=engine-rs/crates/node/Cargo.toml
+backup="$(mktemp)"
+trap 'cp "$backup" "$manifest"; rm -f "$backup"' EXIT
+cp "$manifest" "$backup"
+test -z "$(git status --porcelain -- "$manifest")"
+printf '\nthiserror.workspace = true\n' >> "$manifest"
+if cargo build --release --locked --manifest-path engine-rs/Cargo.toml --bin robotrader-node; then
+  echo 'expected the locked build to fail' >&2
+  exit 1
+fi
+cp "$backup" "$manifest"
+test -z "$(git status --porcelain -- "$manifest")"
 ```
-Expected: the build exits non-zero with a lockfile-update error; the final `cp`
-restores the committed manifest.
+Expected: the locked build exits non-zero with a lockfile-update error; the tree
+is clean before and after; the trap restores the manifest on any exit.
 
 ### Dependencies
 
@@ -156,7 +208,11 @@ Expected: no match.
 ```bash
 grep -n '^name = "litellm"$' backend/poetry.lock
 ```
-Expected: no match.
+Expected: no match. Note the evidence explicitly: `strands-agents`'s
+`[package.extras]` metadata may still contain the string `litellm`; that label
+is copied package metadata, not a resolved dependency. A literal string-absence
+reading would require removing `strands-agents`, which requirement 11 forbids;
+the gate is the absence of a `litellm` package block plus a clean lock.
 
 ```bash
 test ! -e backend/config.py
@@ -177,17 +233,43 @@ Expected: both exit 0.
 ```bash
 grep -q 'strands-agents' backend/pyproject.toml
 grep -q '^name = "strands-agents"$' backend/poetry.lock
+gh issue view 9 --json comments --jq '.comments[].body' | grep -q 'strands-agents'
+gh pr view --json body --jq '.body' | grep -q 'strands-agents'
 ```
-Expected: both exit 0.
+Expected: all exit 0. The last two assert the recorded follow-up in the issue
+logbook and the PR body; if the PR does not exist yet, record the evidence in
+the issue logbook and state why the PR check is deferred to DEV.
+
+### Documentation
+
+```bash
+grep -q 'cargo build --manifest-path engine-rs/Cargo.toml --bin robotrader-node' README.md
+grep -q 'cargo build --manifest-path engine-rs/Cargo.toml --bin robotrader-node' AGENTS.md
+grep -q 'PYTHONPATH=. python3 -m unittest discover -s backend/tests -v' README.md
+grep -q 'PYTHONPATH=. python3 -m unittest discover -s backend/tests -v' AGENTS.md
+```
+Expected: all four exit 0; both documents put the build step before the discovery
+command.
 
 ### CI wiring
 
 ```bash
-grep -q 'charts/\*\*' .github/workflows/ci.yml
+test "$(grep -c 'charts/\*\*' .github/workflows/ci.yml)" -ge 2
 grep -q 'version: v4.2.3' .github/workflows/ci.yml
 grep -q 'cargo build --manifest-path engine-rs/Cargo.toml --bin robotrader-node' .github/workflows/ci.yml
+grep -q 'working-directory: backend' .github/workflows/ci.yml
+grep -q 'PYTHONPATH=.. poetry run python -m unittest discover -s tests -v' .github/workflows/ci.yml
+grep -q '^  rust:' .github/workflows/ci.yml
+grep -q '^  python:' .github/workflows/ci.yml
+grep -q '^  frontend:' .github/workflows/ci.yml
+grep -q '"engine-rs/\*\*"' .github/workflows/ci.yml
+grep -q '"backend/\*\*"' .github/workflows/ci.yml
+grep -q '"frontend/\*\*"' .github/workflows/ci.yml
 ```
-Expected: all three exit 0.
+Expected: all exit 0. `charts/**` appears in both the pull-request and push
+filters (count at least 2); the Rust build is root-runnable; the Python
+discovery keeps its `backend` working directory and `PYTHONPATH=..` form; the
+existing Rust, Python, and frontend jobs and their path filters remain.
 
 ```bash
 git diff --quiet master...HEAD -- .github/workflows/sdlc-checks.yml

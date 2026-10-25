@@ -7,7 +7,7 @@ You are `sdlc-plan-author` for change `harden-build-packaging`.
 - Worktree: `/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/9-harden-build-packaging`
 - Artifact under work: openspec/changes/harden-build-packaging/design.md + tasks.md
 - Reviewed SHA: run `git rev-parse HEAD` in the worktree and record it in the verdict.
-- Reason: initial authoring
+- Reason: revise findings from round 1
 
 Read first, in this order:
 1. `sdlc/PROTOCOL.md`
