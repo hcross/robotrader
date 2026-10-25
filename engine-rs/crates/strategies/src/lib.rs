@@ -164,12 +164,6 @@ impl StrategyPod for MomentumPod {
             (Some(rule), Some(rsi)) => rsi >= rule.min_rsi_short.unwrap_or(30.0),
             _ => true,
         };
-        let rsi_tag = match (asset_override.is_some(), *rsi_14) {
-            (true, None) => " RSI=INACTIVE".to_string(),
-            (_, Some(rsi)) => format!(" RSI={:.1}", rsi),
-            (false, None) => String::new(),
-        };
-
         let support_passes = asset_override
             .and_then(|o| o.support_zone_usd)
             .map_or(true, |support| *mid_price >= support);
@@ -231,10 +225,21 @@ impl StrategyPod for MomentumPod {
                 stop_loss_pct,
                 take_profit_pct: long_take_profit_pct,
                 token_safety: None,
-                rationale: format!(
-                    "Momentum Long: OBI +{:.2}, z={:.2}, catalyst={:.2}{}",
-                    obi, breakout_zscore, catalyst_boost, rsi_tag
-                ),
+                // Built only when an intent is emitted: no per-tick allocation.
+                rationale: match (asset_override.is_some(), *rsi_14) {
+                    (true, None) => format!(
+                        "Momentum Long: OBI +{:.2}, z={:.2}, catalyst={:.2} RSI=INACTIVE",
+                        obi, breakout_zscore, catalyst_boost
+                    ),
+                    (_, Some(rsi)) => format!(
+                        "Momentum Long: OBI +{:.2}, z={:.2}, catalyst={:.2} RSI={:.1}",
+                        obi, breakout_zscore, catalyst_boost, rsi
+                    ),
+                    (false, None) => format!(
+                        "Momentum Long: OBI +{:.2}, z={:.2}, catalyst={:.2}",
+                        obi, breakout_zscore, catalyst_boost
+                    ),
+                },
             }];
         }
 
@@ -265,10 +270,21 @@ impl StrategyPod for MomentumPod {
                 stop_loss_pct,
                 take_profit_pct: short_take_profit_pct,
                 token_safety: None,
-                rationale: format!(
-                    "Momentum Short: OBI {:.2}, z={:.2}{}",
-                    obi, breakout_zscore, rsi_tag
-                ),
+                // Built only when an intent is emitted: no per-tick allocation.
+                rationale: match (asset_override.is_some(), *rsi_14) {
+                    (true, None) => format!(
+                        "Momentum Short: OBI {:.2}, z={:.2} RSI=INACTIVE",
+                        obi, breakout_zscore
+                    ),
+                    (_, Some(rsi)) => format!(
+                        "Momentum Short: OBI {:.2}, z={:.2} RSI={:.1}",
+                        obi, breakout_zscore, rsi
+                    ),
+                    (false, None) => format!(
+                        "Momentum Short: OBI {:.2}, z={:.2}",
+                        obi, breakout_zscore
+                    ),
+                },
             }];
         }
 

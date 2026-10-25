@@ -19,6 +19,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -78,17 +79,21 @@ def _strip_comments(text: str) -> str:
 
 def _iter_scanned_files(root: Path):
     checker = Path(__file__).resolve()
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        if path.suffix not in SCANNED_SUFFIXES:
-            continue
-        try:
-            if path.resolve() == checker:
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Prune skipped trees in place: `rglob` would descend into sibling
+        # worktrees, generated targets, documentation examples, and the
+        # OpenSpec change tree, where contract copies are not declarations.
+        dirnames[:] = sorted(name for name in dirnames if name not in SKIPPED_DIRS)
+        for filename in sorted(filenames):
+            path = Path(dirpath) / filename
+            if path.suffix not in SCANNED_SUFFIXES:
                 continue
-        except OSError:
-            pass
-        yield path
+            try:
+                if path.resolve() == checker:
+                    continue
+            except OSError:
+                pass
+            yield path
 
 
 def _declarations(root: Path) -> list[Path]:

@@ -5,7 +5,9 @@ against temporary trees that exercise the duplicate, comment, docstring, and
 exemption rules.
 """
 
+import contextlib
 import importlib.util
+import io
 import shutil
 import tempfile
 import unittest
@@ -27,11 +29,34 @@ def _load_checker():
 
 
 class TestContractSingleSource(unittest.TestCase):
+    def _require_repo_checkout(self) -> None:
+        # The runtime image ships only `backend/`, `contracts/`, and the Rust
+        # binary; these tests exercise repository files that are not packaged.
+        missing = [path for path in (CHECKER, CONTRACT) if not path.exists()]
+        if missing:
+            self.skipTest(
+                "repository checkout required; not packaged in the runtime image: "
+                + ", ".join(str(path) for path in missing)
+            )
+
+    def _write_skipped_duplicates(self, root: Path) -> None:
+        targets = [
+            root / ".worktrees" / "other-change" / "contracts" / "policy_contract.conf",
+            root / "docs" / "example.py",
+            root / "openspec" / "changes" / "x" / "example.yaml",
+            root / ".sdlc" / "x" / "example.rs",
+        ]
+        for target in targets:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(f"{KEY}=900\n", encoding="utf-8")
+
     def test_repository_declares_the_contract_once(self) -> None:
+        self._require_repo_checkout()
         checker = _load_checker()
         self.assertEqual(checker.main(["--root", str(REPO_ROOT)]), 0)
 
     def test_duplicate_declaration_is_rejected(self) -> None:
+        self._require_repo_checkout()
         checker = _load_checker()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -42,6 +67,7 @@ class TestContractSingleSource(unittest.TestCase):
             self.assertEqual(checker.main(["--root", str(root)]), 1)
 
     def test_comments_and_docstrings_are_not_declarations(self) -> None:
+        self._require_repo_checkout()
         checker = _load_checker()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -63,7 +89,41 @@ class TestContractSingleSource(unittest.TestCase):
 
             self.assertEqual(checker.main(["--root", str(root)]), 0)
 
+    def test_skipped_directories_are_not_scanned(self) -> None:
+        self._require_repo_checkout()
+        checker = _load_checker()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "contracts").mkdir()
+            shutil.copy(CONTRACT, root / "contracts" / "policy_contract.conf")
+            # Mirrors the post-merge main checkout: sibling worktrees, docs, and
+            # OpenSpec copies exist but must never be treated as declarations.
+            self._write_skipped_duplicates(root)
+
+            self.assertEqual(checker.main(["--root", str(root)]), 0)
+
+    def test_root_duplicate_is_reported_while_skipped_dirs_are_ignored(self) -> None:
+        self._require_repo_checkout()
+        checker = _load_checker()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "contracts").mkdir()
+            shutil.copy(CONTRACT, root / "contracts" / "policy_contract.conf")
+            self._write_skipped_duplicates(root)
+            (root / "duplicate.conf").write_text(f"{KEY}=900\n", encoding="utf-8")
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = checker.main(["--root", str(root)])
+
+            self.assertEqual(exit_code, 1)
+            report = stderr.getvalue()
+            self.assertIn("duplicate.conf", report)
+            for skipped in (".worktrees", "docs/", "openspec/", ".sdlc"):
+                self.assertNotIn(skipped, report)
+
     def test_exempt_defaults_still_equal_the_contract_value(self) -> None:
+        self._require_repo_checkout()
         checker = _load_checker()
         declared = None
         for line in CONTRACT.read_text(encoding="utf-8").splitlines():

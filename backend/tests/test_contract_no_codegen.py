@@ -46,6 +46,20 @@ def _generated_contract_files():
 
 
 class TestNoContractCodegen(unittest.TestCase):
+    def setUp(self) -> None:
+        # The runtime image ships only `backend/`, `contracts/`, and the Rust
+        # binary; this guard inspects repository manifests that are not packaged.
+        required = [
+            REPO_ROOT / "engine-rs" / "Cargo.toml",
+            REPO_ROOT / "backend" / "pyproject.toml",
+        ]
+        missing = [path for path in required if not path.exists()]
+        if missing:
+            self.skipTest(
+                "repository checkout required; not packaged in the runtime image: "
+                + ", ".join(str(path) for path in missing)
+            )
+
     def test_no_schema_codegen_dependency_in_manifests(self) -> None:
         for manifest in _manifests():
             self.assertTrue(manifest.exists(), f"missing manifest: {manifest}")

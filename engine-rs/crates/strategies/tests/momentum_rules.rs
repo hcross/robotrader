@@ -139,10 +139,9 @@ fn short_rsi_boundary_is_inclusive() {
 fn rsi_guard_is_reported_inactive_when_rsi_14_is_absent() {
     let emitted = intents(&long_tick(100.0, 0.50, None), &envelope(Some(rule())));
     assert_eq!(emitted.len(), 1);
-    assert!(
-        emitted[0].rationale.contains("RSI=INACTIVE"),
-        "rationale must report the inactive guard, got: {}",
-        emitted[0].rationale
+    assert_eq!(
+        emitted[0].rationale,
+        "Momentum Long: OBI +0.50, z=2.00, catalyst=0.50 RSI=INACTIVE"
     );
 }
 
