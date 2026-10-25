@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev",
+  "status": "merged",
   "pr": 17,
   "areas": [],
   "stages": {
@@ -35,14 +35,21 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "11affbc8947b4dc6882fe2894a07a87ab9283087",
+      "updated_at": "2026-10-25T23:12:50Z"
     }
   },
   "escalation": null,
-  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/8-fix-policy-ttl-heartbeat"
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/8-fix-policy-ttl-heartbeat",
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-25 (run continued 2026-10-26)",
+    "at": "2026-10-25T23:13:46Z",
+    "mode": "full-auto",
+    "pr": 17,
+    "head_sha": "11affbc8947b4dc6882fe2894a07a87ab9283087"
+  }
 }
