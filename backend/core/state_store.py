@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+from .errors import RustBinaryNotFoundError
 from .hierarchy import HierarchicalFleetManager
 from .memory_palace import PalaceDrawer, StrategyMemoryPalace
 from .schemas import AssetOverride, CatalystSignal, PolicyEnvelope
@@ -49,6 +50,23 @@ def _redis_cmd(redis_url: str, *args: str) -> Optional[str]:
     except Exception:
         return None
     return None
+
+
+def resolve_robotrader_binary(engine_dir: Path) -> Path:
+    """Select the ``robotrader-node`` binary with debug-first precedence.
+
+    A fresh local debug build must win over a stale release build; the runtime
+    image ships only the release binary, so release is the fallback. No compiler
+    is invoked: a missing binary raises ``RustBinaryNotFoundError`` and callers
+    must build it explicitly before serving requests.
+    """
+    debug_binary = engine_dir / "target" / "debug" / "robotrader-node"
+    release_binary = engine_dir / "target" / "release" / "robotrader-node"
+    if debug_binary.exists():
+        return debug_binary
+    if release_binary.exists():
+        return release_binary
+    raise RustBinaryNotFoundError([debug_binary, release_binary])
 
 
 class HybridStateStore:
@@ -434,6 +452,7 @@ class HybridStateStore:
         spread_bps: float = 2.5,
         entry_obi_threshold: float = 0.08,
         max_rsi_long: float = 68.0,
+        min_rsi_short: float = 30.0,
         venue: str = "BINANCE_TESTNET_LIVE",
         pod_id: str = "pod_momentum",
     ) -> Dict[str, float]:
@@ -460,8 +479,8 @@ class HybridStateStore:
         rsi_exhaustion_bps = 0.0
         if direction > 0 and rsi_val > max_rsi_long:
             rsi_exhaustion_bps = min(22.0, (rsi_val - max_rsi_long) * 1.6 + 8.0)
-        elif direction < 0 and rsi_val < (100.0 - max_rsi_long):
-            rsi_exhaustion_bps = min(22.0, ((100.0 - max_rsi_long) - rsi_val) * 1.6 + 8.0)
+        elif direction < 0 and rsi_val < min_rsi_short:
+            rsi_exhaustion_bps = min(22.0, (min_rsi_short - rsi_val) * 1.6 + 8.0)
         adverse_selection_bps = round(adverse_obi_bps + adverse_mom_bps + rsi_exhaustion_bps, 2)
 
         # 3. Gross directional/maker alpha
@@ -580,6 +599,7 @@ class HybridStateStore:
                     spread_bps=6.0,
                     entry_obi_threshold=sol_rule.entry_obi_threshold if sol_rule else 0.08,
                     max_rsi_long=sol_rule.max_rsi_long if sol_rule else 68.0,
+                    min_rsi_short=sol_rule.min_rsi_short if sol_rule else 30.0,
                     venue="SOLANA_DEVNET_ONCHAIN",
                     pod_id=chosen_pod,
                 )
@@ -649,6 +669,7 @@ class HybridStateStore:
             spread_bps=spread_bps,
             entry_obi_threshold=rule.entry_obi_threshold if rule else 0.08,
             max_rsi_long=rule.max_rsi_long if rule else 68.0,
+            min_rsi_short=rule.min_rsi_short if rule else 30.0,
             venue="BINANCE_TESTNET_LIVE",
             pod_id=pod_Key,
         )
@@ -745,23 +766,11 @@ class HybridStateStore:
         effective_policy = policy or self.get_effective_policy()
         repo_root = Path(__file__).resolve().parents[2]
         engine_dir = repo_root / "engine-rs"
-        binary_path = engine_dir / "target" / "debug" / "robotrader-node"
+        binary_path = resolve_robotrader_binary(engine_dir)
 
         policy_json = json.dumps(effective_policy.to_dict())
 
-        if binary_path.exists():
-            cmd = [str(binary_path), "--policy-json", policy_json]
-        else:
-            cmd = [
-                "cargo",
-                "run",
-                "--quiet",
-                "--bin",
-                "robotrader-node",
-                "--",
-                "--policy-json",
-                policy_json,
-            ]
+        cmd = [str(binary_path), "--policy-json", policy_json]
 
         proc = subprocess.run(
             cmd,
@@ -788,24 +797,9 @@ class HybridStateStore:
 
         repo_root = Path(__file__).resolve().parents[2]
         engine_dir = repo_root / "engine-rs"
-        debug_bin = engine_dir / "target" / "debug" / "robotrader-node"
-        release_bin = engine_dir / "target" / "release" / "robotrader-node"
+        binary_path = resolve_robotrader_binary(engine_dir)
 
-        if debug_bin.exists():
-            cmd = [str(debug_bin), "--leaf-id", leaf_id]
-        elif release_bin.exists():
-            cmd = [str(release_bin), "--leaf-id", leaf_id]
-        else:
-            cmd = [
-                "cargo",
-                "run",
-                "--quiet",
-                "--bin",
-                "robotrader-node",
-                "--",
-                "--leaf-id",
-                leaf_id,
-            ]
+        cmd = [str(binary_path), "--leaf-id", leaf_id]
 
         proc = subprocess.run(
             cmd,

@@ -11,9 +11,17 @@ service:
 
 ingress:
   enabled: false
+  host: robotrader.local
+  path: /
 
 resources: {}
 
 env:
+  # OPENROUTER_API_KEY: OpenRouter API key used by the warm-path agents.
   openrouterApiKey: ""
+  # SOLANA_RPC_URL: Solana RPC endpoint used by the Solana tools.
   solanaRpcUrl: "https://api.mainnet-beta.solana.com"
+  # redisUrl: Redis IPC URL; the empty string selects the backend's in-memory fallback.
+  redisUrl: ""
+  # maxDailyLlmBudgetUsd: hard daily LLM budget in USD; must be a positive number.
+  maxDailyLlmBudgetUsd: 5.0

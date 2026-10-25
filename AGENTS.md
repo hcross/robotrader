@@ -86,7 +86,9 @@ cd engine-rs && cargo test
 ```
 
 ### 2. Run Python Warm-Path & Architecture Tests
+The suite is an integration suite: build the Rust engine binary first.
 ```bash
+cargo build --manifest-path engine-rs/Cargo.toml --bin robotrader-node
 PYTHONPATH=. python3 -m unittest discover -s backend/tests -v
 ```
 
@@ -104,7 +106,7 @@ docker compose up --build -d
 
 ## Coding Guidelines for Agents
 - **Zero LLM in the Hot Path**: Never place LLM calls, blocking HTTP calls, or unbounded sleeps inside `StrategyPod::on_market_event` or `HardRiskGate::validate`.
-- **PolicyEnvelope Contract**: Keep `engine-rs/crates/common/src/lib.rs` and `backend/core/schemas.py` strictly synchronized (including `AssetOverride` mechanical rules: `entry_obi_threshold`, `max_rsi_long`, `support_zone_usd`, `resistance_zone_usd`, `invalidation_price_usd`, `take_profit_bps`, `stop_loss_bps`).
+- **PolicyEnvelope Contract**: Keep `engine-rs/crates/common/src/lib.rs` and `backend/core/schemas.py` strictly synchronized. `AssetOverride` carries all eleven keys: required `catalyst_score`, `bias`, `max_leverage`, plus optional `support_zone_usd`, `resistance_zone_usd`, `invalidation_price_usd`, `entry_obi_threshold`, `max_rsi_long`, `min_rsi_short`, `take_profit_bps`, `stop_loss_bps`. Policy decoding is strict (`deny_unknown_fields`): an undeclared key fails the node instead of being dropped. `MarketEvent::OrderbookTick.rsi_14` is optional; with an override present and no value, the RSI guard reports `RSI=INACTIVE` until a warm-path producer exists.
 - **Strategy Palace Continuity**: Always query and persist reflection drawers via `StrategyMemoryPalace` in `wing="strategy_ledger"`. Ensure every cycle explicitly qualifies continuity (`INIT_THESIS`, `CONFIRMED`, `REFINED`, `INVALIDATED`).
 - **No Module Shadowing**: Warm-Path infrastructure lives in `backend/core/` so the external `strands-agents` package (`import strands`) is never shadowed.
 - **Capital Protection & Token Budgeting**: `CostGuard` (`backend/agents/monitor.py`) enforces a hard daily USD spend limit (`MAX_DAILY_LLM_BUDGET_USD`) and modulates thinking depth (`DEEP_THESIS` -> `TACTICAL_FOCUS` -> `ECO_CONSERVATION` -> `DETERMINISTIC_LOCK`). Never re-introduce unbounded automatic wallet refills.

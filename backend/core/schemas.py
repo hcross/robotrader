@@ -2,7 +2,27 @@ from __future__ import annotations
 
 import time
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# The safe-baseline TTL is declared once in `contracts/policy_contract.conf` and
+# resolved here at import, mirroring the Rust `include_str!` const scan.
+_CONTRACT_PATH = Path(__file__).resolve().parents[2] / "contracts" / "policy_contract.conf"
+_CONTRACT_KEY = "SAFE_BASELINE_TTL_SECONDS"
+
+
+def _read_contract_ttl(path: Path = _CONTRACT_PATH) -> int:
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        key, separator, value = stripped.partition("=")
+        if separator and key.strip() == _CONTRACT_KEY:
+            return int(value.strip())
+    raise RuntimeError(f"{_CONTRACT_KEY} not declared in {path}")
+
+
+SAFE_BASELINE_TTL_SECONDS = _read_contract_ttl()
 
 
 @dataclass
@@ -85,7 +105,7 @@ class PolicyEnvelope:
         return cls(
             envelope_id="safe_baseline_fallback",
             issued_at_ms=ts,
-            ttl_seconds=900,
+            ttl_seconds=SAFE_BASELINE_TTL_SECONDS,
             global_regime="LOW_VOL_CARRY",
             pod_allocations={
                 "pod_carry": PodAllocation(

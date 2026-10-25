@@ -2,11 +2,13 @@ use robotrader_backtest::{benchmark_market_stream_for_leaf, BacktestEngine};
 use robotrader_common::PolicyEnvelope;
 use robotrader_risk_gate::RustVaultEnclave;
 use std::env;
+use std::io::Read;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut leaf_id = "leaf-solana".to_string();
     let mut custom_policy_json: Option<String> = None;
+    let mut contract_roundtrip = false;
     let mut dump_vault_manifest = false;
     let mut sign_transfer = false;
     let mut dest_address = "FK286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN".to_string();
@@ -19,6 +21,8 @@ fn main() {
             leaf_id = args[i + 1].clone();
         } else if args[i] == "--policy-json" && i + 1 < args.len() {
             custom_policy_json = Some(args[i + 1].clone());
+        } else if args[i] == "--contract-roundtrip" {
+            contract_roundtrip = true;
         } else if args[i] == "--vault-manifest" {
             dump_vault_manifest = true;
         } else if args[i] == "--sign-transfer" {
@@ -31,6 +35,28 @@ fn main() {
             token = args[i + 1].clone();
         } else if args[i] == "--kill-switch" {
             kill_switch = true;
+        }
+    }
+
+    if contract_roundtrip {
+        // Side-effect-free transport: stdin JSON -> strict decode -> canonical JSON.
+        let mut raw_input = String::new();
+        std::io::stdin()
+            .read_to_string(&mut raw_input)
+            .expect("Failed to read stdin");
+        match serde_json::from_str::<PolicyEnvelope>(&raw_input) {
+            Ok(parsed) => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&parsed)
+                        .expect("Failed to serialize policy envelope")
+                );
+                return;
+            }
+            Err(err) => {
+                eprintln!("contract roundtrip decode failed: {err}");
+                std::process::exit(2);
+            }
         }
     }
 
@@ -71,13 +97,21 @@ fn main() {
         return;
     }
 
+    // Strict-decoding happens before event generation so a malformed policy
+    // can never run against the benchmark default or leak a summary to stdout.
+    let custom_envelope: Option<PolicyEnvelope> = match custom_policy_json {
+        Some(raw_json) => match serde_json::from_str::<PolicyEnvelope>(&raw_json) {
+            Ok(parsed) => Some(parsed),
+            Err(err) => {
+                eprintln!("failed to decode --policy-json: {err}");
+                std::process::exit(2);
+            }
+        },
+        None => None,
+    };
+
     let (events, default_envelope) = benchmark_market_stream_for_leaf(&leaf_id);
-    let mut envelope: PolicyEnvelope = default_envelope;
-    if let Some(raw_json) = custom_policy_json {
-        if let Ok(parsed) = serde_json::from_str::<PolicyEnvelope>(&raw_json) {
-            envelope = parsed;
-        }
-    }
+    let envelope = custom_envelope.unwrap_or(default_envelope);
 
     let engine = BacktestEngine::default();
     let summary = engine.run_for_leaf(&leaf_id, &events, &envelope);
