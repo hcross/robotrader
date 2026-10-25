@@ -842,11 +842,13 @@ def cmd_merge(args: argparse.Namespace) -> int:
 
     state["status"] = "merged"
     dest = main / ".sdlc" / args.change
-    current_runtime = common.runtime_dir(args.change)
-    if current_runtime.resolve() != dest.resolve():
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(current_runtime, dest, dirs_exist_ok=True)
     dest.mkdir(parents=True, exist_ok=True)
+    worktree = Path(state.get("worktree_abs", state["worktree"]))
+    worktree_runtime = worktree / ".sdlc" / args.change
+    if worktree_runtime.exists() and worktree_runtime.resolve() != dest.resolve():
+        # The worktree may hold untracked verdicts/revision notes that were not
+        # committed on the feature branch (they are meta-artifacts of the review).
+        shutil.copytree(worktree_runtime, dest, dirs_exist_ok=True)
     write_file(dest / "state.json", json.dumps(state, indent=2, ensure_ascii=False) + "\n")
 
     common.run(
