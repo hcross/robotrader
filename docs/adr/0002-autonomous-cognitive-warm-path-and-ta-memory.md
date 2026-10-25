@@ -34,7 +34,7 @@ Inspired by **MemPalace**, the strategist stores and queries structured drawers 
 - `wing="panorama" / room="macro_social"`: Social narratives, whale flows, macro regime shifts.
 - `wing="ta_confluences" / room="ichimoku_fib_rsi"`: Key technical setups and support/resistance zones.
 - `wing="strategy_ledger" / room="active_theses"`: Every strategic decision, its **hypothesis**, its **invalidation price**, and the **post-mortem outcome** of the previous cycle's thesis.
-- **Logical Continuity**: Every LLM prompt injects the latest drawers from `strategy_ledger` so the strategist must explicitly **CONFIRM**, **REFINE**, or **INVALIDATE** its prior thesis before emitting new rules.
+- **Logical Continuity**: Every LLM prompt injects the latest **continuity-eligible** drawers from `strategy_ledger` so the strategist must explicitly **CONFIRM**, **REFINE**, or **INVALIDATE** its prior thesis before emitting new rules. Only drawers whose `source` is `LLM` or `DETERMINISTIC_FALLBACK` are eligible. `BOOTSTRAP` drawers (seeded on a fresh install, or legacy untyped lines read back conservatively) remain visible in the UI with their badge but are excluded from the continuity prompt and the cross-wing digest.
 
 ### Pillar 3: Mechanical Rule Compilation into the Rust Hot-Path (`PolicyEnvelope` v2)
 The LLM translates its high-level thesis into **explicit mechanical execution rules** compiled into `PolicyEnvelope` and enforced in `<50µs` by the Rust pods (`engine-rs`) and Live Execution Loop:
@@ -58,7 +58,17 @@ We select near-frontier models with ultra-low token pricing on OpenRouter:
 | **Deep Inflection** | `openrouter/z-ai/glm-5.3` | `$0.079` | `$1.400` | Major regime inflection (only if budget > 60%) |
 
 The remaining daily budget ratio ($R = \text{remaining\_usd} / \text{daily\_budget\_usd}$) dynamically governs the **Cognitive Depth (`thinking_depth`)**:
-1. **`DEEP_THESIS` ($R > 50\%$)** : Full multi-indicator TA + social panorama + 5 memory drawers + allowed early wakeup (`min 30s`).
-2. **`TACTICAL_FOCUS` ($20\% < R \le 50\%$)** : Compact TA summary + 2 memory drawers + `deepseek-v4.1-flash` mandatory + wakeup floor `90s`.
+1. **`DEEP_THESIS` ($R > 50\%$)** : Full multi-indicator TA + social panorama + up to 5 **eligible** memory drawers + allowed early wakeup (`min 30s`).
+2. **`TACTICAL_FOCUS` ($20\% < R \le 50\%$)** : Compact TA summary + up to 2 **eligible** memory drawers + `deepseek-v4.1-flash` mandatory + wakeup floor `90s`.
 3. **`ECO_CONSERVATION` ($5\% < R \le 20\%$)** : Minimal token footprint (`max_tokens=350`) + wakeup floor `300s`.
 4. **`DETERMINISTIC_LOCK` ($R \le 5\%$)** : LLM calls suspended; Rust Hot-Path operates autonomously on existing mechanical rules.
+
+The `5` and `2` drawer counts above are **maxima**, filled only by continuity-eligible (`LLM` / `DETERMINISTIC_FALLBACK`) drawers. Newer `BOOTSTRAP` drawers never hide an older eligible thesis.
+
+---
+
+## Amendment — 2026-10-25 (`fix-fabricated-metrics`)
+
+- **Pillar 2 injection rule.** Continuity injection and the cross-wing digest are limited to `LLM` and `DETERMINISTIC_FALLBACK` drawers. A `BOOTSTRAP` drawer cannot claim a prior thesis, a model, a token count, or a cost; it is displayed with a `BOOTSTRAP` badge and excluded from prompts.
+- **Depth-profile counts.** The `DEEP_THESIS` / `TACTICAL_FOCUS` drawer counts (`5` / `2`) are maxima, filled by eligible drawers only.
+- **Provenance vocabulary.** Performance payloads carry `MEASURED` / `SIMULATED` / `FIXTURE` / `BOOTSTRAP`; absent values are `null` and render as `—`. See `openspec/changes/fix-fabricated-metrics/design.md` (D8–D10) and `openspec/specs/integrity/spec.md`.

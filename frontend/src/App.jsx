@@ -54,12 +54,17 @@ const FALLBACK_STATUS = {
       leaf_default_model: 'deepseek/deepseek-v4.1-flash-1017',
     },
     treasury: {
-      total_capital_usd: 25000,
-      deployed_capital_usd: 19200,
-      dry_powder_usd: 5800,
-      dry_powder_ratio: 0.232,
+      // Cold offline skeleton: no invented portfolio, no invented aggregate.
+      total_capital_usd: null,
+      deployed_capital_usd: null,
+      dry_powder_usd: null,
+      dry_powder_ratio: null,
       min_dry_powder_ratio: 0.2,
+      active_leaves_count: null,
+      total_realized_pnl_usd: null,
+      source: 'BOOTSTRAP',
     },
+    openrouter_credit: { credit_balance_usd: null },
     leaves: [],
   },
 };
@@ -67,8 +72,18 @@ const FALLBACK_STATUS = {
 function App() {
   const [statusData, setStatusData] = useState(FALLBACK_STATUS);
   const [backendConnected, setBackendConnected] = useState(false);
+  const [lastSuccessAt, setLastSuccessAt] = useState(null);
+  const [offlineSince, setOfflineSince] = useState(null);
   const [activeTab, setActiveTab] = useState('master');
   const reqSeqRef = React.useRef(0);
+  const lastSuccessRef = React.useRef(null);
+
+  const markOffline = useCallback(() => {
+    setBackendConnected(false);
+    // Degraded only after at least one success; a cold start stays on the
+    // skeleton without an OFFLINE timestamp.
+    setOfflineSince((prev) => prev || (lastSuccessRef.current ? new Date() : null));
+  }, []);
 
   const fetchStatus = useCallback(async () => {
     const seq = ++reqSeqRef.current;
@@ -77,16 +92,22 @@ function App() {
       if (res.ok) {
         const data = await res.json();
         if (seq === reqSeqRef.current) {
+          const now = new Date();
+          lastSuccessRef.current = now;
           setStatusData(data);
+          setLastSuccessAt(now);
+          setOfflineSince(null);
           setBackendConnected(true);
         }
+      } else if (seq === reqSeqRef.current) {
+        markOffline();
       }
     } catch {
       if (seq === reqSeqRef.current) {
-        setBackendConnected(false);
+        markOffline();
       }
     }
-  }, []);
+  }, [markOffline]);
 
   useEffect(() => {
     fetchStatus();
@@ -133,11 +154,14 @@ function App() {
     }
   };
 
-  const isKilled = statusData.kill_switch?.active;
-  const sniperEnabled = Boolean(statusData.policy_envelope?.pod_allocations?.pod_sniper?.enabled);
+  // A failed poll after a success swaps the whole render payload for the cold
+  // skeleton: no retained performance or treasury value can survive.
+  const renderData = offlineSince ? FALLBACK_STATUS : statusData;
+  const isKilled = renderData.kill_switch?.active;
+  const sniperEnabled = Boolean(renderData.policy_envelope?.pod_allocations?.pod_sniper?.enabled);
   const onchainAlphaEnabled = Boolean(
-    statusData.policy_envelope?.pod_allocations?.pod_onchain_alpha?.enabled ||
-      statusData.policy_envelope?.pod_allocations?.pod_solana_alpha?.enabled
+    renderData.policy_envelope?.pod_allocations?.pod_onchain_alpha?.enabled ||
+      renderData.policy_envelope?.pod_allocations?.pod_solana_alpha?.enabled
   );
   const activePreset = sniperEnabled
     ? 'FULL_SWARM'
@@ -145,7 +169,7 @@ function App() {
       ? 'RISK_ON_HIGH_VOL'
       : 'DEFENSIVE';
 
-  const allLeaves = statusData?.hierarchy?.leaves || [];
+  const allLeaves = renderData?.hierarchy?.leaves || [];
   const primaryIds = new Set(PRIMARY_LEAF_TABS.map((t) => t.id));
   const secondaryLeaves = allLeaves.filter((l) => !primaryIds.has(l.id));
 
@@ -212,7 +236,11 @@ function App() {
                 : 'border-amber-500/40 bg-amber-500/10 text-amber-300'
             }`}
           >
-            {backendConnected ? 'IPC Live' : 'Backend hors ligne'}
+            {offlineSince && lastSuccessAt
+              ? `OFFLINE — last success ${lastSuccessAt.toLocaleTimeString('fr-FR')}`
+              : backendConnected
+                ? 'IPC Live'
+                : 'Backend hors ligne'}
           </span>
         </div>
       </header>
@@ -294,18 +322,20 @@ function App() {
         <div className="lg:col-span-2 space-y-6">
           {activeTab === 'master' ? (
             <MasterOverview
-              statusData={statusData}
+              statusData={renderData}
               apiBase={API_BASE}
               onRefresh={fetchStatus}
               onSelectLeaf={(leafId) => setActiveTab(leafId)}
+              offlineSince={offlineSince}
             />
           ) : (
             <LeafAgentView
               leafId={activeTab}
-              statusData={statusData}
+              statusData={renderData}
               apiBase={API_BASE}
               onRefresh={fetchStatus}
               onBackToMaster={() => setActiveTab('master')}
+              offlineSince={offlineSince}
             />
           )}
         </div>

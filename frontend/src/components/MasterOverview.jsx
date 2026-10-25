@@ -14,6 +14,8 @@ import {
   Rss,
 } from 'lucide-react';
 import LLMInspectionModal from './LLMInspectionModal';
+import SourceBadge from './SourceBadge';
+import { formatMetric, formatOperational } from '../lib/provenance';
 
 const CHAIN_TOKENS = {
   Solana: ['SOL', 'USDC', 'USDT', 'JUP', 'RAY'],
@@ -54,13 +56,8 @@ const POSTURE_BADGES = {
 const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
   const hierarchy = statusData?.hierarchy || {};
   const master = hierarchy.master_orchestrator || {};
-  const treasury = hierarchy.treasury || {
-    total_capital_usd: 25000,
-    deployed_capital_usd: 19200,
-    dry_powder_usd: 5800,
-    dry_powder_ratio: 0.232,
-    min_dry_powder_ratio: 0.2,
-  };
+  // No local fallback portfolio: an absent treasury renders as an em dash.
+  const treasury = hierarchy.treasury || {};
   const leaves = hierarchy.leaves || [];
   const openrouterCredit =
     hierarchy.openrouter_credit || statusData?.cost_guard?.openrouter_credit || {};
@@ -336,22 +333,31 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
               Capital Total Maître
             </div>
             <div className="text-2xl font-bold text-white mt-0.5">
-              ${Number(treasury.total_capital_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {formatOperational(treasury.total_capital_usd, 'money')}
             </div>
-            <div className="text-[11px] text-emerald-400 mt-0.5">
-              PnL Global Flotte : +${Number(treasury.total_realized_pnl_usd || 0).toFixed(2)}
+            <div className="text-[11px] text-emerald-400 mt-0.5 flex items-center gap-1.5">
+              PnL Global Flotte :{' '}
+              {formatMetric(
+                treasury.total_realized_pnl_usd,
+                treasury.source,
+                'signedMoney'
+              )}
+              <SourceBadge source={treasury.source} />
             </div>
           </div>
 
           <div className="bg-gray-950/70 p-3.5 rounded-lg border border-gray-800">
             <div className="text-[11px] uppercase tracking-wider text-gray-400">
-              Capital Déployé ({treasury.active_leaves_count || 11} Robots actifs)
+              Capital Déployé ({formatOperational(treasury.active_leaves_count, 'integer')} Robots
+              actifs)
             </div>
             <div className="text-2xl font-bold text-blue-300 mt-0.5">
-              ${Number(treasury.deployed_capital_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {formatOperational(treasury.deployed_capital_usd, 'money')}
             </div>
             <div className="text-[11px] text-gray-400 mt-0.5">
-              {((1 - Number(treasury.dry_powder_ratio || 0.23)) * 100).toFixed(1)}% du portefeuille en travail
+              {treasury.dry_powder_ratio === null || treasury.dry_powder_ratio === undefined
+                ? '— du portefeuille en travail'
+                : `${((1 - Number(treasury.dry_powder_ratio)) * 100).toFixed(1)}% du portefeuille en travail`}
             </div>
           </div>
 
@@ -361,11 +367,17 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
             </div>
             <div className="text-2xl font-bold text-emerald-400 mt-0.5">
-              ${Number(treasury.dry_powder_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {formatOperational(treasury.dry_powder_usd, 'money')}
             </div>
             <div className="text-[11px] text-gray-300 mt-0.5">
-              {(Number(treasury.dry_powder_ratio || 0) * 100).toFixed(1)}% disponible (Plancher sécurité :{' '}
-              {(Number(treasury.min_dry_powder_ratio || 0.2) * 100).toFixed(0)}%)
+              {formatOperational(
+                treasury.dry_powder_ratio === null || treasury.dry_powder_ratio === undefined
+                  ? null
+                  : Number(treasury.dry_powder_ratio) * 100,
+                'rate'
+              )}{' '}
+              disponible (Plancher sécurité :{' '}
+              {formatOperational(Number(treasury.min_dry_powder_ratio ?? 0.2) * 100, 'rate')})
             </div>
           </div>
 
@@ -382,10 +394,11 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
               </button>
             </div>
             <div className="text-2xl font-bold text-purple-300 mt-0.5">
-              ${Number(openrouterCredit.credit_balance_usd ?? 24.5).toFixed(2)}
+              {formatOperational(openrouterCredit.credit_balance_usd, 'money')}
             </div>
             <div className="text-[11px] text-gray-400 mt-0.5">
-              Auto-Refill avant épuisement (&lt;${openrouterCredit.low_watermark_usd ?? 5.0}) • Cap{' '}
+              Auto-Refill avant épuisement (&lt;
+              {formatOperational(openrouterCredit.low_watermark_usd ?? 5.0, 'money')}) • Cap{' '}
               {((openrouterCredit.max_profit_share_pct ?? 0.1) * 100).toFixed(0)}% PnL
             </div>
           </div>
@@ -651,7 +664,10 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/70">
-              {filteredLeaves.map((lf) => (
+              {filteredLeaves.map((lf) => {
+                const livePerf = lf.performance?.live_testnet || {};
+                const pnl = livePerf.realized_pnl_usd;
+                return (
                 <tr key={lf.id} className="hover:bg-gray-800/40 transition">
                   <td className="py-2.5 pr-3">
                     <button
@@ -696,13 +712,19 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
                   <td className="py-2.5 px-3 text-right font-mono">
                     <span
                       className={
-                        Number(lf.realized_pnl_usd || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
+                        typeof pnl === 'number'
+                          ? pnl >= 0
+                            ? 'text-emerald-400'
+                            : 'text-red-400'
+                          : 'text-gray-500'
                       }
                     >
-                      {Number(lf.realized_pnl_usd || 0) >= 0 ? '+' : ''}$
-                      {Number(lf.realized_pnl_usd || 0).toFixed(2)}
+                      {formatMetric(pnl, livePerf.source, 'signedMoney')}
                     </span>{' '}
-                    <span className="text-gray-400 text-[11px]">(SR {lf.sharpe_ratio})</span>
+                    <span className="text-gray-400 text-[11px]">
+                      (SR {formatMetric(livePerf.sharpe_ratio, livePerf.source, 'number')})
+                    </span>{' '}
+                    <SourceBadge source={livePerf.source} />
                   </td>
                   <td className="py-2.5 pl-3 text-right space-x-1.5">
                     <button
@@ -724,7 +746,8 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -882,8 +905,9 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
                 className="p-3 rounded-lg bg-gray-950/80 border border-indigo-500/20 text-xs space-y-1"
               >
                 <div className="flex items-center justify-between text-[11px]">
-                  <span className="font-mono text-indigo-300 font-semibold">
-                    👑 {drw.model_used} • {drw.thesis_continuity}
+                  <span className="font-mono text-indigo-300 font-semibold flex items-center gap-1.5">
+                    👑 {drw.model_used || 'no model call'} • {drw.thesis_continuity}
+                    <SourceBadge source={drw.source} />
                   </span>
                   <span className="text-gray-400 font-mono">
                     {drw.timestamp_ms ? new Date(drw.timestamp_ms).toLocaleTimeString('fr-FR') : ''}

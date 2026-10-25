@@ -175,7 +175,10 @@ class TestPerformancePopulations(unittest.TestCase):
         self.assertEqual(fixture["trades"], 6)
         self.assertEqual(fixture["win_rate_pct"], 100.0)
         self.assertEqual(fixture["cumulative_pnl_usd"], 25.66)
-        self.assertEqual(fixture["source"], "engine-rs deterministic replay (synthetic scenario)")
+        self.assertEqual(fixture["source"], "FIXTURE")
+        self.assertEqual(
+            fixture["source_detail"], "engine-rs deterministic replay (synthetic scenario)"
+        )
 
     def test_win_rate_breakdown_counts_flat_executions(self) -> None:
         stats = HybridStateStore._sample_stats(

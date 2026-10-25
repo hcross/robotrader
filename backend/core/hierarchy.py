@@ -10,7 +10,72 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..tools.rss_tools import EcosystemRSSAggregator
+from . import provenance
 from .memory_palace import PalaceDrawer, StrategyMemoryPalace
+
+# The persisted execution ledger is Solana-filtered at load, so `leaf-solana` is
+# the only leaf whose live metrics can be attributed to rows in this change.
+ATTRIBUTED_LIVE_LEAF_IDS = ("leaf-solana",)
+
+# Legacy performance keys that must never be rehydrated or re-persisted.
+LEGACY_PERFORMANCE_KEYS = (
+    "realized_pnl_usd",
+    "paper_pnl_usd",
+    "sharpe_ratio",
+    "win_rate_pct",
+    "active_positions_count",
+)
+
+LIVE_SOURCE_DETAIL = (
+    "realized_pnl_usd (testnet/devnet orders), Solana-filtered ledger, "
+    "recent 200-row window"
+)
+PAPER_SOURCE_DETAIL = "simulated_pnl_usd (L2 slippage + adverse-selection paper model)"
+TREASURY_SOURCE_DETAIL = (
+    "sum of measured leaf realized_pnl_usd over the recent 200-row window"
+)
+
+
+def leaf_performance(
+    leaf_id: str, populations: Optional[Dict[str, Any]] = None
+) -> Dict[str, Dict[str, Any]]:
+    """Two performance sub-blocks, each carrying its own population source.
+
+    A leaf with no attributed rows reports ``null`` values while keeping the
+    population source: population identity is knowledge, not an observation
+    about the values. ``leaf-solana`` is the only attributed leaf because the
+    persisted ledger is Solana-filtered at load.
+    """
+    live: Dict[str, Any] = {
+        "source": provenance.METRIC_SOURCES[0],  # MEASURED
+        "source_detail": LIVE_SOURCE_DETAIL,
+        "realized_pnl_usd": None,
+        "win_rate_pct": None,
+        "sharpe_ratio": None,
+    }
+    paper: Dict[str, Any] = {
+        "source": provenance.METRIC_SOURCES[1],  # SIMULATED
+        "source_detail": PAPER_SOURCE_DETAIL,
+        "paper_pnl_usd": None,
+        "win_rate_pct": None,
+        "sharpe_ratio": None,
+    }
+    if populations and leaf_id in ATTRIBUTED_LIVE_LEAF_IDS:
+        live_population = populations.get("live_testnet") or {}
+        recent = live_population.get("recent") or {}
+        if int(recent.get("trades") or 0) > 0:
+            live["realized_pnl_usd"] = round(float(recent.get("pnl_usd", 0.0)), 4)
+            live["win_rate_pct"] = recent.get("win_rate_pct")
+            live["sharpe_ratio"] = recent.get("sharpe_ratio")
+        paper_population = populations.get("paper_model") or {}
+        cumulative = paper_population.get("cumulative_pnl_usd")
+        if cumulative is not None:
+            paper["paper_pnl_usd"] = round(float(cumulative), 2)
+        lifetime = paper_population.get("lifetime") or {}
+        paper["win_rate_pct"] = lifetime.get("win_rate_pct")
+        # The paper population records no Sharpe.
+        paper["sharpe_ratio"] = None
+    return {"live_testnet": live, "paper_model": paper}
 
 # Reference prices in USD for multi-chain checkout & valuation
 TOKEN_PRICES_USD: Dict[str, float] = {
@@ -1421,14 +1486,9 @@ class HierarchicalFleetManager:
                 "wallet_vault": wallet_vault,
                 "last_price_usd": float(TOKEN_PRICES_USD.get(spec["symbol"], 1.0)),
                 "ta_metrics": dict(spec.get("ta_specific_metrics", {})),
-                "sharpe_ratio": 2.45 if alloc_usd > 0 else 1.65,
-                "win_rate_pct": 64.5 if alloc_usd > 0 else 58.0,
                 "base_interval_sec": 900 if alloc_usd > 0 else 3600,
                 "target_annual_return_pct": 35.0 if posture == "AGGRESSIVE" else (18.0 if posture == "BALANCED" else 8.0),
                 "max_drawdown_limit_pct": 4.0 if posture == "AGGRESSIVE" else 2.5,
-                "realized_pnl_usd": round(alloc_usd * 0.018, 2) if alloc_usd > 0 else 0.0,
-                "paper_pnl_usd": round(alloc_usd * 0.022, 2) if alloc_usd > 0 else 0.0,
-                "active_positions_count": 2 if alloc_usd >= 600 else (1 if alloc_usd > 0 else 0),
                 "last_reflection_ms": now_ms,
                 "objective_summary": obj_summary,
                 "last_hypothesis": obj_summary,
@@ -1452,9 +1512,9 @@ class HierarchicalFleetManager:
                     timestamp_ms=now_ms,
                     wing="master_orchestrator",
                     room="macro_allocation",
-                    model_used=self.master_model,
+                    model_used="",
                     thinking_depth="DEEP_THESIS",
-                    thesis_continuity="CONFIRMED",
+                    thesis_continuity="INITIAL",
                     global_regime="TRENDING_BULL",
                     panorama_summary="Flux institutionnels soutenus sur Solana, Bitcoin et Sui ; frais CCTP/Wormhole en baisse de 18%.",
                     ta_confluence_notes="Inspection transversale des 26 MemPalaces feuilles : confluence haussière SOL ($152.40) + BTC ($80,775) + SUI ($3.15).",
@@ -1466,8 +1526,9 @@ class HierarchicalFleetManager:
                     },
                     next_wakeup_sec=900,
                     wakeup_reason="Cycle stratégique long terme de l'Orchestrateur Maître (15m)",
-                    tokens_used=1420,
-                    cost_usd=0.00048,
+                    tokens_used=0,
+                    cost_usd=0.0,
+                    source=provenance.DRAWER_SOURCES[2],  # BOOTSTRAP
                 )
             )
 
@@ -1481,9 +1542,9 @@ class HierarchicalFleetManager:
                         timestamp_ms=now_ms,
                         wing=wing,
                         room="active_theses",
-                        model_used=self.leaf_default_model,
+                        model_used="",
                         thinking_depth="DEEP_THESIS" if leaf["enabled"] else "ECO_CONSERVATION",
-                        thesis_continuity="CONFIRMED",
+                        thesis_continuity="INITIAL",
                         global_regime=str(ta.get("kumo_regime", "ABOVE_KUMO_BULLISH")),
                         panorama_summary=f"Flux RSS {leaf['chain']} positifs ; isolation stricte sur {', '.join(leaf['exclusive_assets'][:2])}.",
                         ta_confluence_notes=f"{leaf['chain']} : Fib 0.618={ta.get('golden_pocket_fib_618')}, RSI(14)={ta.get('rsi_14')}, OBI={ta.get('obi_l2')}.",
@@ -1496,8 +1557,9 @@ class HierarchicalFleetManager:
                         },
                         next_wakeup_sec=120 if leaf["enabled"] else 600,
                         wakeup_reason=f"Surveillance dédiée {leaf['chain']}",
-                        tokens_used=620,
-                        cost_usd=0.00004,
+                        tokens_used=0,
+                        cost_usd=0.0,
+                        source=provenance.DRAWER_SOURCES[2],  # BOOTSTRAP
                     )
                 )
 
@@ -1538,21 +1600,23 @@ class HierarchicalFleetManager:
                 data.get("long_term_strategy_thesis", self.long_term_strategy_thesis)
             )
             saved_leaves = data.get("leaves", {})
+            legacy_performance_present = False
             if isinstance(saved_leaves, dict):
                 for lid, state in saved_leaves.items():
                     if lid in self.leaves and isinstance(state, dict):
+                        # Performance keys written before this change are
+                        # ignored: performance is recomputed from evidence only.
                         for k in (
                             "allocated_capital_usd",
                             "capital_weight",
                             "risk_posture",
                             "enabled",
-                            "realized_pnl_usd",
-                            "paper_pnl_usd",
-                            "active_positions_count",
                             "objective_summary",
                         ):
                             if k in state:
                                 self.leaves[lid][k] = state[k]
+                        if any(k in state for k in LEGACY_PERFORMANCE_KEYS):
+                            legacy_performance_present = True
                         self.leaves[lid]["weight_pct"] = round(
                             float(self.leaves[lid].get("capital_weight", 0.0)) * 100.0, 2
                         )
@@ -1560,35 +1624,46 @@ class HierarchicalFleetManager:
                 self.deposit_history = data["deposit_history"][:25]
             if isinstance(data.get("checkout_history"), list):
                 self.checkout_history = data["checkout_history"][:25]
+            if legacy_performance_present:
+                # Lazy, best-effort compaction of the disposable cache with the
+                # complete payload. Correctness never depends on it: load
+                # already ignored the legacy keys.
+                try:
+                    self._redis_cmd(
+                        self._redis_url,
+                        "SET",
+                        self.REDIS_HIERARCHY_KEY,
+                        json.dumps(self._persisted_payload(), ensure_ascii=False),
+                    )
+                except Exception:
+                    pass
         except Exception:
             pass
+
+    def _persisted_payload(self) -> Dict[str, Any]:
+        """The complete hierarchy payload, shared by persist and compaction."""
+        return {
+            "total_capital_usd": self.total_capital_usd,
+            "long_term_strategy_thesis": self.long_term_strategy_thesis,
+            "leaves": {
+                lid: {
+                    "allocated_capital_usd": v["allocated_capital_usd"],
+                    "capital_weight": v["capital_weight"],
+                    "risk_posture": v["risk_posture"],
+                    "enabled": v["enabled"],
+                    "objective_summary": v["objective_summary"],
+                }
+                for lid, v in self.leaves.items()
+            },
+            "deposit_history": self.deposit_history[:25],
+            "checkout_history": self.checkout_history[:25],
+        }
 
     def persist(self) -> None:
         if not self._redis_url or not self._redis_cmd:
             return
         try:
-            payload = json.dumps(
-                {
-                    "total_capital_usd": self.total_capital_usd,
-                    "long_term_strategy_thesis": self.long_term_strategy_thesis,
-                    "leaves": {
-                        lid: {
-                            "allocated_capital_usd": v["allocated_capital_usd"],
-                            "capital_weight": v["capital_weight"],
-                            "risk_posture": v["risk_posture"],
-                            "enabled": v["enabled"],
-                            "realized_pnl_usd": v["realized_pnl_usd"],
-                            "paper_pnl_usd": v["paper_pnl_usd"],
-                            "active_positions_count": v["active_positions_count"],
-                            "objective_summary": v["objective_summary"],
-                        }
-                        for lid, v in self.leaves.items()
-                    },
-                    "deposit_history": self.deposit_history[:25],
-                    "checkout_history": self.checkout_history[:25],
-                },
-                ensure_ascii=False,
-            )
+            payload = json.dumps(self._persisted_payload(), ensure_ascii=False)
             self._redis_cmd(self._redis_url, "SET", self.REDIS_HIERARCHY_KEY, payload)
         except Exception:
             pass
@@ -1815,7 +1890,6 @@ class HierarchicalFleetManager:
         leaf["weight_pct"] = 0.0
         leaf["enabled"] = False
         leaf["risk_posture"] = "HIBERNATION"
-        leaf["active_positions_count"] = 0
         leaf["objective_summary"] = f"🛑 Liquidé et rapatrié vers Dry Powder (${repatriated_usd:.2f}) — Motif : {reason}"
         leaf["last_hypothesis"] = leaf["objective_summary"]
         self.persist()
@@ -1832,6 +1906,7 @@ class HierarchicalFleetManager:
         leaf_id: str,
         risk_posture: Optional[str] = None,
         allocated_capital_usd: Optional[float] = None,
+        populations: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if leaf_id not in self.leaves:
             return {"status": "error", "reason": f"Agent feuille inconnu: {leaf_id}"}
@@ -1862,22 +1937,29 @@ class HierarchicalFleetManager:
                 leaf["enabled"] = True
 
         self.persist()
-        return {"status": "updated", "leaf": self.get_leaf_detail(leaf_id)}
+        return {"status": "updated", "leaf": self.get_leaf_detail(leaf_id, populations=populations)}
 
-    def get_leaf_detail(self, leaf_id: str, solana_live_metrics: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def get_leaf_detail(
+        self,
+        leaf_id: str,
+        solana_live_metrics: Optional[Dict[str, Any]] = None,
+        populations: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         leaf = dict(self.leaves.get(leaf_id, self.leaves["leaf-solana"]))
         wing = str(leaf["mempalace_wing"])
         rss_feed = EcosystemRSSAggregator.get_feed_for_agent(leaf_id)
         drawers = self.palace.recall_recent(limit=6, wing=wing)
         leaf["rss_feed"] = rss_feed
         leaf["palace_drawers"] = drawers
-        if leaf_id == "leaf-solana" and solana_live_metrics:
-            leaf["paper_pnl_usd"] = round(
-                float(solana_live_metrics.get("paper_model", {}).get("cumulative_pnl_usd", 0.0)), 2
-            )
-            leaf["realized_pnl_usd"] = round(
-                float(solana_live_metrics.get("live_testnet", {}).get("cumulative_cex_pnl_usd", 0.0)), 4
-            )
+        # Performance is derived on every call path; a defensive no-populations
+        # path returns null values with the population sources intact.
+        effective_populations = populations if populations is not None else solana_live_metrics
+        leaf["performance"] = leaf_performance(leaf_id, effective_populations)
+        # Flat performance keys are removed, not mirrored: there is no second
+        # write path to diverge. No position ledger exists, so the count is null.
+        for key in ("realized_pnl_usd", "paper_pnl_usd", "sharpe_ratio", "win_rate_pct"):
+            leaf.pop(key, None)
+        leaf["active_positions_count"] = None
         return {
             **leaf,
             "leaf": leaf,
@@ -1900,10 +1982,26 @@ class HierarchicalFleetManager:
         all_wings = [str(spec["mempalace_wing"]) for spec in LEAF_ECOSYSTEM_CATALOG]
         macro_rss = EcosystemRSSAggregator.get_feed_for_agent("master")
         or_credit = dict(eff_cost.get("openrouter_credit", {}))
-        or_credit.setdefault("credit_balance_usd", or_credit.get("balance_usd", 24.5))
+        if "credit_balance_usd" not in or_credit:
+            or_credit["credit_balance_usd"] = or_credit.get("balance_usd")
         or_credit.setdefault("max_profit_share_pct", 0.10)
-        active_cnt = sum(1 for lf in leaves_list if float(lf.get("allocated_capital_usd", 0.0)) > 0)
-        tot_pnl = round(sum(float(lf.get("realized_pnl_usd", 0.0)) for lf in leaves_list), 2)
+        active_cnt = (
+            None
+            if not leaves_list
+            else sum(1 for lf in leaves_list if float(lf.get("allocated_capital_usd", 0.0)) > 0)
+        )
+        measured_pnls = [
+            lf["performance"]["live_testnet"]["realized_pnl_usd"]
+            for lf in leaves_list
+            if lf.get("performance", {}).get("live_testnet", {}).get("realized_pnl_usd")
+            is not None
+        ]
+        tot_pnl = round(sum(measured_pnls), 2) if measured_pnls else None
+        treasury_source = (
+            provenance.METRIC_SOURCES[0]  # MEASURED
+            if tot_pnl is not None
+            else provenance.METRIC_SOURCES[3]  # BOOTSTRAP
+        )
         return {
             "architecture": "hierarchical_master_leaf_v3",
             "master_orchestrator": {
@@ -1934,6 +2032,8 @@ class HierarchicalFleetManager:
                 "min_dry_powder_ratio_pct": round(self.min_dry_powder_ratio * 100.0, 1),
                 "active_leaves_count": active_cnt,
                 "total_realized_pnl_usd": tot_pnl,
+                "source": treasury_source,
+                "source_detail": TREASURY_SOURCE_DETAIL,
                 "supported_checkout_tokens": list(TOKEN_PRICES_USD.keys()),
                 "token_prices_usd": TOKEN_PRICES_USD,
                 "deposit_history": self.deposit_history[:10],

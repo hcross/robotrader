@@ -6,6 +6,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+from ..core import provenance
 from ..core.agent import BaseWarmAgent, CallResult
 from ..core.memory_palace import PalaceDrawer
 from ..core.schemas import AssetOverride, CatalystSignal, Message
@@ -389,10 +390,11 @@ class OrchestratorAgent(BaseWarmAgent):
                 f"Golden Pocket Fibonacci 0.618 à ${fib_618:.2f} (écart {fib_dist_bps:.0f} bps)."
             )
 
+            parsed_from_llm = parsed is not None and (p_tok + c_tok) > 0
             if not parsed:
                 early_wakeup = max(min_wakeup, min(base_interval, 45 if fib_dist_bps < 30.0 else base_interval))
                 parsed = {
-                    "thesis_continuity": "CONFIRMED" if self.store.palace.drawers else "INITIAL",
+                    "thesis_continuity": self.store.palace.fallback_continuity("strategy_ledger"),
                     "panorama_summary": default_panorama,
                     "ta_confluence_notes": default_ta_notes,
                     "hypothesis": (
@@ -476,14 +478,22 @@ class OrchestratorAgent(BaseWarmAgent):
             self.store.set_policy(current_policy)
 
             call_cost = self.cost_guard.compute_call_cost(used_model, p_tok, c_tok)
+            billed_tokens = p_tok + c_tok
+            drawer_source = (
+                provenance.DRAWER_SOURCES[0]  # LLM
+                if parsed_from_llm
+                else provenance.DRAWER_SOURCES[1]  # DETERMINISTIC_FALLBACK
+            )
+            # A fallback with no billed call carries no fabricated telemetry.
+            telemetry_model = used_model if billed_tokens > 0 else ""
             drawer = PalaceDrawer(
                 drawer_id=f"drw_{now_ms}",
                 timestamp_ms=now_ms,
                 wing="strategy_ledger",
                 room="active_theses",
-                model_used=used_model,
+                model_used=telemetry_model,
                 thinking_depth=thinking_depth,
-                thesis_continuity=str(parsed.get("thesis_continuity", "CONFIRMED")),
+                thesis_continuity=str(parsed.get("thesis_continuity", "INITIAL")),
                 global_regime=current_policy.global_regime,
                 panorama_summary=str(parsed.get("panorama_summary", "")),
                 ta_confluence_notes=str(parsed.get("ta_confluence_notes", "")),
@@ -492,8 +502,9 @@ class OrchestratorAgent(BaseWarmAgent):
                 compiled_rules_summary=compiled_summary,
                 next_wakeup_sec=effective_wakeup_sec,
                 wakeup_reason=wakeup_reason,
-                tokens_used=p_tok + c_tok,
+                tokens_used=billed_tokens,
                 cost_usd=call_cost,
+                source=drawer_source,
             )
             self.store.palace.add_drawer(drawer)
 
@@ -503,7 +514,7 @@ class OrchestratorAgent(BaseWarmAgent):
                 timestamp_ms=now_ms,
                 wing="leaf_solana",
                 room="active_theses",
-                model_used=used_model,
+                model_used=telemetry_model,
                 thinking_depth=thinking_depth,
                 thesis_continuity=drawer.thesis_continuity,
                 global_regime=drawer.global_regime,
@@ -514,8 +525,9 @@ class OrchestratorAgent(BaseWarmAgent):
                 compiled_rules_summary=compiled_summary,
                 next_wakeup_sec=effective_wakeup_sec,
                 wakeup_reason=wakeup_reason,
-                tokens_used=p_tok + c_tok,
+                tokens_used=billed_tokens,
                 cost_usd=call_cost,
+                source=drawer.source,
             )
             self.store.palace.add_drawer(leaf_sol_drawer)
             if "leaf-solana" in self.store.hierarchy.leaves:
@@ -571,13 +583,10 @@ class OrchestratorAgent(BaseWarmAgent):
             )
             cross_wing_digest = self.store.palace.format_cross_wing_digest(limit_per_wing=1)
 
-            # Check OpenRouter credit balance & auto-refill before exhaustion
-            total_realized_pnl = sum(
-                float(lf.get("realized_pnl_usd", 0.0))
-                for lf in self.store.hierarchy.leaves.values()
-            ) + float(self.store.live_pnl_usd)
+            # Check OpenRouter credit balance & auto-refill before exhaustion.
+            # Only measured realized PnL, null-safe, with no fabricated floor.
             refill_check = self.cost_guard.trigger_openrouter_refill(
-                realized_trading_pnl_usd=max(125.0, total_realized_pnl),
+                realized_trading_pnl_usd=self.store.measured_realized_pnl_usd(),
                 force=False,
             )
 
@@ -593,8 +602,12 @@ class OrchestratorAgent(BaseWarmAgent):
                     "allocated_usd": lf["allocated_capital_usd"],
                     "weight_pct": lf["weight_pct"],
                     "posture": lf["risk_posture"],
-                    "pnl_usd": lf["realized_pnl_usd"],
-                    "sharpe": lf["sharpe_ratio"],
+                    "pnl_usd": (lf.get("performance") or {})
+                    .get("live_testnet", {})
+                    .get("realized_pnl_usd"),
+                    "sharpe": (lf.get("performance") or {})
+                    .get("live_testnet", {})
+                    .get("sharpe_ratio"),
                 }
                 for lf in h_snap["leaves"]
                 if lf["allocated_capital_usd"] > 0 or lf["tier"] in ("P0_CORE", "P1_MAJOR", "VENUE_MULTI")
@@ -697,9 +710,10 @@ class OrchestratorAgent(BaseWarmAgent):
                     )
                 )
 
+            parsed_from_llm = parsed is not None and (p_tok + c_tok) > 0
             if not parsed:
                 parsed = {
-                    "thesis_continuity": "CONFIRMED",
+                    "thesis_continuity": self.store.palace.fallback_continuity("master_orchestrator"),
                     "long_term_strategy": (
                         f"Allocation cœur sur Solana ($6.5k), Bitcoin ($5.5k) et Ethereum ($4.2k) complétée par Hyperliquid et Sui, "
                         f"tout en sanctuarisant ${treasury['dry_powder_usd']:.0f} ({treasury['dry_powder_ratio']*100:.1f}%) en Dry Powder "
@@ -739,15 +753,21 @@ class OrchestratorAgent(BaseWarmAgent):
             next_sec = max(900, min(14400, int(parsed.get("next_wakeup_sec", 3600))))
             wakeup_reason = str(parsed.get("wakeup_reason", "Cycle macro 1h (3600s)"))
             call_cost = self.cost_guard.compute_call_cost(used_model, p_tok, c_tok)
-
+            billed_tokens = p_tok + c_tok
+            drawer_source = (
+                provenance.DRAWER_SOURCES[0]  # LLM
+                if parsed_from_llm
+                else provenance.DRAWER_SOURCES[1]  # DETERMINISTIC_FALLBACK
+            )
+            telemetry_model = used_model if billed_tokens > 0 else ""
             drawer = PalaceDrawer(
                 drawer_id=f"drw_master_{now_ms}",
                 timestamp_ms=now_ms,
                 wing="master_orchestrator",
                 room="macro_allocation",
-                model_used=used_model,
+                model_used=telemetry_model,
                 thinking_depth="MASTER_LONG_TERM",
-                thesis_continuity=str(parsed.get("thesis_continuity", "CONFIRMED")),
+                thesis_continuity=str(parsed.get("thesis_continuity", "INITIAL")),
                 global_regime="HIERARCHICAL_MULTI_CHAIN",
                 panorama_summary=str(parsed.get("macro_regime_summary", "")),
                 ta_confluence_notes=str(parsed.get("capital_allocation_rationale", "")),
@@ -756,8 +776,9 @@ class OrchestratorAgent(BaseWarmAgent):
                 compiled_rules_summary=posture_updates if isinstance(posture_updates, dict) else {},
                 next_wakeup_sec=next_sec,
                 wakeup_reason=wakeup_reason,
-                tokens_used=p_tok + c_tok,
+                tokens_used=billed_tokens,
                 cost_usd=call_cost,
+                source=drawer_source,
             )
             self.store.palace.add_drawer(drawer)
 
@@ -887,9 +908,10 @@ class OrchestratorAgent(BaseWarmAgent):
                 )
 
             primary_pair = leaf["exclusive_assets"][0] if leaf["exclusive_assets"] else f"{leaf['symbol']}/USDT"
+            parsed_from_llm = parsed is not None and (p_tok + c_tok) > 0
             if not parsed:
                 parsed = {
-                    "thesis_continuity": "CONFIRMED",
+                    "thesis_continuity": self.store.palace.fallback_continuity(wing),
                     "panorama_summary": rss_headlines[0] if rss_headlines else f"Flux {leaf['chain']} stable.",
                     "ta_confluence_notes": (
                         f"{primary_pair} (${leaf['last_price_usd']}): "
@@ -907,14 +929,21 @@ class OrchestratorAgent(BaseWarmAgent):
 
             next_sec = max(60, min(1800, int(parsed.get("next_wakeup_sec", leaf.get("base_interval_sec", 180)))))
             call_cost = self.cost_guard.compute_call_cost(used_model, p_tok, c_tok)
+            billed_tokens = p_tok + c_tok
+            drawer_source = (
+                provenance.DRAWER_SOURCES[0]  # LLM
+                if parsed_from_llm
+                else provenance.DRAWER_SOURCES[1]  # DETERMINISTIC_FALLBACK
+            )
+            telemetry_model = used_model if billed_tokens > 0 else ""
             drawer = PalaceDrawer(
                 drawer_id=f"drw_{wing}_{now_ms}",
                 timestamp_ms=now_ms,
                 wing=wing,
                 room="active_theses",
-                model_used=used_model,
+                model_used=telemetry_model,
                 thinking_depth=str(profile["thinking_depth"]),
-                thesis_continuity=str(parsed.get("thesis_continuity", "CONFIRMED")),
+                thesis_continuity=str(parsed.get("thesis_continuity", "INITIAL")),
                 global_regime=str(leaf["risk_posture"]),
                 panorama_summary=str(parsed.get("panorama_summary", "")),
                 ta_confluence_notes=str(parsed.get("ta_confluence_notes", "")),
@@ -928,8 +957,9 @@ class OrchestratorAgent(BaseWarmAgent):
                 },
                 next_wakeup_sec=next_sec,
                 wakeup_reason=str(parsed.get("wakeup_reason", "")),
-                tokens_used=p_tok + c_tok,
+                tokens_used=billed_tokens,
                 cost_usd=call_cost,
+                source=drawer_source,
             )
             self.store.palace.add_drawer(drawer)
 

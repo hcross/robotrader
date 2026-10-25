@@ -12,8 +12,17 @@ import {
 } from 'lucide-react';
 import Dashboard from './Dashboard';
 import LLMInspectionModal from './LLMInspectionModal';
+import SourceBadge from './SourceBadge';
+import { formatMetric, formatOperational } from '../lib/provenance';
 
-const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster }) => {
+const LeafAgentView = ({
+  leafId,
+  statusData,
+  apiBase,
+  onRefresh,
+  onBackToMaster,
+  offlineSince,
+}) => {
   const [leafDetail, setLeafDetail] = useState(null);
   const [reflecting, setReflecting] = useState(false);
   const [liquidating, setLiquidating] = useState(false);
@@ -42,10 +51,17 @@ const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster 
     fetchDetail();
   }, [fetchDetail, statusData, leafId]);
 
-  const leaf = leafDetail?.leaf || summaryLeaf;
-  const rssItems = leafDetail?.rss_feed?.items || [];
-  const drawers = leafDetail?.mempalace_drawers || [];
+  // A degraded poll ignores cached detail and cached replay results: no
+  // retained performance value may leak through.
+  const effectiveDetail = offlineSince ? null : leafDetail;
+  const effectiveRust = offlineSince ? null : rustBacktestResult;
+  const leaf = effectiveDetail?.leaf || summaryLeaf;
+  const rssItems = effectiveDetail?.rss_feed?.items || [];
+  const drawers = effectiveDetail?.mempalace_drawers || [];
   const rustPods = (leaf.rust_pods || []).slice(0, 4);
+  const livePerf = leaf.performance?.live_testnet || {};
+  const paperPerf = leaf.performance?.paper_model || {};
+  const rustSource = effectiveRust?.source || leaf.last_rust_backtest?.source || 'FIXTURE';
 
   const handleRunRustPodsBacktest = async () => {
     setRunningRustPods(true);
@@ -135,12 +151,12 @@ const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster 
               Aucun trading hors-Solana (BTC et ETH ont été intégralement retirés de cette branche et délégués à leurs
               robots feuilles dédiés). Capital alloué par l&apos;Orchestrateur :{' '}
               <strong className="text-emerald-400">
-                ${Number(leaf.allocated_capital_usd ?? 6500).toLocaleString()}
+                {formatOperational(leaf.allocated_capital_usd, 'money')}
               </strong>{' '}
               ({leaf.risk_posture || 'AGGRESSIVE'}).
             </p>
           </div>
-          {Number(leaf.allocated_capital_usd ?? 6500) > 0 && (
+          {Number(leaf.allocated_capital_usd || 0) > 0 && (
             <button
               type="button"
               onClick={handleEmergencyLiquidate}
@@ -276,16 +292,38 @@ const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster 
           <div className="bg-gray-950/70 p-3.5 rounded-lg border border-gray-800">
             <div className="text-[11px] uppercase text-gray-400">PnL Réalisé &amp; Sharpe</div>
             <div
-              className={`text-2xl font-bold mt-0.5 ${
-                Number(leaf.realized_pnl_usd || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
+              className={`text-2xl font-bold mt-0.5 flex items-center gap-1.5 ${
+                typeof livePerf.realized_pnl_usd === 'number'
+                  ? livePerf.realized_pnl_usd >= 0
+                    ? 'text-emerald-400'
+                    : 'text-red-400'
+                  : 'text-gray-500'
               }`}
             >
-              {Number(leaf.realized_pnl_usd || 0) >= 0 ? '+' : ''}$
-              {Number(leaf.realized_pnl_usd || 0).toFixed(2)}
+              {formatMetric(livePerf.realized_pnl_usd, livePerf.source, 'signedMoney')}
+              <SourceBadge source={livePerf.source} />
             </div>
             <div className="text-[11px] text-gray-400 mt-0.5">
-              Sharpe Ratio : <strong className="text-white">{leaf.sharpe_ratio}</strong> • Win Rate :{' '}
-              <strong className="text-white">{leaf.win_rate_pct}%</strong>
+              Sharpe Ratio :{' '}
+              <strong className="text-white">
+                {formatMetric(livePerf.sharpe_ratio, livePerf.source, 'number')}
+              </strong>{' '}
+              • Win Rate :{' '}
+              <strong className="text-white">
+                {formatMetric(livePerf.win_rate_pct, livePerf.source, 'rate')}
+              </strong>
+            </div>
+            <div className="text-[11px] text-gray-400 mt-0.5 flex items-center gap-1.5">
+              Paper (simulé) :{' '}
+              {formatMetric(paperPerf.paper_pnl_usd, paperPerf.source, 'signedMoney')} • WR{' '}
+              {formatMetric(paperPerf.win_rate_pct, paperPerf.source, 'rate')}
+              <SourceBadge source={paperPerf.source} />
+            </div>
+            <div className="text-[11px] text-gray-400 mt-0.5">
+              Positions ouvertes :{' '}
+              <strong className="text-white">
+                {formatOperational(leaf.active_positions_count, 'integer')}
+              </strong>
             </div>
           </div>
 
@@ -331,7 +369,7 @@ const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {rustPods.map((pod, idx) => {
             const slotPnl =
-              rustBacktestResult?.pod_pnl_attribution?.[pod.slot_id] ??
+              effectiveRust?.pod_pnl_attribution?.[pod.slot_id] ??
               leaf.last_rust_backtest?.pod_pnl_attribution?.[pod.slot_id];
             return (
               <div
@@ -366,9 +404,20 @@ const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster 
 
                 {slotPnl !== undefined && (
                   <div className="pt-2 border-t border-gray-800/80 flex items-center justify-between text-[11px] font-mono">
-                    <span className="text-gray-400">Attribution Replay Rust (`engine-rs`) :</span>
-                    <span className={Number(slotPnl) >= 0 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
-                      {Number(slotPnl) >= 0 ? '+' : ''}${Number(slotPnl).toFixed(2)}
+                    <span className="text-gray-400 flex items-center gap-1.5">
+                      Attribution Replay Rust (`engine-rs`) :
+                      <SourceBadge source={rustSource} />
+                    </span>
+                    <span
+                      className={
+                        typeof slotPnl === 'number'
+                          ? slotPnl >= 0
+                            ? 'text-emerald-400 font-bold'
+                            : 'text-red-400 font-bold'
+                          : 'text-gray-500 font-bold'
+                      }
+                    >
+                      {formatMetric(slotPnl, rustSource, 'signedMoney')}
                     </span>
                   </div>
                 )}
@@ -377,29 +426,35 @@ const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster 
           })}
         </div>
 
-        {rustBacktestResult && (
+        {effectiveRust && (
           <div className="p-3.5 rounded-lg bg-gray-950 border border-orange-500/30 text-xs space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-bold text-orange-300">
+              <span className="font-bold text-orange-300 flex items-center gap-2">
                 ✅ Résultat Replay Déterministe Rust (`robotrader-node --leaf-id {leafId}`)
+                <SourceBadge source={rustSource} />
               </span>
               <div className="flex items-center gap-3 font-mono">
                 <span className="text-emerald-400 font-bold">
-                  PnL Net : +${Number(rustBacktestResult.net_profit_usd || 0).toFixed(2)}
+                  PnL Net : {formatMetric(effectiveRust.net_profit_usd, rustSource, 'signedMoney')}
                 </span>
                 <span className="text-gray-300">
-                  Sharpe : <strong>{Number(rustBacktestResult.sharpe_ratio || 0).toFixed(2)}</strong>
+                  Sharpe :{' '}
+                  <strong>{formatMetric(effectiveRust.sharpe_ratio, rustSource, 'number')}</strong>
                 </span>
                 <span className="text-gray-300">
-                  Win Rate : <strong>{Number(rustBacktestResult.win_rate_pct || 0).toFixed(1)}%</strong>
+                  Win Rate :{' '}
+                  <strong>{formatMetric(effectiveRust.win_rate_pct, rustSource, 'rate')}</strong>
                 </span>
                 <span className="text-gray-300">
-                  Trades : <strong>{rustBacktestResult.total_trades}</strong>
+                  Trades :{' '}
+                  <strong>
+                    {formatMetric(effectiveRust.total_trades, rustSource, 'integer')}
+                  </strong>
                 </span>
               </div>
             </div>
             <div className="space-y-1 max-h-40 overflow-y-auto">
-              {(rustBacktestResult.executions || []).map((ex, i) => (
+              {(effectiveRust.executions || []).map((ex, i) => (
                 <div
                   key={i}
                   className="flex flex-wrap items-center justify-between gap-2 py-1 border-b border-gray-900 font-mono text-[11px]"
@@ -408,8 +463,20 @@ const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster 
                     <strong className="text-orange-300">{ex.symbol}</strong> ({ex.side}) —{' '}
                     <span className="text-gray-400">{ex.rationale}</span>
                   </span>
-                  <span className={ex.realized_pnl_usd >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                    {ex.realized_pnl_usd >= 0 ? '+' : ''}${Number(ex.realized_pnl_usd || 0).toFixed(2)}
+                  <span
+                    className={
+                      typeof ex.realized_pnl_usd === 'number'
+                        ? ex.realized_pnl_usd >= 0
+                          ? 'text-emerald-400'
+                          : 'text-red-400'
+                        : 'text-gray-500'
+                    }
+                  >
+                    {formatMetric(
+                      ex.realized_pnl_usd,
+                      ex.source || rustSource,
+                      'signedMoney'
+                    )}
                   </span>
                 </div>
               ))}
@@ -495,10 +562,12 @@ const LeafAgentView = ({ leafId, statusData, apiBase, onRefresh, onBackToMaster 
                       {drw.thesis_continuity}
                     </span>
                     <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono text-[10px]">
-                      {drw.model_used}
+                      {drw.model_used || 'no model call'}
                     </span>
+                    <SourceBadge source={drw.source} />
                     <span className="text-[11px] text-gray-400">
-                      wing: <code>{drw.wing}</code> • {drw.tokens_used || 0} tok
+                      wing: <code>{drw.wing}</code> •{' '}
+                      {formatMetric(drw.tokens_used, drw.source, 'integer')} tok
                     </span>
                   </div>
                   <span className="text-[11px] text-emerald-400">
