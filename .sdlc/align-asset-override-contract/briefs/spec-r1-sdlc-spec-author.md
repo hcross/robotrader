@@ -7,7 +7,7 @@ You are `sdlc-spec-author` for change `align-asset-override-contract`.
 - Worktree: `/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/10-align-asset-override-contract`
 - Artifact under work: openspec/changes/align-asset-override-contract/proposal.md + specs/** + tasks.md (Lane S)
 - Reviewed SHA: run `git rev-parse HEAD` in the worktree and record it in the verdict.
-- Reason: initial authoring
+- Reason: revise findings from round 1
 
 Read first, in this order:
 1. `sdlc/PROTOCOL.md`

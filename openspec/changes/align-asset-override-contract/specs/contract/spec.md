@@ -2,7 +2,7 @@
 
 ### Requirement: Complete AssetOverride field parity
 
-The Rust `AssetOverride` SHALL expose all eleven keys published by the Python `AssetOverride`: `catalyst_score`, `bias`, `max_leverage`, `support_zone_usd`, `resistance_zone_usd`, `invalidation_price_usd`, `entry_obi_threshold`, `max_rsi_long`, `min_rsi_short`, `take_profit_bps`, and `stop_loss_bps`. The seven mechanical-rule keys absent from the current Rust type SHALL be `Option<T>` with `#[serde(default)]`, and decoding MUST NOT discard any of them. Re-encoding a decoded envelope SHALL emit all eleven keys, using JSON `null` for an absent optional value.
+The Rust `AssetOverride` SHALL expose all eleven keys published by the Python `AssetOverride`: `catalyst_score`, `bias`, `max_leverage`, `support_zone_usd`, `resistance_zone_usd`, `invalidation_price_usd`, `entry_obi_threshold`, `max_rsi_long`, `min_rsi_short`, `take_profit_bps`, and `stop_loss_bps`. The eight mechanical-rule keys absent from the current Rust type — `support_zone_usd`, `resistance_zone_usd`, `invalidation_price_usd`, `entry_obi_threshold`, `max_rsi_long`, `min_rsi_short`, `take_profit_bps`, and `stop_loss_bps` — SHALL be `Option<T>` with `#[serde(default)]`, and decoding MUST NOT discard any of them. `catalyst_score` (f64), `bias` (`DirectionalBias`), and `max_leverage` (f64) SHALL remain required non-`Option` fields. Re-encoding a decoded envelope SHALL emit all eleven keys, using JSON `null` for an absent optional value.
 
 #### Scenario: All eleven keys survive a decode and re-encode
 
@@ -10,10 +10,22 @@ The Rust `AssetOverride` SHALL expose all eleven keys published by the Python `A
 - **THEN** the re-encoded override contains exactly the eleven keys
 - **THEN** every re-encoded value equals the corresponding Python value
 
+#### Scenario: Only the required keys decode
+
+- **WHEN** an envelope JSON contains only `catalyst_score`, `bias`, and `max_leverage` for an override
+- **THEN** decoding succeeds
+- **THEN** the eight optional fields read as absent
+
 #### Scenario: Absent optional rule decodes
 
-- **WHEN** a Python envelope omits `entry_obi_threshold` from an override
+- **WHEN** an envelope JSON from a non-Python or older producer omits `entry_obi_threshold`
 - **THEN** Rust decoding succeeds and the field reads as absent rather than as a decode error or a dropped key
+- **THEN** the Python `to_dict()` path is unaffected because it always emits all eleven keys
+
+#### Scenario: Missing required field is rejected
+
+- **WHEN** an envelope JSON omits `catalyst_score`, `bias`, or `max_leverage`
+- **THEN** decoding fails and the error names the missing field
 
 #### Scenario: Null optional zone is preserved
 
@@ -27,7 +39,7 @@ The Rust `AssetOverride` SHALL expose all eleven keys published by the Python `A
 
 ### Requirement: Strict policy decoding
 
-The policy types `PolicyEnvelope`, `PodAllocation`, and `AssetOverride` SHALL use `#[serde(deny_unknown_fields)]` or an equivalent strict decoder. A JSON key not declared by the target type MUST cause deserialisation to fail with an error that identifies the offending key, and unknown policy keys MUST NOT be ignored.
+The policy types `PolicyEnvelope`, `PodAllocation`, and `AssetOverride` SHALL use `#[serde(deny_unknown_fields)]` or an equivalent strict decoder. A JSON key not declared by the target type MUST cause deserialisation to fail with an error that identifies the offending key, and unknown policy keys MUST NOT be ignored. `MarketEvent` and `OnChainTokenSafety` SHALL retain serde's default tolerant behaviour and MUST NOT receive `deny_unknown_fields` in this change.
 
 #### Scenario: Unknown AssetOverride key is rejected
 
@@ -50,6 +62,11 @@ The policy types `PolicyEnvelope`, `PodAllocation`, and `AssetOverride` SHALL us
 - **WHEN** the envelope contains exactly the six declared top-level keys, the five declared `PodAllocation` keys, and the eleven declared `AssetOverride` keys
 - **THEN** decoding succeeds and no field is reported as unknown
 
+#### Scenario: Unknown event field remains tolerated
+
+- **WHEN** a `MarketEvent` or `OnChainTokenSafety` JSON object contains a key not declared by Rust
+- **THEN** decoding succeeds and every declared field retains its value
+
 ### Requirement: Fail-loud CLI policy ingestion
 
 When `robotrader-node` is invoked with `--policy-json`, it SHALL use the supplied envelope if strict decoding succeeds. If decoding fails, the process MUST exit with a non-zero status, MUST write an error message naming the offending key to stderr, and MUST NOT write a backtest summary to stdout or execute with the default envelope.
@@ -66,28 +83,34 @@ When `robotrader-node` is invoked with `--policy-json`, it SHALL use the supplie
 - **THEN** the exit status is zero
 - **THEN** the backtest runs with the supplied envelope rather than the default envelope
 
-### Requirement: RSI input on MarketEvent
+### Requirement: Optional RSI input on MarketEvent
 
-`MarketEvent::OrderbookTick` SHALL carry a required `rsi_14` field containing the 14-period RSI computed by the warm path. Serialisation and deserialisation MUST preserve the value, and an `OrderbookTick` JSON object without `rsi_14` MUST fail to deserialise.
+`MarketEvent::OrderbookTick` SHALL carry an optional `rsi_14` field (`Option<f64>` with `#[serde(default)]`) holding the 14-period RSI supplied by the tick producer. Serialisation and deserialisation MUST preserve a present value, and an absent `rsi_14` MUST decode as absent rather than fail decoding. This change adds no Python warm-path producer or transport for `MarketEvent::OrderbookTick`; today only the Rust backtest fixtures produce that event.
 
 #### Scenario: rsi_14 survives a round-trip
 
 - **WHEN** an `OrderbookTick` with `rsi_14 = 46.5` is serialised and deserialised
 - **THEN** the decoded `rsi_14` equals 46.5
 
-#### Scenario: Missing rsi_14 is rejected
+#### Scenario: Absent rsi_14 decodes
 
 - **WHEN** an `OrderbookTick` JSON object omits `rsi_14`
-- **THEN** deserialisation fails and no `MarketEvent` is produced
+- **THEN** deserialisation succeeds and the decoded `rsi_14` is absent
+- **THEN** no decode error is produced
 
 ### Requirement: Momentum pod applies envelope mechanical rules
 
-When the envelope contains an `AssetOverride` for the event symbol, `MomentumPod` SHALL apply that override's mechanical rules to entry decisions and emitted `OrderIntent` values. The OBI gate MUST require `|OBI| >= entry_obi_threshold` for both directions, with an absent value resolving to 0.08. The long RSI guard MUST require `rsi_14 <= max_rsi_long`, with an absent value resolving to 70.0. The short RSI guard MUST require `rsi_14 >= min_rsi_short`, with an absent value resolving to 30.0. A long entry MUST require `mid_price >= support_zone_usd` when that field is present, and a short entry MUST require `mid_price <= resistance_zone_usd` when that field is present. A long entry MUST require `mid_price > invalidation_price_usd` when that field is present, and a short entry MUST require `mid_price < invalidation_price_usd` when that field is present. The emitted intent MUST set `take_profit_pct = take_profit_bps / 100.0` and `stop_loss_pct = stop_loss_bps / 100.0`, with absent values resolving to 45.0 and 30.0 respectively. When the symbol has no `AssetOverride`, the pod MUST preserve its configured OBI threshold and ATR-derived TP/SL values and MUST NOT apply RSI, support, resistance, or invalidation gates. When any applicable rule fails, the pod MUST emit no `OrderIntent` for that event and direction.
+When the envelope contains an `AssetOverride` for the event symbol, `MomentumPod` SHALL apply that override's mechanical rules to entry decisions and emitted `OrderIntent` values. The OBI gate MUST require `|OBI| >= entry_obi_threshold` for both directions, with an absent value resolving to 0.08. The long RSI guard MUST require `rsi_14 <= max_rsi_long` when `rsi_14` is present, with an absent `max_rsi_long` resolving to 70.0. The short RSI guard MUST require `rsi_14 >= min_rsi_short` when `rsi_14` is present, with an absent `min_rsi_short` resolving to 30.0. When `rsi_14` is absent and the symbol has an override, the RSI guard MUST be reported as `RSI=INACTIVE` in the emitted `OrderIntent.rationale`. A long entry MUST require `mid_price >= support_zone_usd` when that field is present, and a short entry MUST require `mid_price <= resistance_zone_usd` when that field is present. A long entry MUST require `mid_price > invalidation_price_usd` when that field is present, and a short entry MUST require `mid_price < invalidation_price_usd` when that field is present. The emitted intent MUST set `take_profit_pct = take_profit_bps / 100.0` and `stop_loss_pct = stop_loss_bps / 100.0`, with absent values resolving to 45.0 and 30.0 respectively. When the symbol has no `AssetOverride`, the pod MUST preserve its configured OBI threshold and ATR-derived TP/SL values and MUST NOT apply RSI, support, resistance, or invalidation gates. When any applicable rule fails, the pod MUST emit no `OrderIntent` for that event and direction. The warm-path paper execution model in `backend/core/state_store.py` MUST use `min_rsi_short` as its short RSI threshold, and the `100.0 - max_rsi_long` derivation MUST NOT remain.
 
 #### Scenario: Override OBI threshold blocks a marginal signal
 
 - **WHEN** an override sets `entry_obi_threshold = 0.35` and a long setup has OBI 0.30 with every other entry condition passing
 - **THEN** no long `OrderIntent` is emitted
+
+#### Scenario: OBI boundary is inclusive
+
+- **WHEN** an override sets `entry_obi_threshold = 0.35` and a long setup has OBI 0.35 with every other entry condition passing
+- **THEN** a long `OrderIntent` is emitted
 
 #### Scenario: Long RSI guard blocks an overbought entry
 
@@ -104,20 +127,46 @@ When the envelope contains an `AssetOverride` for the event symbol, `MomentumPod
 - **WHEN** an override sets `min_rsi_short = 45.0` and a short setup has `rsi_14 = 40.0` with every other entry condition passing
 - **THEN** no short `OrderIntent` is emitted
 
+#### Scenario: Short RSI boundary is inclusive
+
+- **WHEN** an override sets `min_rsi_short = 45.0` and a short setup has `rsi_14 = 45.0` with every other entry condition passing
+- **THEN** a short `OrderIntent` is emitted
+
+#### Scenario: RSI guard is reported inactive when rsi_14 is absent
+
+- **WHEN** an override exists, `rsi_14` is absent, and a long setup passes every other gate
+- **THEN** a long `OrderIntent` is emitted
+- **THEN** its `rationale` contains `RSI=INACTIVE`
+
 #### Scenario: Support gate blocks a long below support
 
 - **WHEN** an override sets `support_zone_usd = 150.0` and the mid-price is 149.9 with every other entry condition passing
 - **THEN** no long `OrderIntent` is emitted
+
+#### Scenario: Support boundary is inclusive
+
+- **WHEN** an override sets `support_zone_usd = 150.0` and the mid-price is 150.0 with every other entry condition passing
+- **THEN** a long `OrderIntent` is emitted
 
 #### Scenario: Resistance gate blocks a short above resistance
 
 - **WHEN** an override sets `resistance_zone_usd = 160.0` and the mid-price is 160.1 with every other entry condition passing
 - **THEN** no short `OrderIntent` is emitted
 
+#### Scenario: Resistance boundary is inclusive
+
+- **WHEN** an override sets `resistance_zone_usd = 160.0` and the mid-price is 160.0 with every other entry condition passing
+- **THEN** a short `OrderIntent` is emitted
+
 #### Scenario: Invalidation gate blocks a long at the level
 
 - **WHEN** an override sets `invalidation_price_usd = 145.0` and the mid-price is 145.0 with every other entry condition passing
 - **THEN** no long `OrderIntent` is emitted
+
+#### Scenario: Invalidation gate blocks a short at the level
+
+- **WHEN** an override sets `invalidation_price_usd = 145.0` and a short setup has a mid-price of 145.0 with every other entry condition passing
+- **THEN** no short `OrderIntent` is emitted
 
 #### Scenario: TP and SL distances come from the envelope
 
@@ -134,6 +183,12 @@ When the envelope contains an `AssetOverride` for the event symbol, `MomentumPod
 - **WHEN** the symbol has no `AssetOverride` and a long setup has OBI 0.23, `rsi_14 = 80.0`, and every other entry condition passing
 - **THEN** a long `OrderIntent` is emitted with the pod's configured OBI threshold and ATR-derived TP/SL values
 - **THEN** no RSI gate is applied
+
+#### Scenario: Warm-path short RSI uses min_rsi_short
+
+- **WHEN** the warm-path paper model evaluates a short under an override with `min_rsi_short = 45.0` and `max_rsi_long = 70.0`
+- **THEN** the short-side RSI exhaustion threshold applied is 45.0, not 30.0
+- **THEN** the hot path and the warm path use the same short RSI threshold for that override
 
 ### Requirement: Cross-language round-trip contract test
 
@@ -157,27 +212,29 @@ A test SHALL exist that runs without Redis, network access, or a live exchange a
 
 ### Requirement: Single-sourced safe-baseline TTL
 
-The safe-baseline envelope TTL SHALL have exactly one authoritative definition in the repository. The Rust and Python `safe_baseline` envelopes MUST both expose `ttl_seconds = 900` resolved from that definition, and neither runtime MUST restate the safe-baseline TTL as an independent literal. A repository check MUST fail when a second authoritative definition exists.
+The safe-baseline TTL SHALL be declared exactly once, as the named key `SAFE_BASELINE_TTL_SECONDS` in a single machine-readable contract file, with value `900`. The Rust and Python `safe_baseline()` constructors MUST resolve `ttl_seconds` from that declaration and MUST NOT carry an independent safe-baseline literal. `PolicyEnvelope.from_dict`'s generic decode default and `default_active()`'s TTL MUST either resolve from the same declaration or be listed as explicit exemptions by the repository check. A repository check MUST fail, naming the duplicate file, when a second declaration of `SAFE_BASELINE_TTL_SECONDS` appears.
 
-#### Scenario: Rust baseline TTL is 900
+#### Scenario: Rust baseline resolves the named key
 
 - **WHEN** the Rust safe-baseline envelope is built
-- **THEN** its `ttl_seconds` equals 900
+- **THEN** its `ttl_seconds` equals the value of `SAFE_BASELINE_TTL_SECONDS`
+- **THEN** that value equals 900
 
-#### Scenario: Python baseline TTL is 900
+#### Scenario: Python baseline resolves the named key
 
 - **WHEN** the Python safe-baseline envelope is built
-- **THEN** its `ttl_seconds` equals 900
+- **THEN** its `ttl_seconds` equals the value of `SAFE_BASELINE_TTL_SECONDS`
+- **THEN** that value equals 900
 
-#### Scenario: Runtimes agree with the single source
+#### Scenario: Exempt defaults do not trip the check
 
-- **WHEN** the Rust and Python baseline TTLs are compared with the authoritative definition
-- **THEN** both equal that definition
+- **WHEN** `PolicyEnvelope.from_dict` and `default_active()` retain 900 as generic envelope defaults
+- **THEN** the repository check passes because neither is a safe-baseline declaration
 
-#### Scenario: Duplicate definition is rejected
+#### Scenario: Duplicate declaration is rejected
 
-- **WHEN** a second hard-coded safe-baseline TTL literal is introduced in either runtime
-- **THEN** the repository check fails
+- **WHEN** a second file declares `SAFE_BASELINE_TTL_SECONDS`
+- **THEN** the repository check exits non-zero and names the duplicate file
 
 ### Requirement: Hand-maintained contract with executable drift detection
 
