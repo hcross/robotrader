@@ -1,0 +1,62 @@
+schema: spec-driven
+
+# Project context — read by OpenSpec and by every SDLC agent before writing an artifact.
+context: |
+  Robotrader v3 is a hierarchical hybrid Rust/Python quantitative and agentic
+  cryptocurrency trading platform. Hot path: Rust (`engine-rs`). Warm path:
+  Python (`backend`). Control plane: React 19 (`frontend`). IPC: Redis.
+
+  Normative delivery workflow: `sdlc/PROTOCOL.md`. Human entry point:
+  `docs/sdlc/README.md`. If this file and the protocol disagree, the protocol wins.
+
+  Hard invariants (violating one is a blocker, regardless of the feature):
+  - Zero LLM calls, blocking I/O, or unbounded sleeps in
+    `StrategyPod::on_market_event` or `HardRiskGate::validate`.
+  - `HardRiskGate::validate` stays under the 50µs budget; no allocation or
+    logging on that path.
+  - `PolicyEnvelope` stays byte-for-byte compatible between
+    `engine-rs/crates/common/src/lib.rs` and `backend/core/schemas.py`.
+  - Capital protection is never weakened: dry-powder floor >= 20%, Kelly
+    sizing, drawdown kill-switch, `CostGuard` daily cap, no unbounded refills.
+  - Vault material never leaves `RustVaultEnclave`; zeroize volatile RAM; no
+    key material in logs, transcripts, fixtures, or review evidence.
+  - Backtest, paper, and live share the same deterministic code path; no
+    look-ahead and no live-only branch in strategy logic.
+  - Each leaf robot stays isolated to its own chain/venue and MemPalace wing.
+  - `backend/core/` keeps warm-path infrastructure so `import strands` is never
+    shadowed.
+
+  Repository conventions:
+  - Repository content is English-only. Chat with the operator is French.
+  - Conventional Commits, with the change id in brackets:
+    `feat(api): add health endpoint [add-health-endpoint]`.
+  - `master` is protected. No direct commits, no direct pushes.
+  - One change = one issue + one branch + one worktree + one PR.
+  - Every claim in a review must cite a file, line, command, or diff hunk.
+
+# Per-artifact rules — passed verbatim to authors and reviewers by the OpenSpec CLI.
+rules:
+  proposal:
+    - "Start the file with '## Review Card (≤ 5 min)': a table with Outcome, Why now, Blast radius, Risk, Effort, Decision needed, plus at least one Mermaid diagram."
+    - "The Review Card is <= 400 words. Read-time budget = words/200 + 0.5 min per diagram, and must be <= 5.0 min."
+    - "Add a '## Non-goals' section. Non-goals are as important as goals."
+    - "Use bullets, tables, and diagrams. No paragraph longer than two sentences."
+    - "List capabilities in kebab-case under 'New Capabilities' and 'Modified Capabilities'. Every capability listed gets a delta spec file."
+    - "Do not put implementation detail in the proposal; it belongs in design.md."
+  specs:
+    - "Create exactly one delta spec per capability: specs/<capability>/spec.md."
+    - "Use the delta headers '## ADDED Requirements', '## MODIFIED Requirements', '## REMOVED Requirements', '## RENAMED Requirements'."
+    - "Every requirement is '### Requirement: <name>' and uses SHALL or MUST."
+    - "Every requirement has at least one '#### Scenario: <name>' with exactly four hashes, a WHEN bullet, and a THEN bullet."
+    - "MODIFIED requirements copy the entire existing requirement block, not a fragment."
+    - "Requirement and scenario names are unique, stable, and testable. No TBD or open question in a spec."
+  design:
+    - "Include at least one Mermaid diagram of the runtime or data flow being changed."
+    - "Include a Decision table: decision, alternatives considered, rationale, rejected because."
+    - "Include 'Risks / Trade-offs' as 'Risk -> Mitigation' and a rollback plan."
+    - "Reference the proposal for why and the delta specs for what; do not restate them."
+  tasks:
+    - "Every task is a checkbox: '- [ ] X.Y <description>'. Non-checkbox tasks are not tracked."
+    - "Group tasks under numbered '## N. <group>' headings, ordered by dependency."
+    - "Each task fits one session and names the scenario, invariant, or verification it satisfies."
+    - "End with '## Verification' listing the exact commands to run and the evidence to attach."

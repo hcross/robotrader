@@ -1,0 +1,14 @@
+# Author revision note
+# Path: .sdlc/<change-id>/revisions/<stage>-r<N>-response.md
+# Written by the author after a CHANGES_REQUESTED verdict, before the next round.
+
+stage: <spec|plan|dev>
+round: <N>
+head_sha: <sha>
+responses:
+  - id: <SPEC|PLAN|DEV>-R<N>-F01
+    action: fixed        # fixed | disputed | deferred
+    evidence: "What changed, where, and how it was verified."
+  - id: <SPEC|PLAN|DEV>-R<N>-F02
+    action: disputed
+    evidence: "Why the finding does not apply, with a file/command reference."

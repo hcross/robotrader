@@ -11,6 +11,44 @@ It strictly separates:
 3. **Deterministic Sub-millisecond Execution, Hard Risk & Cryptographic Enclave (`engine-rs` in Rust)**: Hot-path event processing, order book imbalance (OBI) parsing, `HardRiskGate` validation (<50µs, including `validate_inference_refill`), `RustVaultEnclave` (`BIP-32`/`BIP-44`/`SLIP-0010` HD derivation across all 26 chains with volatile RAM zeroization and destination whitelist enforcement — see [`docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md`](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)), Kelly position sizing, multi-chain on-chain anti-rug / honeypot checks (`OnChainTokenSafety`), and zero LLM latency.
 4. **Cost-Controlled Warm-Path Scheduling ([`docs/PERFORMANCE_AND_COST_AUDIT.md`](docs/PERFORMANCE_AND_COST_AUDIT.md))**: Background LLM scheduling is paused by default on startup (`ENABLE_AUTO_LLM_SCHEDULER=false`, `$0.00/h`) and can be toggled in the UI (`POST /api/v1/cognitive/scheduler`). `CostGuard` uses realistic OpenRouter pricing and hydrates rolling 24h spend from `backend/data/transcript_ledger.jsonl`.
 
+## Mandatory Delivery Workflow (SDLC)
+
+Every change follows the right-sized workflow in [`sdlc/PROTOCOL.md`](sdlc/PROTOCOL.md).
+No direct commits to `master`. No agent merges without explicit written human delegation.
+
+| Lane | Use when | Artifacts | Cold reviews |
+|---|---|---|---|
+| **M** — Micro | ≤ 2 files, one module, no contract/money/risk/vault change, existing tests cover it | issue + PR | dev |
+| **S** — Standard | new behavior, 3–10 files, one service, additive contract | proposal + delta specs + tasks | spec, dev |
+| **L** — Large | breaking contract, money/risk/vault path, > 10 files, cross-stack, migration, ADR | proposal + specs + design + tasks | spec, plan, dev |
+
+Hard rules:
+
+- **One change = one issue logbook + one branch in `.worktrees/<issue>-<slug>` + one PR.**
+- **Separate minds**: the author never reviews; reviewers are cold-start instances.
+- **Three review rounds per stage**, then escalate to a human. A fourth round is rejected by the tooling.
+- **Reviewers resume from the ledger** (`.sdlc/<change-id>/reviews/`), never from the author's chat.
+- **Specs are OpenSpec-compatible** (`openspec/`), with a ≤ 400-word Review Card and ≥ 1 diagram (≤ 5 min).
+- **No secrets or keys** in specs, verdicts, evidence, briefs, or dossiers.
+- **Preserve the platform invariants** listed in `openspec/config.yaml` and `sdlc/checklists/dev.md`.
+
+Start and drive a change:
+
+```bash
+scripts/sdlc/sdlc.sh start <change-id> --title "<title>" --lane <M|S|L> --reason "<why this lane>"
+scripts/sdlc/sdlc.sh next <change-id>
+scripts/sdlc/run-agent.sh <role> .sdlc/<change-id>/briefs/<stage>-r<N>-<role>.md
+scripts/sdlc/sdlc.sh verdict <change-id> <stage> <round> <verdict-file>
+scripts/sdlc/sdlc.sh merge-ready <change-id>
+```
+
+Agent profiles are canonical in `sdlc/agents/` and generated into `.claude/agents/`
+(Claude Code) and `.agent/agents/` (Antigravity CLI). Run
+`scripts/sdlc/install-agents.sh --check` after editing a profile.
+
+Human guide: [`docs/sdlc/README.md`](docs/sdlc/README.md) · Decision record:
+[`docs/adr/0004-agentic-sdlc.md`](docs/adr/0004-agentic-sdlc.md).
+
 ## Tech Stack
 - **Hot-Path & Replay Engine (`engine-rs`)**: Rust (Edition 2021), Cargo Workspace (`common`, `risk-gate`, `strategies`, `exec-router`, `backtest`, `node`), Serde, Tokio.
 - **Warm-Path AI & Control Plane (`backend`)**: Python 3.10+, FastAPI, Poetry, `strands-agents`, OpenRouter / LiteLLM, CCXT, Solana RPC.

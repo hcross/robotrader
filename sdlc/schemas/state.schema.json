@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robotrader.local/sdlc/state.schema.json",
+  "title": "SDLC change state",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "version",
+    "change_id",
+    "title",
+    "issue",
+    "lane",
+    "lane_reason",
+    "branch",
+    "worktree",
+    "base_branch",
+    "status",
+    "human_gates",
+    "stages"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "change_id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+    "title": { "type": "string", "minLength": 1 },
+    "issue": { "type": "integer", "minimum": 1 },
+    "lane": { "enum": ["M", "S", "L"] },
+    "lane_reason": { "type": "string", "minLength": 1 },
+    "lane_change": {
+      "type": ["object", "null"],
+      "properties": {
+        "from": { "enum": ["M", "S", "L"] },
+        "to": { "enum": ["M", "S", "L"] },
+        "reason": { "type": "string" }
+      }
+    },
+    "branch": { "type": "string", "minLength": 1 },
+    "worktree": { "type": "string", "minLength": 1 },
+    "base_branch": { "type": "string", "default": "master" },
+    "base_sha": { "type": "string" },
+    "created_at": { "type": "string" },
+    "human_gates": {
+      "type": "array",
+      "items": { "enum": ["spec", "plan", "merge"] }
+    },
+    "status": {
+      "enum": [
+        "triage",
+        "spec",
+        "spec-review",
+        "plan",
+        "plan-review",
+        "dev",
+        "dev-review",
+        "merge-ready",
+        "escalated",
+        "merged",
+        "abandoned"
+      ]
+    },
+    "pr": { "type": ["integer", "null"] },
+    "areas": { "type": "array", "items": { "type": "string" } },
+    "stages": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "spec": { "$ref": "#/$defs/stage" },
+        "plan": { "$ref": "#/$defs/stage" },
+        "dev": { "$ref": "#/$defs/stage" }
+      }
+    },
+    "escalation": {
+      "type": ["object", "null"],
+      "properties": {
+        "reason": { "type": "string" },
+        "at": { "type": "string" },
+        "dossier": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "rounds"],
+      "properties": {
+        "status": {
+          "enum": ["pending", "in_progress", "in_review", "changes_requested", "approved", "skipped", "escalated"]
+        },
+        "rounds": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "last_verdict": { "type": ["string", "null"] },
+        "last_reviewer": { "type": ["string", "null"] },
+        "last_sha": { "type": ["string", "null"] },
+        "updated_at": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

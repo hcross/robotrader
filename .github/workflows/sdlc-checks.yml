@@ -1,0 +1,73 @@
+name: SDLC checks
+
+on:
+  pull_request:
+    paths:
+      - "openspec/**"
+      - "sdlc/**"
+      - "docs/sdlc/**"
+      - "scripts/sdlc/**"
+      - ".claude/**"
+      - ".agent/**"
+      - ".github/**"
+  push:
+    branches: [master]
+    paths:
+      - "openspec/**"
+      - "sdlc/**"
+      - "docs/sdlc/**"
+      - "scripts/sdlc/**"
+      - ".claude/**"
+      - ".agent/**"
+      - ".github/**"
+
+permissions:
+  contents: read
+
+jobs:
+  sdlc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install OpenSpec
+        run: npm install -g @fission-ai/openspec@1.4.1
+
+      - name: Verify generated agent adapters are in sync
+        run: scripts/sdlc/install-agents.sh --check
+
+      - name: Validate all OpenSpec changes
+        run: openspec validate --changes --strict --json
+
+      - name: Lint changed specs and verdicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+          else
+            base="HEAD~1"
+          fi
+          ids=$(git diff --name-only "$base"...HEAD \
+            | awk -F/ '/^openspec\/changes\// && $3 != "archive" {print $3}' \
+            | sort -u)
+          if [ -z "$ids" ]; then
+            echo "no changed OpenSpec change"
+            exit 0
+          fi
+          for id in $ids; do
+            echo "::group::$id"
+            python3 scripts/sdlc/spec-lint.py --change "$id" || exit 1
+            python3 scripts/sdlc/verdict-lint.py --change "$id" || exit 1
+            echo "::endgroup::"
+          done

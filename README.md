@@ -208,6 +208,26 @@ cd frontend && npm run build
 
 ---
 
+## 🧭 Development Workflow (Agentic SDLC)
+
+Every change follows a right-sized **SPEC → PLAN → DEV** workflow with
+cold-start reviewer agents, an issue logbook, a worktree branch, and a PR.
+Three review rounds maximum per stage; no agent merges.
+
+| Lane | Use when | Artifacts | Cold reviews |
+|---|---|---|---|
+| **M** — Micro | ≤ 2 files, no contract/money/risk change | issue + PR | dev |
+| **S** — Standard | new behavior, 3–10 files, additive contract | proposal + delta specs + tasks | spec, dev |
+| **L** — Large | contract, money/risk/vault, > 10 files, migration | proposal + specs + design + tasks | spec, plan, dev |
+
+- Human guide: [`docs/sdlc/README.md`](docs/sdlc/README.md)
+- Normative protocol: [`sdlc/PROTOCOL.md`](sdlc/PROTOCOL.md)
+- Decision record: [`docs/adr/0004-agentic-sdlc.md`](docs/adr/0004-agentic-sdlc.md)
+- Specs use OpenSpec in [`openspec/`](openspec/); the human decision surface is
+  a ≤ 5-minute Review Card.
+
+---
+
 ## 📖 Architecture Decision Records (ADRs) & Audits
 
 - [**ADR-0001: Hybrid Quant & Agentic Architecture**](docs/adr/0001-hybrid-quant-agentic-architecture.md)  
@@ -216,6 +236,8 @@ cd frontend && npm run build
   *Integration of real mathematical TA indicators (Ichimoku, Fibonacci 0.618, RSI, ATR, Bollinger), infinite strategy memory, compiled mechanical rules, self-scheduling wakeups, and budget-driven frontier flash model routing.*
 - [**ADR-0003: Hierarchical Multi-Ecosystem Architecture, Master Treasury & Cross-Wing MemPalace**](docs/adr/0003-hierarchical-multi-ecosystem-architecture.md)  
   *Master Orchestrator (`moonshotai/kimi-k3.1-pro`) + 26 isolated blockchain/venue leaf agents (`deepseek/deepseek-v4.1-flash-1017`), `<= 4` ecosystem-adapted Rust pods per blockchain, Cross-Chain Bridge Hurdle Pricer (`2.5x`), Dry Powder floor (`>= 20%`), and multi-token Checkout.*
+- [**ADR-0004: Right-Sized Agentic SDLC with Cold-Start Reviews**](docs/adr/0004-agentic-sdlc.md)  
+  *SPEC → PLAN → DEV lanes (M/S/L), cold-start reviewer agents with artifact-based resume, a hard three-round cap, OpenSpec-compatible specs, a ≤ 5-minute human Review Card, and a human-only merge gate.*
 - [**Performance & LLM Cost Post-Mortem Audit (`docs/PERFORMANCE_AND_COST_AUDIT.md`)**](docs/PERFORMANCE_AND_COST_AUDIT.md)  
   *Full quantitative audit of the 325 LLM cycles / 4.41M tokens (`~$2.00` OpenRouter spend), breakdown of the 3 trading populations (`backtest_fixture` 100% win rate / Sharpe 28.22, `paper_model` `+$1,155.52` over 1,500 trades, `live_testnet`), and the 4 structural remediations reducing LLM OpEx by 25x–40x.*
 - [**Cryptographic Vault Enclave & 26-Chain HD Key Management (`docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md`)**](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)  

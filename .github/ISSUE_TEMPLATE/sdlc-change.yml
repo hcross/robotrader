@@ -1,0 +1,86 @@
+name: SDLC change
+description: Start a right-sized change through the Robotrader SDLC (SPEC → PLAN → DEV, cold reviews).
+title: "[SDLC] "
+labels: ["sdlc"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The conductor fills this logbook. Do not pre-write the spec here.
+        Workflow: `sdlc/PROTOCOL.md` · Human guide: `docs/sdlc/README.md`.
+
+  - type: input
+    id: change-id
+    attributes:
+      label: Change ID
+      description: Stable kebab-case identifier, e.g. add-health-endpoint.
+      placeholder: add-health-endpoint
+    validations:
+      required: true
+
+  - type: dropdown
+    id: lane
+    attributes:
+      label: Lane (triage hint)
+      description: The conductor re-checks this against the rubric.
+      options:
+        - "M — Micro (fix, docs, test-only, ≤2 files)"
+        - "S — Standard (new behavior, 3–10 files)"
+        - "L — Large (contract, money/risk/vault, >10 files, migration)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Observed problem
+      description: Facts, not a solution. What is true now that should not be?
+      placeholder: Operators cannot see service health, so incident triage is blind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: One sentence. What is true after the change?
+      placeholder: Operators can read a read-only health endpoint.
+    validations:
+      required: true
+
+  - type: textarea
+    id: blast
+    attributes:
+      label: Blast radius
+      description: Services, crates, contracts, chains, data.
+      placeholder: backend API, one endpoint, no contract change.
+    validations:
+      required: true
+
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Non-goals
+      description: What is explicitly out of scope?
+      placeholder: Metrics, alerting, dashboards.
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and risks
+      description: Invariants, deadlines, money/risk/vault implications, rollback concerns.
+      placeholder: Must not touch the hot path or PolicyEnvelope.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: Acknowledgement
+      options:
+        - label: I understand the human merge decision is required; no agent merges.
+          required: true
+        - label: I have not hidden a second change inside this request.
+          required: true

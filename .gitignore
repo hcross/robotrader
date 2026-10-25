@@ -7,3 +7,8 @@ frontend/dist/
 frontend/node_modules/
 backend/data/*.jsonl
 
+# SDLC runtime
+.worktrees/
+.sdlc/**/evidence/
+.sdlc/**/.state.lock
+
