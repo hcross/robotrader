@@ -192,6 +192,14 @@ It records the delegation in `state.json` and on the PR, merges, pulls the base
 branch, archives the OpenSpec change, commits the ledger, closes the issue, and
 removes the worktree. A safety/security escalation still stops the merge.
 
+When the change covers only a slice of the issue, mark it partial first:
+
+```bash
+scripts/sdlc/sdlc.sh partial <change-id> --reason "<remaining scope>"
+```
+
+The merge then comments on the issue instead of closing it.
+
 ## 8. Escalation playbook
 
 | Trigger | Human sees | Default recommendation |

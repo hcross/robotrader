@@ -428,6 +428,10 @@ issue, and removes the worktree.
 It never bypasses a failing gate. A safety/security escalation still requires a
 human decision, even under full-auto.
 
+**Partial changes.** A change may cover only a slice of its issue. Mark it with
+`sdlc.sh partial <change>` (or `start --partial`); the merge then comments on the
+issue instead of closing it, so the remaining scope stays tracked.
+
 ---
 
 ## 12. CLI compatibility
@@ -458,6 +462,7 @@ scripts/sdlc/sdlc.sh verdict <change-id> <stage> <round> <file>
 scripts/sdlc/sdlc.sh pr <change-id> [--number <n>]  # link the PR (auto-detect by branch)
 scripts/sdlc/sdlc.sh merge-ready <change-id>    # gates + dossier
 scripts/sdlc/sdlc.sh merge <change-id> --delegated-by "<operator>"  # full-auto merge
+scripts/sdlc/sdlc.sh partial <change-id> [--reason "<scope left>"]  # keep the issue open
 scripts/sdlc/sdlc.sh escalate <change-id> --reason <reason>
 scripts/sdlc/run-agent.sh <role> <brief-file>   # cold agent, headless
 ```

@@ -194,6 +194,10 @@ The command records the delegation in the issue and PR, refuses on any red gate,
 and never bypasses an escalation. A safety/security escalation still stops the
 merge.
 
+If the change is only a slice of its issue, run
+`scripts/sdlc/sdlc.sh partial <change-id> --reason "<remaining scope>"` before
+the merge. The merge then comments on the issue instead of closing it.
+
 ## 8. Escalation
 
 Escalate immediately when any trigger in `sdlc/PROTOCOL.md` §9 fires. The

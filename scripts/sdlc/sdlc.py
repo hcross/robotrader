@@ -224,6 +224,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         human_gates=human_gates,
     )
     state["worktree_abs"] = str(worktree_abs)
+    state["partial_issue"] = bool(args.partial)
     runtime = worktree_abs / ".sdlc" / change_id
     for sub in ("reviews", "revisions", "evidence", "briefs"):
         (runtime / sub).mkdir(parents=True, exist_ok=True)
@@ -441,6 +442,27 @@ def cmd_stage(args: argparse.Namespace) -> int:
         summary=f"**{stage}** → `{args.status}`.",
     )
     print(json.dumps({"change_id": args.change, "stage": stage, "status": args.status, "state": state["status"]}, indent=2))
+    return 0
+
+
+def cmd_partial(args: argparse.Namespace) -> int:
+    """Mark a change as a partial slice so the linked issue stays open."""
+    state = common.load_state(args.change)
+    state["partial_issue"] = True
+    state["partial_reason"] = args.reason or ""
+    common.save_state(args.change, state)
+    append_event(
+        state,
+        stage=state["status"],
+        round_no=0,
+        actor="sdlc-conductor",
+        verdict=None,
+        summary=(
+            "**Partial change** — the linked issue stays open after merge. "
+            + (args.reason or "")
+        ),
+    )
+    print(json.dumps({"change_id": args.change, "partial_issue": True}, indent=2))
     return 0
 
 
@@ -873,16 +895,30 @@ def cmd_merge(args: argparse.Namespace) -> int:
         common.run(["git", "-C", str(main), "push", "origin", base], check=False)
 
     if state.get("issue"):
-        common.gh(
-            [
-                "issue",
-                "close",
-                str(state["issue"]),
-                "--comment",
-                f"Merged under full-auto delegation by {delegation['by']}.",
-            ],
-            check=False,
-        )
+        if state.get("partial_issue"):
+            common.gh(
+                [
+                    "issue",
+                    "comment",
+                    str(state["issue"]),
+                    "--body",
+                    f"Merged under full-auto delegation by {delegation['by']}. "
+                    "This change is a **partial** slice; the issue remains open "
+                    "for the out-of-scope items.",
+                ],
+                check=False,
+            )
+        else:
+            common.gh(
+                [
+                    "issue",
+                    "close",
+                    str(state["issue"]),
+                    "--comment",
+                    f"Merged under full-auto delegation by {delegation['by']}.",
+                ],
+                check=False,
+            )
 
     worktree = Path(state.get("worktree_abs", state["worktree"]))
     if worktree != main and worktree.exists():
@@ -1028,6 +1064,11 @@ def main(argv: list[str]) -> int:
     p.add_argument("--base-branch")
     p.add_argument("--no-issue", action="store_true")
     p.add_argument("--no-worktree", action="store_true")
+    p.add_argument(
+        "--partial",
+        action="store_true",
+        help="the change covers only a slice; keep the linked issue open after merge",
+    )
     p.set_defaults(func=cmd_start)
 
     p = sub.add_parser("status", help="show state")
@@ -1044,6 +1085,11 @@ def main(argv: list[str]) -> int:
     p.add_argument("status", choices=["in_progress", "in_review"])
     p.add_argument("--actor")
     p.set_defaults(func=cmd_stage)
+
+    p = sub.add_parser("partial", help="mark the change as a partial slice; keep the issue open")
+    p.add_argument("change")
+    p.add_argument("--reason")
+    p.set_defaults(func=cmd_partial)
 
     p = sub.add_parser("verdict", help="record a verdict file")
     p.add_argument("change")
