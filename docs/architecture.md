@@ -13,7 +13,7 @@ Robotrader v2 separates **deterministic low-latency execution** from **asynchron
 1. **Zero LLM in the Hot Path**: Market data ingestion, orderbook state, quantitative signal calculation, pre-trade risk enforcement, and order routing execute deterministically in **Rust (`engine-rs`)** in `<1ms`.
 2. **AI as Warm-Path Meta-Controller**: Python AI agents (`backend/`) ingest unstructured real-time catalysts (listings, macro events, governance, whale clusters), classify market regimes, and publish TTL-bounded **`PolicyEnvelope`** states to Redis.
 3. **Zero Code Drift (`Backtest == Paper == Live`)**: Strategy pods implement a unified Rust trait (`StrategyPod`) that processes identical `MarketEvent` streams whether replaying historical Parquet/DuckDB ticks, paper-trading live WebSockets, or executing with real capital.
-4. **Synchronous Hard Risk Firewall**: No order reaches an exchange or Solana RPC without passing through `HardRiskGate`, which enforces fractional Kelly sizing, daily drawdown kill-switches, fee/slippage bounds, and on-chain token safety checks.
+4. **Synchronous Hard Risk Firewall**: No order reaches an exchange or Solana RPC without passing through `HardRiskGate`, which enforces fractional Kelly sizing, daily drawdown kill-switches, a per-intent execution-cost hurdle (round-trip fee + spread + declared impact + configurable buffer), and on-chain token safety checks.
 
 ---
 
@@ -49,7 +49,7 @@ flowchart TB
             P4["Pod 4: pod_sniper (Atomic DEX Pool & MEV Liquidation Sniper)"]
         end
 
-        Risk["HardRiskGate (<50µs: Drawdown Kill-Switch, Kelly Sizing, OnChainTokenSafety, SimulatedVault (SIMULATED))"]
+        Risk["HardRiskGate (measured 0.244µs: Drawdown Kill-Switch, Cost-Aware Edge Hurdle, Kelly Sizing, OnChainTokenSafety, SimulatedVault (SIMULATED))"]
         Exec["Smart Execution Router (Post-Only CEX Maker / OnchainDexAggregator + MevBundleAtomic)"]
         Replay["Deterministic Backtest & Walk-Forward Runner"]
     end
@@ -77,6 +77,8 @@ flowchart TB
     Storage --> Replay
     Replay -.->|"Identical StrategyPod Trait"| Pods
 ```
+
+> **Hot-path budget evidence.** `HardRiskGate::validate` measured mean: **0.244 µs** (244.15 ns). Command: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate` (criterion 0.8.2; host: Apple Silicon macOS, 2026-10-26).
 
 ---
 
@@ -129,8 +131,8 @@ flowchart TB
    ```
 3. **`crates/risk-gate` (`HardRiskGate`)**:
    - Stateful, in-memory pre-trade validator.
-   - Tracks real-time equity, unrealized PnL, daily high-water mark, per-pod exposure, and order rate limits.
-   - Rejects any `OrderIntent` if `daily_drawdown >= max_daily_drawdown_pct` or if `PolicyEnvelope` TTL has expired without safe-mode fallback.
+   - Tracks real-time equity, unrealized PnL, and the daily high-water mark. Aggregate exposure caps and order-rate limits remain tracked in issue #4.
+   - Rejects any `OrderIntent` when the kill switch is active, `daily_drawdown >= max_daily_drawdown_pct`, the effective pod is disabled (including the `PolicyEnvelope` TTL safe-baseline fallback), `max_slippage_bps` exceeds the effective cap, on-chain token safety fails, or `expected_edge_bps` is not strictly greater than the per-intent hurdle `2 x fee_bps(venue, order_type) + spread_bps(order_type, tip) + max_slippage_bps + min_edge_buffer_bps`. The former fixed 12 bps floor is removed.
 4. **`crates/exec-router`**:
    - Supports four exact `ROBOTRADER_EXECUTION_MODE` values: `BACKTEST`, `PAPER` (default when unset; live market data with simulated fills/fees/slippage), `SIMULATED`, and `LIVE`. An empty or unknown value fails closed; `LIVE` still exports a `SIMULATED` vault and claims no real custody.
    - **CEX Optimization**: Uses `Post-Only` limit orders at best bid/ask with micro-repricing to capture maker rebates or low maker fees instead of paying 5–10 bps taker fees.

@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "fix-risk-gate-cost-hurdle",
+  "title": "Make the HardRiskGate edge hurdle cost-aware",
+  "issue": 4,
+  "lane": "L",
+  "lane_reason": "4a cost-aware hurdle only; exposure caps, kill-switch contract, rate limit, MEV tip remain open",
+  "lane_change": null,
+  "branch": "sdlc/4-fix-risk-gate-cost-hurdle",
+  "worktree": ".worktrees/4-fix-risk-gate-cost-hurdle",
+  "base_branch": "master",
+  "base_sha": "7c7537cfa0b8ca4ec4ea6e433450e94fd886258f",
+  "created_at": "2026-10-26T07:41:55Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev",
+  "pr": 20,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "3a0502917099763084bf0fc6b2ff4bbcd13895eb",
+      "updated_at": "2026-10-26T07:52:51Z"
+    },
+    "plan": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-plan-reviewer",
+      "last_sha": "6ed356c35e5380e6cfc5dc676b6861b75350a16d",
+      "updated_at": "2026-10-26T08:02:07Z"
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/4-fix-risk-gate-cost-hurdle",
+  "partial_issue": true
+}

@@ -1,7 +1,7 @@
 # Robotrader v3 — Audit Quantitatif des Performances & Post-Mortem des Coûts d'Inférence LLM
 
 **Date** : 24 Octobre 2026  
-**Périmètre** : Architecture Hiérarchique Multi-Écosystèmes (26 Blockchains/Plateformes, `engine-rs` Rust `<50µs` + Warm-Path Python OpenRouter)  
+**Périmètre** : Architecture Hiérarchique Multi-Écosystèmes (26 Blockchains/Plateformes, `engine-rs` Rust measured mean `0.244 µs` for `HardRiskGate::validate` via `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate` + Warm-Path Python OpenRouter)  
 **Sources auditées** :
 - Ledger immuable d'inférence : [`backend/data/transcript_ledger.jsonl`](../backend/data/transcript_ledger.jsonl) (`325` cycles cognitifs, `440` requêtes HTTP OpenRouter, `4.41M` jetons)
 - État des 3 populations de trading : `backtest_fixture` (Rust `engine-rs`), `paper_model` (carnet L2 + sélection adverse), `live_testnet` (Binance Spot Testnet + Solana Devnet)
@@ -24,6 +24,8 @@ The inference-cost tables in §2 and §4 measure OpenRouter token spend. They ar
 
 **Language note**: the pre-existing French body of this document is a recorded legacy exception. New text added by the integrity change is written in English; the repository's English-only convention applies to new content.
 
+**Hot-path benchmark note (English)**: the `HardRiskGate::validate` approved-path mean is `0.244 µs` (244.15 ns). Command: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate` (criterion 0.8.2; host: Apple Silicon macOS, 2026-10-26).
+
 ---
 
 ## 1. Synthèse Exécutive
@@ -34,8 +36,8 @@ Durant la campagne de test intensif de l'architecture hiérarchique Robotrader v
 
 L'audit révèle un contraste net entre :
 1. **L'excellence du moteur d'exécution et de trading (`engine-rs` & `paper_model`)** :
-   - **Zéro latence LLM dans le Hot-Path** (`< 50µs` par tick en Rust) — *operational latency measurement*.
-   - **Backtest déterministe Rust (`backtest_fixture`) [FIXTURE]** : **100% de taux de réussite** sur la branche Solana (`+$22.78` nets sur 6 trades, Sharpe annualisé **`28.22`**, Max Drawdown **`0.0%`**, `1` rug pull `SCAM-SOL` bloqué par `HardRiskGate`), et validation des **pods Rust adaptés (`<= 4` par blockchain)** sur l'intégralité des **26 écosystèmes**. All figures in this bullet are `[FIXTURE]`.
+   - **Zéro latence LLM dans le Hot-Path** (measured mean `0.244 µs` per `validate` call in Rust via `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`) — *operational latency measurement*.
+   - **Backtest déterministe Rust (`backtest_fixture`) [FIXTURE]** : **`100.0%` de taux de réussite** sur la branche Solana (`+$24.73` nets sur `4` trades, Sharpe annualisé **`128.52`**, Max Drawdown **`0.0%`**, `3` rejets : `2` par le hurdle de coût et `1` rug pull `SCAM-SOL` bloqué par `HardRiskGate`), et validation des **pods Rust adaptés (`<= 4` par blockchain)** sur l'intégralité des **26 écosystèmes**. All figures in this bullet are `[FIXTURE]`.
    - **Simulation Paper-Money réaliste (`paper_model`) [SIMULATED]** : **`+$1,155.52` de PnL net cumulé (`+11.55%` sur `$10,000`)**, **56.3% de win rate** (`845` gains / `624` pertes / `31` neutres) malgré l'application stricte du slippage L2 et de la sélection adverse. All figures in this bullet are `[SIMULATED]`.
 2. **Une sur-fréquence et une inflation de contexte dans la boucle cognitive Warm-Path (`~$2.00` dépensés)** — *operational inference-cost measurement* :
    - Le robot feuille Solana se réveillait toutes les **30s à 45s** pour ré-analyser des bougies **15 minutes (`900s`)**, envoyant **~8 300 jetons d'entrée** par appel et doublant la consommation lors des escalades de troncature (`115` retries), tandis que `CostGuard` sous-estimait les tarifs OpenRouter d'un facteur ~10x et perdait son compteur à chaque redémarrage de conteneur.
@@ -62,7 +64,7 @@ Les **4 correctifs structurels** mis en œuvre à l'issue de cet audit réduisen
 
 1. **Cadence de réveil `30s–45s` décorrélée de l'horizon des bougies `15m` (`900s`)** :
    - En régime `HIGH_INFLECTION`, `CostGuard` abaissait `min_wakeup_sec` à `30s–45s`.
-   - `Leaf/leaf-solana` a exécuté **291 cycles cognitifs** (souvent espacés de 35 secondes) sur les mêmes bougies OHLCV 15 minutes (`SOL/USDT`, `JUP/USDT`, `RAY/USDT`), alors que les 4 pods Rust (`engine-rs`) géraient déjà le carnet d'ordres L2 en `< 50µs` sans besoin de LLM.
+   - `Leaf/leaf-solana` a exécuté **291 cycles cognitifs** (souvent espacés de 35 secondes) sur les mêmes bougies OHLCV 15 minutes (`SOL/USDT`, `JUP/USDT`, `RAY/USDT`), alors que les 4 pods Rust (`engine-rs`) géraient déjà le carnet d'ordres L2 avec un `HardRiskGate::validate` mesuré à `0.244 µs` en moyenne (bench: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`) sans besoin de LLM.
 2. **Inflation du prompt `FULL_THESIS` (`~8 300` jetons/cycle) + pénalité de double facturation sur troncature** :
    - Le contrat `FULL_THESIS` injectait les dictionnaires JSON bruts complets de `ta_snapshots` (`SOL/USDT`, `JUP/USDT`, `RAY/USDT`), les 4 derniers tiroirs `MemPalace`, **et** les 2 derniers transcripts bruts complets (`format_recent_transcripts(limit=2)`).
    - Lorsque la réponse JSON dépassait le plafond initial de jetons de sortie (`115` fois sur `325` cycles, soit `35%` des cycles), le mécanisme d'escalade relançait immédiatement un second appel HTTP avec un plafond supérieur — **re-facturant une seconde fois les ~8 300 jetons d'entrée**.
@@ -76,25 +78,23 @@ Les **4 correctifs structurels** mis en œuvre à l'issue de cet audit réduisen
 
 Conformément à l'invariant d'isolation des métriques, Robotrader v3 sépare strictement ses trois populations d'évaluation :
 
-### 3.1 Population 1 — Backtest Déterministe Rust (`backtest_fixture`, `engine-rs` `<50µs`) [`FIXTURE`]
+### 3.1 Population 1 — Backtest Déterministe Rust (`backtest_fixture`, `engine-rs` measured mean `0.244 µs` via `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`) [`FIXTURE`]
 
 > Source: `[FIXTURE]` — every numeric trading figure in this subsection is the output of a deterministic `engine-rs` replay on a synthetic scenario. It is not realized, live, or product performance.
 
 - **Branche Solana (`leaf-solana`, 4 pods Rust natifs)** :
-  - **Capital initial** : `$10,000.00` -> **Capital final** : **`$10,022.78`** (**`+0.228%`** sur la séquence de référence)
-  - **Taux de réussite (Win Rate)** : **`100.0%`** (`6` gains / `0` perte sur `6` exécutions)
-  - **Ratio de Sharpe annualisé** : **`28.22`**
+  - **Capital initial** : `$10,000.00` -> **Capital final** : **`$10,024.73`** (**`+0.247%`** sur la séquence de référence)
+  - **Taux de réussite (Win Rate)** : **`100.0%`** (`4` gains / `0` perte sur `4` exécutions)
+  - **Ratio de Sharpe annualisé** : **`128.52`**
   - **Max Drawdown** : **`0.0%`**
-  - **Frais d'exécution cumulés** : `$1.67` (Maker rebate CEX `-1.0 bps` + Jupiter v6 + tip Jito MEV)
-  - **Protection `HardRiskGate` (`<50µs`)** : **`1` rejet critique** (`AntiRugRejected: Mint authority is still active` sur le jeton piège `SCAM-SOL`, perte évitée : 100% de l'allocation sniper)
+  - **Frais d'exécution cumulés** : `$1.47` (Maker rebate CEX `-1.0 bps` + Jupiter v6 + tip Jito MEV)
+  - **Protection `HardRiskGate` (measured mean `0.244 µs`; bench: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`)** : **`3` rejets critiques** — **`2` par le hurdle de coût** (JUP smart-money edge `70.2` contre hurdle `87.2`; AIX-SOL sniper edge `95.0` contre hurdle `151.4`) et **`1` `OnChainRugCheckFailed`** (`SCAM-SOL`, edge `81.0` contre hurdle `87.8`, perte évitée : 100% de l'allocation sniper)
   - **Attribution par Pod Rust Solana** :
-    - `pod_carry` (`Solana JitoSOL/Perp Funding Basis Carry`) : **`+$11.91`** (2 trades)
-    - `pod_momentum` (`Solana L2 Orderflow & Raydium CLMM Momentum`) : **`+$9.70`** (2 trades)
-    - `pod_solana_alpha` (`Solana Smart-Money & Jupiter Whale Tracker`) : **`+$0.93`** (1 trade)
-    - `pod_sniper` (`Solana Anti-Rug SPL New Pool Sniper`) : **`+$0.24`** (1 trade validé + 1 rug `SCAM-SOL` bloqué)
+    - `pod_carry` (`Solana JitoSOL/Perp Funding Basis Carry`) : **`+$13.61`** (2 trades)
+    - `pod_momentum` (`Solana L2 Orderflow & Raydium CLMM Momentum`) : **`+$11.11`** (2 trades)
 - **Flotte Multi-Blockchains (26 écosystèmes, `1..=4` pods Rust adaptés par blockchain)** :
   - Chaque écosystème dispose désormais de ses propres pods Rust compilés dans `engine-rs` (`crates/strategies/src/lib.rs`) et testables individuellement via `POST /api/v1/leaf/{leaf_id}/backtest`.
-  - Exemple `leaf-bitcoin` (3 pods Rust : `btc_etf_basis_carry`, `btc_halving_l2_momentum`, `btc_utxo_whale_accumulator`) : `4` trades, `100%` win rate, **`+$20.47`**, Sharpe **`34.25`**, Max DD **`0.0%`**.
+  - Exemple `leaf-bitcoin` (3 pods Rust : `btc_etf_basis_carry`, `btc_halving_l2_momentum`, `btc_utxo_whale_accumulator`) : `3` trades, `100.0%` win rate, **`+$19.58`**, Sharpe **`238.97`**, Max DD **`0.0%`**, `1` rejet par le hurdle de coût.
 
 ### 3.2 Population 2 — Simulation Continue avec Slippage L2 & Sélection Adverse (`paper_model`) [`SIMULATED`]
 
@@ -142,7 +142,7 @@ Le moteur `paper_model` applique sur chaque tick un modèle de microstructure p�
 | **4** | **Tarification OpenRouter réelle + Hydratation 24h (`hydrate_from_ledger`)** | Tarifs sous-évalués ~10x (`$0.18` affiché pour `$2.00` réels) et remise à zéro en RAM au restart | Tarifs réels OpenRouter (`$0.30/$1.10` DeepSeek Flash, `$0.60/$2.50` Kimi K3.1 Pro) + reconstruction automatique du cumul 24h depuis `transcript_ledger.jsonl` | **Verrouillage budgétaire exact** |
 
 ### Coût Horaire Projeté (Lorsque l'Auto-Scheduler est activé)
-- **Mode Par Défaut (`PAUSE`)** : **`$0.00 / heure`** (les pods Rust `engine-rs` continuent d'exécuter les règles mécaniques du `PolicyEnvelope` en `<50µs` sans aucun appel LLM).
+- **Mode Par Défaut (`PAUSE`)** : **`$0.00 / heure`** (les pods Rust `engine-rs` continuent d'exécuter les règles mécaniques du `PolicyEnvelope` avec un `HardRiskGate::validate` mesuré à `0.244 µs` en moyenne; bench: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`; sans aucun appel LLM).
 - **Mode Auto-Scheduler `ACTIF` (4 réflexions feuille/h + 1 réflexion maître/h)** :
   - `Leaf/leaf-solana` (`4 x ~1 800` jetons totaux/h sous `deepseek-v4.1-flash-1017`) : **`~$0.004 / heure`**
   - `MasterOrchestrator` (`1 x ~2 500` jetons totaux/h sous `kimi-k3.1-pro`) : **`~$0.003 / heure`**

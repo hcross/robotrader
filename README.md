@@ -5,7 +5,7 @@
 It combines:
 - **Tier 1 — Master Orchestrator & Cross-Chain Treasury (`moonshotai/kimi-k3.1-pro`)**: Manages the Master Portfolio, enforces a permanent `>= 20%` `Dry Powder` safety reserve, prices cross-chain transfer viability (`2.5x` round-trip bridge hurdle rate), executes multi-chain/multi-token operator `Checkout` requests, reads across all 26 leaf agents' MemPalace wings (`wing="master_orchestrator"`), and governs profit-gated OpenRouter credit auto-refill on a `1h` (`3600s`) macro cadence.
 - **Tier 2 — 26 Specialized Blockchain & Venue Leaf Robots (`deepseek/deepseek-v4.1-flash-1017`)**: Each leaf robot is strictly isolated to **one single blockchain** (Solana, Bitcoin, Ethereum, Sui, Hyperliquid, BNB, XRP, TON, TRON, Avalanche, Cosmos, Aptos, Chainlink, Stacks, NEAR, Cardano, Polkadot, Dogecoin, ICP, Canton, Celo, Tezos, Flow, Vaulta/EOS, plus Binance CEX Multi-Pair and Paper Sandbox) with its own RSS feed, specific TA/on-chain metrics, dedicated MemPalace wing (`wing="leaf_<slug>"`), and **`1..=4` ecosystem-adapted Rust Strategy Pods** in `engine-rs`.
-- **Tier 3 — Sub-Millisecond Deterministic Rust Execution & Simulated Vault (`engine-rs`, `<50µs`)**: Synchronous `HardRiskGate`, `SimulatedVault` (`SIMULATED`: non-spendable addresses and non-chain-valid audit receipts across all 26 chains — see [Simulated Vault & Key Boundaries](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)), Kelly position sizer, multi-chain `OnChainTokenSafety` anti-rug/honeypot filter, and per-blockchain Rust strategy pods (`pod_carry`, `pod_momentum`, `pod_onchain_alpha`, `pod_sniper`) with zero LLM latency in the hot path.
+- **Tier 3 — Sub-Millisecond Deterministic Rust Execution & Simulated Vault (`engine-rs`, `HardRiskGate::validate` measured mean **0.244 µs** via `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`)**: Synchronous `HardRiskGate`, `SimulatedVault` (`SIMULATED`: non-spendable addresses and non-chain-valid audit receipts across all 26 chains — see [Simulated Vault & Key Boundaries](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)), Kelly position sizer, multi-chain `OnChainTokenSafety` anti-rug/honeypot filter, and per-blockchain Rust strategy pods (`pod_carry`, `pod_momentum`, `pod_onchain_alpha`, `pod_sniper`) with zero LLM latency in the hot path.
 
 ---
 
@@ -39,13 +39,13 @@ Robotrader v2 solves the latency and reliability dilemma of agentic trading by e
 │               │  Redis 7 IPC State Store (TTL Heartbeat) │             │
 │               └──────────────────────┬───────────────────┘             │
 └──────────────────────────────────────┼─────────────────────────────────┘
-                                       │ Sub-millisecond reads (<50µs)
+                                       │ Sub-millisecond reads
 ┌──────────────────────────────────────┼─────────────────────────────────┐
 │               HOT-PATH: DETERMINISTIC EXECUTION ENGINE                 │
 │               Rust Workspace (engine-rs)                               │
 │                                      ▼                                 │
 │               ┌──────────────────────────────────────────┐             │
-│               │ Synchronous HardRiskGate (<50µs)         │             │
+│               │ Synchronous HardRiskGate (0.244µs)       │             │
 │               │ • Kelly Sizer & Simulated Vault          │             │
 │               │ • Drawdown Kill-Switch                   │             │
 │               │ • Multi-Chain OnChainTokenSafety Check   │             │
@@ -66,13 +66,15 @@ Robotrader v2 solves the latency and reliability dilemma of agentic trading by e
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
+> **Hot-path budget evidence.** Measured `HardRiskGate::validate` mean on the approved path: **0.244 µs** (244.15 ns). Command: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate` (criterion 0.8.2; host: Apple Silicon macOS, 2026-10-26).
+
 ---
 
 ## ✨ Key Features
 
 ### 1. Zero LLM Latency in the Hot-Path
 - **Sub-millisecond decisions**: Market events and Order Book Imbalance (OBI) feeds are ingested directly by Rust pods.
-- **HardRiskGate (<50µs)**: Validates maximum order sizing, drawdown halts, and Solana token safety synchronously.
+- **HardRiskGate (measured mean 0.244 µs; bench: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`)**: Validates maximum order sizing, drawdown halts, the per-intent execution-cost hurdle, and Solana token safety synchronously.
 - **No blocking I/O**: The execution engine never waits for an external LLM call or network inference loop.
 
 ### 2. Professional Technical Analysis Toolbelt
@@ -144,7 +146,7 @@ The warm-path LLM translates abstract market theses into concrete numerical rule
 │   ├── Cargo.toml
 │   └── crates/
 │       ├── common/     # Canonical types: MarketEvent, OrderIntent, PolicyEnvelope, AssetOverride
-│       ├── risk-gate/  # Synchronous HardRiskGate (<50µs), Kelly sizer, Drawdown kill-switch
+│       ├── risk-gate/  # Synchronous HardRiskGate (measured 0.244µs), Kelly sizer, Drawdown kill-switch
 │       ├── strategies/ # StrategyPod trait + Pod 1 (Carry), Pod 2 (Momentum), Pod 3 (Solana), Pod 4 (Sniper)
 │       ├── exec-router/# Post-Only CEX maker router & Solana Jupiter v6 + Jito bundle simulator
 │       ├── backtest/   # Deterministic replay engine (Replay == Paper == Live)
@@ -162,6 +164,8 @@ The warm-path LLM translates abstract market theses into concrete numerical rule
 │   │   └── 0002-autonomous-cognitive-warm-path-and-ta-memory.md
 └── docker-compose.yml  # Multi-container orchestration (Redis, Backend, Frontend)
 ```
+
+> **Hot-path budget evidence.** `HardRiskGate::validate` measured mean: **0.244 µs** (244.15 ns). Command: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate` (criterion 0.8.2; host: Apple Silicon macOS, 2026-10-26).
 
 ---
 
@@ -269,7 +273,7 @@ Three review rounds maximum per stage; no agent merges.
 - [**ADR-0004: Right-Sized Agentic SDLC with Cold-Start Reviews**](docs/adr/0004-agentic-sdlc.md)  
   *SPEC → PLAN → DEV lanes (M/S/L), cold-start reviewer agents with artifact-based resume, a hard three-round cap, OpenSpec-compatible specs, a ≤ 5-minute human Review Card, and a human-only merge gate.*
 - [**Performance & LLM Cost Post-Mortem Audit (`docs/PERFORMANCE_AND_COST_AUDIT.md`)**](docs/PERFORMANCE_AND_COST_AUDIT.md)  
-  *Full quantitative audit of the 325 LLM cycles / 4.41M tokens (`~$2.00` OpenRouter spend), breakdown of the 3 trading populations (`backtest_fixture` 100% win rate / Sharpe 28.22, `paper_model` `+$1,155.52` over 1,500 trades, `live_testnet`), and the 4 structural remediations reducing LLM OpEx by 25x–40x.*
+  *Full quantitative audit of the 325 LLM cycles / 4.41M tokens (`~$2.00` OpenRouter spend), breakdown of the 3 trading populations (`backtest_fixture` `4` trades / `+$24.73` / Sharpe 128.52, `paper_model` `+$1,155.52` over 1,500 trades, `live_testnet`), and the 4 structural remediations reducing LLM OpEx by 25x–40x.*
 - [**ADR-0005: The Vault Is Simulated (`docs/adr/0005-vault-is-simulated.md`)**](docs/adr/0005-vault-is-simulated.md)  
   *Why the vault is labelled `SIMULATED`, how execution mode and seed provenance fail closed, and why Python holds no key custody; real cryptography and mainnet custody remain open in issue #2.*
 - [**Simulated Vault & Key Boundaries (`docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md`)**](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)  

@@ -82,8 +82,10 @@ class TestHybridArchitectureV2(unittest.TestCase):
             self.assertIsNone(rule.invalidation_price_usd)
 
         bt_full = resp_full["backtest"]
-        self.assertEqual(bt_full["total_trades"], 6)
-        self.assertEqual(bt_full["rejected_orders"], 1)  # Rug token rejected
+        # Regenerated from the cost-aware hurdle: two orders now fail the
+        # execution-cost hurdle and SCAM-SOL still fails the anti-rug gate.
+        self.assertEqual(bt_full["total_trades"], 4)
+        self.assertEqual(bt_full["rejected_orders"], 3)
         self.assertGreater(bt_full["net_profit_usd"], 0.0)
 
         # 2. Defensive Carry regime (only Pod 1 & Pod 2 enabled)

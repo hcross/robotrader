@@ -501,6 +501,18 @@ pub fn benchmark_market_stream_for_leaf(leaf_id: &str) -> (Vec<MarketEvent>, Pol
 #[cfg(test)]
 mod tests {
     use super::*;
+    use robotrader_common::{fee_bps_for, spread_bps_for};
+    use robotrader_risk_gate::RiskRejection;
+    use robotrader_strategies::{OnChainAlphaPod, StrategyPod};
+
+    const FLOAT_TOLERANCE: f64 = 1e-9;
+
+    fn assert_close(actual: f64, expected: f64, label: &str) {
+        assert!(
+            (actual - expected).abs() < FLOAT_TOLERANCE,
+            "{label}: expected {expected}, got {actual}"
+        );
+    }
 
     #[test]
     fn test_full_multi_pod_backtest_and_rug_rejection() {
@@ -508,47 +520,115 @@ mod tests {
         let (events, envelope) = benchmark_market_stream();
         let summary = engine.run(&events, &envelope);
 
-        assert_eq!(summary.total_trades, 6);
-        assert_eq!(summary.rejected_orders, 1); // SCAM-SOL rejected by HardRiskGate!
-        assert!(summary.net_profit_usd > 0.0);
-        assert!(summary.sharpe_ratio > 2.0);
-        assert_eq!(summary.pod_pnl_attribution.len(), 4);
+        // Regenerated from `cargo run -p robotrader-node -- --leaf-id leaf-solana`
+        // after the cost-aware hurdle; fixture inputs are unchanged.
+        assert_eq!(summary.total_trades, 4);
+        assert_eq!(summary.rejected_orders, 3);
+        assert_eq!(summary.pod_pnl_attribution.len(), 2);
+        assert_close(
+            summary.net_profit_usd,
+            24.727172152519415,
+            "net_profit_usd",
+        );
+        assert_close(summary.final_equity_usd, 10024.72717215252, "final_equity_usd");
+        assert_close(
+            summary.total_return_pct,
+            0.24727172152519414,
+            "total_return_pct",
+        );
+        assert_close(summary.win_rate_pct, 100.0, "win_rate_pct");
+        assert_close(
+            summary.sharpe_ratio,
+            128.52308889884674,
+            "sharpe_ratio",
+        );
+        assert_close(summary.max_drawdown_pct, 0.0, "max_drawdown_pct");
+        assert_close(
+            summary.total_fees_usd,
+            1.4711945828105164,
+            "total_fees_usd",
+        );
+        assert_close(
+            summary.pod_pnl_attribution["pod_carry"],
+            13.614211628444282,
+            "pod_carry pnl",
+        );
+        assert_close(
+            summary.pod_pnl_attribution["pod_momentum"],
+            11.112960524076215,
+            "pod_momentum pnl",
+        );
         assert!(summary.ecosystem_pods.len() <= MAX_PODS_PER_BLOCKCHAIN);
+    }
+
+    #[test]
+    fn test_scam_sol_fixture_is_rejected_as_a_rug_not_by_the_hurdle() {
+        // `BacktestSummary` discards the `RiskRejection` variant, so this test
+        // drives the fixture's own SCAM-SOL intent through the gate directly.
+        // No summary or node-JSON field is added (PLAN-R1-F05).
+        let (events, envelope) = benchmark_market_stream();
+        let scam_event = events
+            .iter()
+            .find(|event| event.symbol() == "SCAM-SOL")
+            .expect("the benchmark stream contains the SCAM-SOL rug event");
+
+        let mut pod = OnChainAlphaPod::default();
+        let intents = pod.on_market_event(scam_event, &envelope);
+        assert_eq!(intents.len(), 1, "SCAM-SOL must emit one intent");
+        let intent = &intents[0];
+
+        let tip_bps = ((intent.expected_edge_bps * 0.10) as u32).clamp(2, 25);
+        let hurdle_bps = fee_bps_for(intent.venue, intent.order_type) * 2.0
+            + spread_bps_for(intent.order_type, tip_bps)
+            + intent.max_slippage_bps as f64
+            + RiskLimits::default().min_edge_buffer_bps;
+        assert_close(intent.expected_edge_bps, 81.0, "SCAM-SOL edge_bps");
+        assert_close(hurdle_bps, 87.8, "SCAM-SOL hurdle_bps");
+        assert!(intent.expected_edge_bps < hurdle_bps);
+
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        let portfolio = PortfolioState::new(10_000.0);
+        match gate.validate(intent, &portfolio, &envelope, scam_event.timestamp_ms()) {
+            Err(RiskRejection::OnChainRugCheckFailed { .. }) => {}
+            other => panic!("expected OnChainRugCheckFailed, got {other:?}"),
+        }
     }
 
     #[test]
     fn test_all_26_blockchains_have_at_most_4_adapted_rust_pods() {
         let engine = BacktestEngine::default();
-        let all_leaves = [
-            "leaf-solana",
-            "leaf-bitcoin",
-            "leaf-ethereum",
-            "leaf-sui",
-            "leaf-hyperliquid",
-            "leaf-bnb",
-            "leaf-xrp",
-            "leaf-ton",
-            "leaf-tron",
-            "leaf-avalanche",
-            "leaf-cosmos",
-            "leaf-aptos",
-            "leaf-chainlink",
-            "leaf-stacks",
-            "leaf-near",
-            "leaf-cardano",
-            "leaf-polkadot",
-            "leaf-dogecoin",
-            "leaf-icp",
-            "leaf-canton",
-            "leaf-celo",
-            "leaf-tezos",
-            "leaf-flow",
-            "leaf-eos",
-            "leaf-binance-cex",
-            "leaf-paper-sandbox",
+        // Exact per-leaf values regenerated from
+        // `cargo run -p robotrader-node -- --leaf-id <leaf>` at this tip.
+        let expected: [(&str, usize, usize, f64); 26] = [
+            ("leaf-solana", 4, 3, 24.727172152519415),
+            ("leaf-bitcoin", 3, 1, 19.58224799920572),
+            ("leaf-ethereum", 3, 2, 17.185563929990167),
+            ("leaf-sui", 3, 2, 15.357363144730698),
+            ("leaf-hyperliquid", 3, 2, 17.207987447352934),
+            ("leaf-bnb", 3, 1, 19.16214496964858),
+            ("leaf-xrp", 3, 1, 19.58224799920754),
+            ("leaf-ton", 3, 1, 19.16214496964858),
+            ("leaf-tron", 3, 1, 21.41062352956942),
+            ("leaf-avalanche", 3, 1, 19.16214496964858),
+            ("leaf-cosmos", 3, 1, 19.58224799920572),
+            ("leaf-aptos", 3, 1, 19.58224799920572),
+            ("leaf-chainlink", 3, 1, 19.58224799920572),
+            ("leaf-stacks", 3, 1, 19.58224799920572),
+            ("leaf-near", 3, 1, 19.58224799920572),
+            ("leaf-cardano", 3, 1, 19.58224799920572),
+            ("leaf-polkadot", 3, 1, 19.58224799920754),
+            ("leaf-dogecoin", 3, 1, 19.58224799920572),
+            ("leaf-icp", 3, 1, 19.58224799920572),
+            ("leaf-canton", 3, 1, 19.58224799920754),
+            ("leaf-celo", 3, 1, 19.58224799920572),
+            ("leaf-tezos", 3, 1, 19.58224799920754),
+            ("leaf-flow", 3, 1, 19.58224799920754),
+            ("leaf-eos", 3, 1, 19.58224799920572),
+            ("leaf-binance-cex", 3, 1, 18.012215874785397),
+            ("leaf-paper-sandbox", 3, 2, 16.765559498326184),
         ];
 
-        for leaf_id in all_leaves {
+        for (leaf_id, expected_trades, expected_rejections, expected_pnl) in expected {
             let specs = ecosystem_pod_specs(leaf_id);
             assert!(
                 !specs.is_empty() && specs.len() <= 4,
@@ -559,8 +639,19 @@ mod tests {
             let (events, envelope) = benchmark_market_stream_for_leaf(leaf_id);
             let summary = engine.run_for_leaf(leaf_id, &events, &envelope);
             assert_eq!(summary.leaf_id, leaf_id);
-            assert!(summary.total_trades >= 3, "Leaf {leaf_id} executed too few trades");
-            assert!(summary.net_profit_usd > 0.0, "Leaf {leaf_id} net profit was non-positive");
+            assert_eq!(
+                summary.total_trades, expected_trades,
+                "Leaf {leaf_id} trade count changed"
+            );
+            assert_eq!(
+                summary.rejected_orders, expected_rejections,
+                "Leaf {leaf_id} rejection count changed"
+            );
+            assert_close(
+                summary.net_profit_usd,
+                expected_pnl,
+                &format!("Leaf {leaf_id} net_profit_usd"),
+            );
         }
     }
 }
