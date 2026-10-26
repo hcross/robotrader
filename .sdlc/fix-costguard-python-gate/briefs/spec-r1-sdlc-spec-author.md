@@ -2,12 +2,12 @@ You are `sdlc-spec-author` for change `fix-costguard-python-gate`.
 
 - Stage: `spec`
 - Round: `1` (max 3)
-- Lane: `S`
+- Lane: `L`
 - Issue: #5
 - Worktree: `/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/5-fix-costguard-python-gate`
 - Artifact under work: openspec/changes/fix-costguard-python-gate/proposal.md + specs/** + tasks.md (Lane S)
 - Reviewed SHA: run `git rev-parse HEAD` in the worktree and record it in the verdict.
-- Reason: initial authoring
+- Reason: revise findings from round 1
 
 Read first, in this order:
 1. `sdlc/PROTOCOL.md`

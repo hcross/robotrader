@@ -3,9 +3,13 @@
   "change_id": "fix-costguard-python-gate",
   "title": "Make the Python CostGuard refill path truthful and roll over its daily budget",
   "issue": 5,
-  "lane": "S",
+  "lane": "L",
   "lane_reason": "Backend-only CostGuard slice; 4-7 files; no Rust gate ownership decision",
-  "lane_change": null,
+  "lane_change": {
+    "from": "S",
+    "to": "L",
+    "reason": "CostGuard refill gate and daily cap are a capital-protection path per sdlc/PROTOCOL.md §2.1; PLAN and design.md are required."
+  },
   "branch": "sdlc/5-fix-costguard-python-gate",
   "worktree": ".worktrees/5-fix-costguard-python-gate",
   "base_branch": "master",
@@ -14,20 +18,20 @@
   "human_gates": [
     "merge"
   ],
-  "status": "triage",
+  "status": "spec-review",
   "pr": null,
   "areas": [],
   "stages": {
     "spec": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "changes_requested",
+      "rounds": 1,
+      "last_verdict": "CHANGES_REQUESTED",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "2dea6d4f046fa32eb53b0191cf1c790473bac22f",
+      "updated_at": "2026-10-26T00:03:17Z"
     },
     "plan": {
-      "status": "skipped",
+      "status": "pending",
       "rounds": 0,
       "last_verdict": null,
       "last_reviewer": null,

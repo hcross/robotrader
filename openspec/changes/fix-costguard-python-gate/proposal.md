@@ -2,18 +2,19 @@
 
 | Field | Value |
 |---|---|
-| Outcome | The Python `CostGuard` cannot refill inference credit without measured realized trading profit, its daily budget rolls over every 24 hours without Redis, and the UI shows the backend's real low watermark. |
-| Why now | Issue #5 reproduces an automatic top-up with no profit, a spend counter that never resets (or resets on restart), and a displayed threshold that disagrees with the code. This is the only guard between an agent loop and a real OpenRouter bill. |
-| Blast radius | `backend/agents/monitor.py`, `backend/agents/orchestrator.py`, `backend/server.py`, `frontend/src/components/MasterOverview.jsx`, backend tests. `backend/core/state_store.py` is consumed read-only. No Rust, no `PolicyEnvelope`, no Redis schema change. |
-| Risk | Medium. Worst failure: a legitimate refill is refused because the measured PnL is not wired into the automatic path. |
-| Effort | S |
-| Decision needed | None. Scope is fixed by the partial-change comment on issue #5. |
+| Outcome | The Python `CostGuard` cannot refill inference credit without measured realized profit or while the kill switch is active; its daily budget rolls over every 24 h without Redis; the UI shows the backend's real low watermark. |
+| Why now | Issue #5 reproduces an automatic top-up with no profit, a spend counter that never rolls over, a non-injectable ledger read at construction, and a UI threshold that disagrees with the backend. ADR-0003 also disagrees with the code on that threshold. |
+| Blast radius | `backend/agents/monitor.py`, `backend/agents/orchestrator.py`, `backend/server.py`, `frontend/src/components/MasterOverview.jsx`, `docs/adr/0003-hierarchical-multi-ecosystem-architecture.md`, backend tests. `backend/core/state_store.py` is consumed read-only. No Rust, no `PolicyEnvelope`, no Redis schema. |
+| Risk | Medium. Worst failure: a legitimate refill is refused because the injected measured source is missing or the ledger path is misconfigured. |
+| Effort | L in review-round terms (SPEC + PLAN + DEV). |
+| Decision needed | Approve the ADR-0003 amendment: low watermark `$5.00` → `$2.00`, and the ADR's kill-switch condition enforced by the Python gate. |
 
 ```mermaid
 flowchart LR
-  A["usage recorded"] --> B["measured realized PnL"]
-  B --> C{"PnL > 0?"}
-  C -- no --> D["no refill"]
+  A["usage recorded"] --> K{"kill switch active?"}
+  K -- yes --> D["no refill"]
+  K -- no --> C{"measured PnL > 0?"}
+  C -- no --> D
   C -- yes --> E{"amount <= 10% PnL<br/>and epoch cap?"}
   E -- no --> D
   E -- yes --> F["bounded refill"]
@@ -22,41 +23,46 @@ flowchart LR
 
 ## Why
 
-- The automatic refill path omits `realized_trading_pnl_usd`, so the profit gate is skipped entirely.
-- The spend total is cumulative and resets only on restart when Redis is absent, so the daily cap is not a daily cap.
-- The frontend advertises a `$5.00` low watermark while the backend uses `$2.00`, and the status claims auto-refill is disabled while it runs.
+- The automatic refill path omits both the realized PnL and the ADR's kill-switch condition, so the documented gate is not the gate that runs.
+- `LLMMonitorAgent` holds no state store, so the automatic path cannot reach the measured PnL; a module-global read would evaluate the wrong instance in tests.
+- Spend is cumulative and hydrated only when Redis is configured, from a fixed dev ledger read synchronously at construction.
+- The UI advertises a `$5.00` watermark while the backend uses `$2.00`, and the status claims auto-refill is disabled while it runs.
 
 ## What Changes
 
-- Make a measured realized PnL mandatory on every refill path; the automatic path uses the state store's measured helper.
-- Reject refills when realized profit is zero or negative, with no balance, epoch, or history mutation.
-- Apply the profit-share cap (10% of PnL), single-refill bound, and epoch cap on the automatic path as well as the operator path.
-- Replace the cumulative spend counter with a rolling 24-hour window that works without Redis, and retain ledger hydration, including at startup when the ledger exists.
-- Expose one backend-owned low watermark and render it from the status payload; remove the frontend literal.
-- Report auto-refill status truthfully and add an automatic-path regression test for negative and zero PnL.
+- Inject the orchestrator's own state store into `CostGuard`; fail closed (no refill) when no measured source exists.
+- Require a measured realized PnL on every refill path and reject zero or negative profit with no state mutation.
+- Enforce the kill-switch condition, the `force`/watermark distinction, the 10% profit-share cap, the fixed `(0, $25.00]` single-refill bound, and the configured epoch cap on every path.
+- Replace cumulative spend with a rolling 24 h window, keep `total_cost_usd` as its derived total, and make ledger hydration injectable, lazy, bounded, and independent of Redis.
+- Amend ADR-0003: watermark `$2.00` with rationale, and the kill-switch condition stated for the Python gate. The amendment is a deliverable of this change.
+- Expose one backend-owned watermark; the frontend renders it and shows an em dash when absent.
+- **BREAKING (status value)**: `auto_wallet_refill` changes from `DISABLED_BY_SECURITY_POLICY` to `ENABLED_PROFIT_GATED` or `DISABLED`. `auto_refill_policy` already exists and now follows the same state.
+- Add automatic-path tests for negative and zero PnL and isolate the ledger path in tests.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `costguard`: profit-gated, epoch-capped refill behavior, rolling 24-hour spend accounting, and the operator-facing auto-refill status and low watermark.
+- `costguard`: profit- and kill-switch-gated refills, store injection, rolling 24 h spend accounting, injectable hydration, and the operator-facing status and watermark.
 
 ### Modified Capabilities
 
-None. No existing spec under `openspec/specs/` defines CostGuard behavior.
+- `integrity`: the requirement "Refill gating consumes null-safe measured PnL only" keeps its caller rules but no longer declares the CostGuard defects out of scope; they are specified by `costguard`.
 
 ## Non-goals
 
 - Routing the gate through the Rust `HardRiskGate::validate_inference_refill`; that remains a follow-up on issue #5.
 - Querying the real OpenRouter `/credits` balance or making refill an out-of-band operator action.
 - Removing the dead Rust validator.
-- Changing the dry-powder floor, Kelly sizing, kill switch, or `PolicyEnvelope`.
-- Persisting the spend window outside the existing transcript ledger.
+- Aligning the UI's fixed `$15.00` refill button with `OPENROUTER_REFILL_AMOUNT_USD` (`$10.00`); tracked as a follow-up on issue #5.
+- Ledger segments older than the most recent rotated file (`<name>.1`).
+- Changing the dry-powder floor, Kelly sizing, kill-switch semantics, or `PolicyEnvelope`.
 
 ## Impact
 
-- **Backend**: `backend/agents/monitor.py` (gate, window, status), `backend/agents/orchestrator.py` and `backend/server.py` (callers), `backend/core/state_store.py` (measured helper, already present).
+- **Backend**: `backend/agents/monitor.py` (store injection, gate, rolling window, lazy hydration, status), `backend/agents/orchestrator.py` (inject its store), `backend/server.py` (operator path uses the injected source).
 - **Frontend**: `frontend/src/components/MasterOverview.jsx` renders `openrouter_credit.low_watermark_usd` and the truthful status.
-- **Contract**: the `/api/v1/status` `cost_guard` block keeps its shape; `auto_wallet_refill` changes value, and `openrouter_credit.low_watermark_usd` becomes the only threshold source. No Redis key, `PolicyEnvelope`, or Rust wire change.
-- **Tests**: `backend/tests/test_architecture.py`, `backend/tests/test_hierarchy_v3.py`, plus an automatic-path refill regression test.
+- **ADR**: `docs/adr/0003-hierarchical-multi-ecosystem-architecture.md` is amended from `$5.00` to `$2.00` and records the kill-switch condition.
+- **Contract**: `/api/v1/status` keeps its shape. The `auto_wallet_refill` enum value changes, which is a **BREAKING** semantic change for external consumers; migration is to accept `ENABLED_PROFIT_GATED` and `DISABLED` and to read `auto_refill_policy` for the policy state. `openrouter_credit.low_watermark_usd` becomes the only threshold source.
+- **Tests**: `backend/tests/test_architecture.py`, `backend/tests/test_hierarchy_v3.py`, plus new automatic-path and isolated-hydration tests.
 - **Backtest/paper/live**: unaffected; this is warm-path treasury accounting only.
