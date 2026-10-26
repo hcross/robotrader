@@ -69,6 +69,9 @@ class TestPerformancePopulations(unittest.TestCase):
         self.assertEqual(bt["total_fees_usd"], 1.78)
         self.assertEqual(len(bt["executions"]), 6)
         self.assertEqual(bt["executions_source"], "backtest_fixture")
+        self.assertEqual(bt["artifact_kind"], "policy_sanity_check")
+        self.assertEqual(bt["source"], "FIXTURE")
+        self.assertIs(bt["fill_simulation"], False)
 
     def test_paper_and_live_populations_use_their_own_pnl_column(self) -> None:
         # Both orders lose money for real; one wins and one loses in the paper model.
@@ -175,9 +178,13 @@ class TestPerformancePopulations(unittest.TestCase):
         self.assertEqual(fixture["trades"], 6)
         self.assertEqual(fixture["win_rate_pct"], 100.0)
         self.assertEqual(fixture["cumulative_pnl_usd"], 25.66)
+        self.assertEqual(fixture["artifact_kind"], "policy_sanity_check")
         self.assertEqual(fixture["source"], "FIXTURE")
+        self.assertIs(fixture["fill_simulation"], False)
         self.assertEqual(
-            fixture["source_detail"], "engine-rs deterministic replay (synthetic scenario)"
+            fixture["source_detail"],
+            "deterministic policy sanity check on a synthetic fixture; "
+            "not a fill simulation",
         )
 
     def test_win_rate_breakdown_counts_flat_executions(self) -> None:

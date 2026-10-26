@@ -7,6 +7,8 @@ It combines:
 - **Tier 2 — 26 Specialized Blockchain & Venue Leaf Robots (`deepseek/deepseek-v4.1-flash-1017`)**: Each leaf robot is strictly isolated to **one single blockchain** (Solana, Bitcoin, Ethereum, Sui, Hyperliquid, BNB, XRP, TON, TRON, Avalanche, Cosmos, Aptos, Chainlink, Stacks, NEAR, Cardano, Polkadot, Dogecoin, ICP, Canton, Celo, Tezos, Flow, Vaulta/EOS, plus Binance CEX Multi-Pair and Paper Sandbox) with its own RSS feed, specific TA/on-chain metrics, dedicated MemPalace wing (`wing="leaf_<slug>"`), and **`1..=4` ecosystem-adapted Rust Strategy Pods** in `engine-rs`.
 - **Tier 3 — Sub-Millisecond Deterministic Rust Execution & Simulated Vault (`engine-rs`, `HardRiskGate::validate` measured mean **0.244 µs** via `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`)**: Synchronous `HardRiskGate`, `SimulatedVault` (`SIMULATED`: non-spendable addresses and non-chain-valid audit receipts across all 26 chains — see [Simulated Vault & Key Boundaries](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)), Kelly position sizer, multi-chain `OnChainTokenSafety` anti-rug/honeypot filter, and per-blockchain Rust strategy pods (`pod_carry`, `pod_momentum`, `pod_onchain_alpha`, `pod_sniper`) with zero LLM latency in the hot path.
 
+> **Honesty note — the current replay artefact.** The `engine-rs` `backtest` crate produces a deterministic **policy sanity check** (`artifact_kind: policy_sanity_check`, `source: FIXTURE`, `fill_simulation: false`). It exercises the pod trait, `HardRiskGate`, and the anti-rug path over a synthetic fixture. Its PnL is declared-edge arithmetic (`notional × (expected_edge_bps − modelled round-trip fees − modelled spread)`), **not a fill simulation and not measured backtest performance**. `Backtest == Paper == Live` remains an intended target, not a demonstrated property of this fixture; a real event-driven simulator remains issue #3.
+
 ---
 
 ## 🏛️ Architecture Philosophy
@@ -132,7 +134,7 @@ The warm-path LLM translates abstract market theses into concrete numerical rule
 ### 7. Modern Command Center & Remote ZeroTier Access
 - **Real-Time Dashboard**: React 19 + Tailwind v4 + Vite with live WebSocket telemetry.
 - **Cognitive Panel**: Displays active AI thesis, model used, thinking depth, Ichimoku/Fibonacci confluences, and strategy drawers.
-- **Execution Ledger**: Paginated transaction table with order timestamps, fills, and slippage.
+- **Execution Ledger**: Paginated transaction table with order timestamps, fills, and slippage. Fixture rows are labelled **Policy sanity check** (`FIXTURE`) and are declared-edge arithmetic, not a fill ledger.
 - **Testnet/Devnet Telemetry**: Read-only Solana balance from a configured public address (`custody: NONE`); Solana Devnet actions are simulated, unsigned, and not broadcast. Measured PnL comes only from Binance Spot Testnet orders; simulated rows are excluded.
 - **ZeroTier Remote Ready**: Automatic dynamic host resolution allowing seamless access from remote LAN IPs (e.g. `http://<zerotier-ip>:5173`).
 
@@ -149,7 +151,7 @@ The warm-path LLM translates abstract market theses into concrete numerical rule
 │       ├── risk-gate/  # Synchronous HardRiskGate (measured 0.244µs), Kelly sizer, Drawdown kill-switch
 │       ├── strategies/ # StrategyPod trait + Pod 1 (Carry), Pod 2 (Momentum), Pod 3 (Solana), Pod 4 (Sniper)
 │       ├── exec-router/# Post-Only CEX maker router & Solana Jupiter v6 + Jito bundle simulator
-│       ├── backtest/   # Deterministic replay engine (Replay == Paper == Live)
+│       ├── backtest/   # Deterministic policy sanity check fixture (not a fill simulation; real replay in issue #3)
 │       └── node/       # CLI runtime binary (robotrader-node)
 ├── backend/            # Python Warm-Path AI Meta-Controller & FastAPI Control Plane
 │   ├── core/           # IPC State Store, StrategyMemoryPalace, Schemas, BaseWarmAgent
@@ -200,7 +202,7 @@ The simulated vault recognizes exactly four case-sensitive values:
 
 | Value | Meaning | Seed when no secret file and no environment seed |
 |---|---|---|
-| `BACKTEST` | Deterministic replay | deterministic devnet seed |
+| `BACKTEST` | Deterministic policy sanity check fixture (not a fill simulation) | deterministic devnet seed |
 | `PAPER` | Paper execution (the default when unset) | deterministic devnet seed |
 | `SIMULATED` | Explicit simulation mode | deterministic devnet seed |
 | `LIVE` | Live-intended mode; still exports a `SIMULATED` manifest | construction fails closed |
@@ -273,7 +275,7 @@ Three review rounds maximum per stage; no agent merges.
 - [**ADR-0004: Right-Sized Agentic SDLC with Cold-Start Reviews**](docs/adr/0004-agentic-sdlc.md)  
   *SPEC → PLAN → DEV lanes (M/S/L), cold-start reviewer agents with artifact-based resume, a hard three-round cap, OpenSpec-compatible specs, a ≤ 5-minute human Review Card, and a human-only merge gate.*
 - [**Performance & LLM Cost Post-Mortem Audit (`docs/PERFORMANCE_AND_COST_AUDIT.md`)**](docs/PERFORMANCE_AND_COST_AUDIT.md)  
-  *Full quantitative audit of the 325 LLM cycles / 4.41M tokens (`~$2.00` OpenRouter spend), breakdown of the 3 trading populations (`backtest_fixture` `4` trades / `+$24.73` / Sharpe 128.52, `paper_model` `+$1,155.52` over 1,500 trades, `live_testnet`), and the 4 structural remediations reducing LLM OpEx by 25x–40x.*
+  *Full quantitative audit of the 325 LLM cycles / 4.41M tokens (`~$2.00` OpenRouter spend), the 3 trading populations (`backtest_fixture` is a policy sanity check fixture, not a fill simulation; `paper_model` is simulated; `live_testnet` is the only measured population), and the 4 structural remediations reducing LLM OpEx by 25x–40x.*
 - [**ADR-0005: The Vault Is Simulated (`docs/adr/0005-vault-is-simulated.md`)**](docs/adr/0005-vault-is-simulated.md)  
   *Why the vault is labelled `SIMULATED`, how execution mode and seed provenance fail closed, and why Python holds no key custody; real cryptography and mainnet custody remain open in issue #2.*
 - [**Simulated Vault & Key Boundaries (`docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md`)**](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)  

@@ -14,7 +14,11 @@ import {
 } from 'lucide-react';
 import LLMInspectionModal from './LLMInspectionModal';
 import SourceBadge from './SourceBadge';
-import { formatMetric, formatOperational } from '../lib/provenance';
+import {
+  POLICY_SANITY_CHECK_LABEL,
+  formatMetric,
+  formatOperational,
+} from '../lib/provenance';
 
 const POD_META = {
   pod_carry: {
@@ -147,9 +151,9 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
           source={livePop.source}
         />
         <StatCard
-          title="Fixture Backtest Rust"
+          title={POLICY_SANITY_CHECK_LABEL}
           value={formatMetric(bt.sharpe_ratio, bt.source, 'number')}
-          subtitle={`Sharpe · Win rate ${formatMetric(bt.win_rate_pct, bt.source, 'rate')} (${formatMetric(bt.trades, bt.source, 'integer')} trades) · Net ${formatMetric(bt.cumulative_pnl_usd, bt.source, 'signedMoney')}`}
+          subtitle={`FIXTURE · rule & plumbing check, not a fill simulation · declared-edge arithmetic · Win rate ${formatMetric(bt.win_rate_pct, bt.source, 'rate')} (${formatMetric(bt.trades, bt.source, 'integer')} trades) · Net ${formatMetric(bt.cumulative_pnl_usd, bt.source, 'signedMoney')}`}
           icon={TrendingUp}
           color="text-blue-400"
           source={bt.source}
@@ -157,7 +161,7 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
         <StatCard
           title="HardRiskGate (&lt;50µs)"
           value={`${formatMetric(bt.rejected_orders, bt.source, 'integer')} Rug Bloqué`}
-          subtitle={`Max DD fixture: ${formatMetric(bt.max_drawdown_pct, bt.source, 'number')}% / Limite 3.0%`}
+          subtitle={`Policy sanity check · Max DD fixture: ${formatMetric(bt.max_drawdown_pct, bt.source, 'number')}% / Limite 3.0%`}
           icon={Shield}
           color="text-amber-400"
           source={bt.source}
@@ -351,14 +355,14 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
               {executionRowSource === 'MEASURED'
                 ? 'Journal d’Exécution Live (Testnet / Devnet)'
                 : executionRowSource === 'FIXTURE'
-                  ? 'Replay Déterministe (`engine-rs`)'
+                  ? `${POLICY_SANITY_CHECK_LABEL} (engine-rs)`
                   : 'Journal d’Exécution (source non attribuée)'}
             </h3>
             <p className="text-xs text-gray-400 mt-0.5">
               {executionRowSource === 'MEASURED'
                 ? `${totalExecutions > 0 ? `Affichage ${startIndex + 1}–${endIndex} sur ${totalExecutions} ordres` : 'Aucun ordre enregistré'} — colonne PnL : realized_pnl_usd`
                 : executionRowSource === 'FIXTURE'
-                  ? `${totalExecutions > 0 ? `Affichage ${startIndex + 1}–${endIndex} sur ${totalExecutions} ordres` : 'Aucun ordre enregistré'} — fixture synthétique, aucun ordre live`
+                  ? `${totalExecutions > 0 ? `Affichage ${startIndex + 1}–${endIndex} sur ${totalExecutions} lignes` : 'Aucune ligne enregistrée'} — fixture synthétique, arithmétique d’edge déclaré, pas une simulation de fill ni un journal de fills ; aucun ordre live`
                   : `${totalExecutions > 0 ? `Affichage ${startIndex + 1}–${endIndex} sur ${totalExecutions} ordres` : 'Aucun ordre enregistré'} — provenance absente, PnL non attribué`}
             </p>
           </div>
@@ -394,7 +398,13 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
                 <th className="pb-2 pr-3">Notional</th>
                 <th className="pb-2 pr-3">
                   <span className="flex items-center gap-1.5">
-                    {isTestnetMode ? 'PnL Réel (vs Modèle Paper)' : 'PnL Réalisé'}
+                    {executionRowSource === 'FIXTURE'
+                      ? 'PnL fixture (edge déclaré)'
+                      : isTestnetMode
+                        ? 'PnL Réel (vs Modèle Paper)'
+                        : executionRowSource === 'MEASURED'
+                          ? 'PnL Réalisé'
+                          : 'PnL (source non attribuée)'}
                     <SourceBadge source={executionRowSource} />
                   </span>
                 </th>

@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "mark-backtest-artifact-honest",
+  "title": "Relabel the circular backtest artefact as a fixture sanity check",
+  "issue": 3,
+  "lane": "S",
+  "lane_reason": "Honesty slice only; real event-driven fill simulator remains open",
+  "lane_change": null,
+  "branch": "sdlc/3-mark-backtest-artifact-honest",
+  "worktree": ".worktrees/3-mark-backtest-artifact-honest",
+  "base_branch": "master",
+  "base_sha": "87c5fb5d66f10f834eedb4d7390ee4ccc101ca18",
+  "created_at": "2026-10-26T08:14:59Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev-review",
+  "pr": 21,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "61411563eb0e975f5a9d48e90fd6ddb5a1c57be2",
+      "updated_at": "2026-10-26T08:21:50Z"
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "changes_requested",
+      "rounds": 1,
+      "last_verdict": "CHANGES_REQUESTED",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "692e4b7125050e75d2c3fac45396967c2f9b982f",
+      "updated_at": "2026-10-26T08:47:41Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/3-mark-backtest-artifact-honest",
+  "partial_issue": true
+}

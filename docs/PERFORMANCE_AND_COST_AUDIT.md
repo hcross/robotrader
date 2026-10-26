@@ -4,7 +4,7 @@
 **Périmètre** : Architecture Hiérarchique Multi-Écosystèmes (26 Blockchains/Plateformes, `engine-rs` Rust measured mean `0.244 µs` for `HardRiskGate::validate` via `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate` + Warm-Path Python OpenRouter)  
 **Sources auditées** :
 - Ledger immuable d'inférence : [`backend/data/transcript_ledger.jsonl`](../backend/data/transcript_ledger.jsonl) (`325` cycles cognitifs, `440` requêtes HTTP OpenRouter, `4.41M` jetons)
-- État des 3 populations de trading : `backtest_fixture` (Rust `engine-rs`), `paper_model` (carnet L2 + sélection adverse), `live_testnet` (Binance Spot Testnet + Solana Devnet)
+- État des 3 populations de trading : `backtest_fixture` (Rust `engine-rs` **policy sanity check** fixture, `policy_sanity_check` — not a fill simulation), `paper_model` (carnet L2 + sélection adverse), `live_testnet` (Binance Spot Testnet + Solana Devnet, the only measured population)
 
 ---
 
@@ -14,7 +14,7 @@
 
 | Label | Population | Meaning |
 |---|---|---|
-| `[FIXTURE]` | `backtest_fixture` | Deterministic `engine-rs` replay on a synthetic scenario. |
+| `[FIXTURE]` | `backtest_fixture` | Deterministic **policy sanity check** (`policy_sanity_check`) on a synthetic fixture; declared-edge arithmetic, **not a fill simulation**. |
 | `[SIMULATED]` | `paper_model` | L2 slippage + adverse-selection paper simulation. |
 | `[MEASURED]` | `live_testnet` | Binance Spot Testnet / Solana Devnet orders actually realised. |
 
@@ -37,7 +37,7 @@ Durant la campagne de test intensif de l'architecture hiérarchique Robotrader v
 L'audit révèle un contraste net entre :
 1. **L'excellence du moteur d'exécution et de trading (`engine-rs` & `paper_model`)** :
    - **Zéro latence LLM dans le Hot-Path** (measured mean `0.244 µs` per `validate` call in Rust via `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`) — *operational latency measurement*.
-   - **Backtest déterministe Rust (`backtest_fixture`) [FIXTURE]** : **`100.0%` de taux de réussite** sur la branche Solana (`+$24.73` nets sur `4` trades, Sharpe annualisé **`128.52`**, Max Drawdown **`0.0%`**, `3` rejets : `2` par le hurdle de coût et `1` rug pull `SCAM-SOL` bloqué par `HardRiskGate`), et validation des **pods Rust adaptés (`<= 4` par blockchain)** sur l'intégralité des **26 écosystèmes**. All figures in this bullet are `[FIXTURE]`.
+   - **Deterministic policy sanity check (`backtest_fixture`, `policy_sanity_check`) [FIXTURE]** : a rule and plumbing check over a synthetic fixture, **not a fill simulation**. It reports `100.0%` de taux de réussite sur la branche Solana (`+$24.73` d'arithmétique d'edge déclaré sur `4` trades, Sharpe annualisé **`128.52`**, Max Drawdown **`0.0%`**, `3` rejets : `2` par le hurdle de coût et `1` rug pull `SCAM-SOL` bloqué par `HardRiskGate`), et valide les **pods Rust adaptés (`<= 4` par blockchain)** sur l'intégralité des **26 écosystèmes**. The PnL is `notional × (expected_edge_bps − modelled round-trip fees − modelled spread)`; it is not market-derived, realized, or backtest performance. All figures in this bullet are `[FIXTURE]`.
    - **Simulation Paper-Money réaliste (`paper_model`) [SIMULATED]** : **`+$1,155.52` de PnL net cumulé (`+11.55%` sur `$10,000`)**, **56.3% de win rate** (`845` gains / `624` pertes / `31` neutres) malgré l'application stricte du slippage L2 et de la sélection adverse. All figures in this bullet are `[SIMULATED]`.
 2. **Une sur-fréquence et une inflation de contexte dans la boucle cognitive Warm-Path (`~$2.00` dépensés)** — *operational inference-cost measurement* :
    - Le robot feuille Solana se réveillait toutes les **30s à 45s** pour ré-analyser des bougies **15 minutes (`900s`)**, envoyant **~8 300 jetons d'entrée** par appel et doublant la consommation lors des escalades de troncature (`115` retries), tandis que `CostGuard` sous-estimait les tarifs OpenRouter d'un facteur ~10x et perdait son compteur à chaque redémarrage de conteneur.
@@ -78,23 +78,23 @@ Les **4 correctifs structurels** mis en œuvre à l'issue de cet audit réduisen
 
 Conformément à l'invariant d'isolation des métriques, Robotrader v3 sépare strictement ses trois populations d'évaluation :
 
-### 3.1 Population 1 — Backtest Déterministe Rust (`backtest_fixture`, `engine-rs` measured mean `0.244 µs` via `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`) [`FIXTURE`]
+### 3.1 Population 1 — Policy Sanity Check Fixture (`backtest_fixture`, `policy_sanity_check`, `engine-rs` measured mean `0.244 µs` via `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`) [`FIXTURE`]
 
-> Source: `[FIXTURE]` — every numeric trading figure in this subsection is the output of a deterministic `engine-rs` replay on a synthetic scenario. It is not realized, live, or product performance.
+> Source: `[FIXTURE]` — every numeric trading figure in this subsection is the output of a deterministic **policy sanity check** on a synthetic fixture. It is a rule and plumbing check, **not a fill simulation** and not realized, live, or backtest performance. The PnL is declared-edge arithmetic: `notional × (expected_edge_bps − modelled round-trip fees − modelled spread)`.
 
-- **Branche Solana (`leaf-solana`, 4 pods Rust natifs)** :
-  - **Capital initial** : `$10,000.00` -> **Capital final** : **`$10,024.73`** (**`+0.247%`** sur la séquence de référence)
-  - **Taux de réussite (Win Rate)** : **`100.0%`** (`4` gains / `0` perte sur `4` exécutions)
-  - **Ratio de Sharpe annualisé** : **`128.52`**
+- **Branche Solana (`leaf-solana`, 4 pods Rust natifs)** — fixture figures, `[FIXTURE]` :
+  - **Capital initial** : `$10,000.00` -> **Capital final** : **`$10,024.73`** (**`+0.247%`** d'arithmétique d'edge déclaré sur la séquence de référence)
+  - **Taux de réussite (Win Rate)** : **`100.0%`** (`4` gains / `0` perte sur `4` exécutions de fixture)
+  - **Ratio de Sharpe annualisé** : **`128.52`** (fixture arithmetic; not a performance target)
   - **Max Drawdown** : **`0.0%`**
   - **Frais d'exécution cumulés** : `$1.47` (Maker rebate CEX `-1.0 bps` + Jupiter v6 + tip Jito MEV)
   - **Protection `HardRiskGate` (measured mean `0.244 µs`; bench: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`)** : **`3` rejets critiques** — **`2` par le hurdle de coût** (JUP smart-money edge `70.2` contre hurdle `87.2`; AIX-SOL sniper edge `95.0` contre hurdle `151.4`) et **`1` `OnChainRugCheckFailed`** (`SCAM-SOL`, edge `81.0` contre hurdle `87.8`, perte évitée : 100% de l'allocation sniper)
   - **Attribution par Pod Rust Solana** :
-    - `pod_carry` (`Solana JitoSOL/Perp Funding Basis Carry`) : **`+$13.61`** (2 trades)
-    - `pod_momentum` (`Solana L2 Orderflow & Raydium CLMM Momentum`) : **`+$11.11`** (2 trades)
+    - `pod_carry` (`Solana JitoSOL/Perp Funding Basis Carry`) : **`+$13.61`** (2 trades de fixture)
+    - `pod_momentum` (`Solana L2 Orderflow & Raydium CLMM Momentum`) : **`+$11.11`** (2 trades de fixture)
 - **Flotte Multi-Blockchains (26 écosystèmes, `1..=4` pods Rust adaptés par blockchain)** :
   - Chaque écosystème dispose désormais de ses propres pods Rust compilés dans `engine-rs` (`crates/strategies/src/lib.rs`) et testables individuellement via `POST /api/v1/leaf/{leaf_id}/backtest`.
-  - Exemple `leaf-bitcoin` (3 pods Rust : `btc_etf_basis_carry`, `btc_halving_l2_momentum`, `btc_utxo_whale_accumulator`) : `3` trades, `100.0%` win rate, **`+$19.58`**, Sharpe **`238.97`**, Max DD **`0.0%`**, `1` rejet par le hurdle de coût.
+  - Exemple `leaf-bitcoin` (3 pods Rust : `btc_etf_basis_carry`, `btc_halving_l2_momentum`, `btc_utxo_whale_accumulator`) — fixture `policy_sanity_check`, `[FIXTURE]` : `3` trades, `100.0%` win rate, **`+$19.58`**, Sharpe **`238.97`**, Max DD **`0.0%`**, `1` rejet par le hurdle de coût. These are rule/plumbing outcomes, not a performance measurement.
 
 ### 3.2 Population 2 — Simulation Continue avec Slippage L2 & Sélection Adverse (`paper_model`) [`SIMULATED`]
 

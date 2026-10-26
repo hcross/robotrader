@@ -22,6 +22,12 @@ export const DRAWER_SOURCES = Object.freeze([
   'BOOTSTRAP',
 ]);
 
+// The deterministic executor artefact is a policy and plumbing sanity check,
+// not a fill simulation. Machine-readable kind and human label are fixed here
+// so no surface invents a competing artefact name.
+export const ARTIFACT_KIND_POLICY_SANITY_CHECK = 'policy_sanity_check';
+export const POLICY_SANITY_CHECK_LABEL = 'Policy sanity check';
+
 export const EM_DASH = '—';
 
 const KNOWN_SOURCES = new Set([...METRIC_SOURCES, ...DRAWER_SOURCES]);

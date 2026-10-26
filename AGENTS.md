@@ -11,6 +11,8 @@ It strictly separates:
 3. **Deterministic Sub-millisecond Execution, Hard Risk & Simulated Vault (`engine-rs` in Rust)**: Hot-path event processing, order book imbalance (OBI) parsing, `HardRiskGate` validation (measured mean **0.244 µs** for `validate`; the same synchronous budget covers `validate_inference_refill`; bench: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`), `SimulatedVault` (`SIMULATED` manifest and receipts across all 26 chains: non-spendable addresses, non-chain-valid audit signatures, and a simulated prefix whitelist — see [`docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md`](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)), Kelly position sizing, multi-chain on-chain anti-rug / honeypot checks (`OnChainTokenSafety`), and zero LLM latency.
 4. **Cost-Controlled Warm-Path Scheduling ([`docs/PERFORMANCE_AND_COST_AUDIT.md`](docs/PERFORMANCE_AND_COST_AUDIT.md))**: Background LLM scheduling is paused by default on startup (`ENABLE_AUTO_LLM_SCHEDULER=false`, `$0.00/h`) and can be toggled in the UI (`POST /api/v1/cognitive/scheduler`). `CostGuard` uses realistic OpenRouter pricing and hydrates rolling 24h spend from `backend/data/transcript_ledger.jsonl`.
 
+> **Honesty note — the current replay artefact.** The `engine-rs` `backtest` crate produces a deterministic **policy sanity check** (`artifact_kind: policy_sanity_check`, `source: FIXTURE`, `fill_simulation: false`), not a fill simulation. It exercises the pod trait, `HardRiskGate`, and the anti-rug path over a synthetic fixture; its PnL is declared-edge arithmetic (`notional × (expected_edge_bps − modelled round-trip fees − modelled spread)`), not measured backtest performance. `Backtest == Paper == Live` is an intended target, not demonstrated by this fixture; the real event-driven simulator remains issue #3.
+
 ## Mandatory Delivery Workflow (SDLC)
 
 Every change follows the right-sized workflow in [`sdlc/PROTOCOL.md`](sdlc/PROTOCOL.md).
@@ -66,7 +68,7 @@ Human guide: [`docs/sdlc/README.md`](docs/sdlc/README.md) · Decision record:
 │       ├── risk-gate/  # Synchronous HardRiskGate (measured 0.244µs), SimulatedVault (26 chains, SIMULATED), Kelly sizer, OnChainTokenSafety anti-rug
 │       ├── strategies/ # StrategyPod trait + Pod 1 (Carry), Pod 2 (Momentum), Pod 3 (OnChainAlphaPod), Pod 4 (DexSniperPod)
 │       ├── exec-router/# Post-Only CEX maker router & On-Chain DEX Aggregator + Atomic MEV bundle simulator
-│       ├── backtest/   # Unified deterministic replay engine (Backtest == Paper == Live)
+│       ├── backtest/   # Deterministic policy sanity check fixture (not a fill simulation; real replay in issue #3)
 │       └── node/       # CLI & runtime binary (`robotrader-node`)
 ├── backend/            # Python Warm-Path AI Meta-Controller & FastAPI Control Plane
 │   ├── core/           # IPC State Store, schemas (mirroring engine-rs/common), BaseWarmAgent, StrategyMemoryPalace
@@ -82,10 +84,13 @@ Human guide: [`docs/sdlc/README.md`](docs/sdlc/README.md) · Decision record:
 
 ## How to Run & Test
 
-### 1. Run Rust Engine & Backtest Tests
+### 1. Run Rust Engine & Policy-Sanity-Check Tests
 ```bash
 cd engine-rs && cargo test
 ```
+The `robotrader-backtest` suite asserts fixture rule and plumbing invariants
+(kind fields, determinism, trade/rejection counts, anti-rug, accounting
+identity). Exact PnL values are determinism baselines, not performance targets.
 
 ### 2. Run Python Warm-Path & Architecture Tests
 The suite is an integration suite: build the Rust engine binary first.

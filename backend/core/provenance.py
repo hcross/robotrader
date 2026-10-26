@@ -17,6 +17,11 @@ from typing import Any, Dict, Optional
 # its provenance").
 METRIC_SOURCES = ("MEASURED", "SIMULATED", "FIXTURE", "BOOTSTRAP")
 
+# Canonical machine-readable kind for the deterministic execution artefact.
+# The fixture is a rule and plumbing sanity check, not a fill simulation; a real
+# event-driven replay remains issue #3.
+ARTIFACT_KIND_POLICY_SANITY_CHECK = "policy_sanity_check"
+
 # Palace drawer provenance (spec: "Palace drawers declare provenance").
 DRAWER_SOURCES = ("LLM", "DETERMINISTIC_FALLBACK", "BOOTSTRAP")
 

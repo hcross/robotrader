@@ -30,7 +30,15 @@ impl SmartExecutionRouter {
         spread_bps_for(order.intent.order_type, order.mev_priority_tip_bps)
     }
 
-    /// Executes an approved order and returns a deterministic `ExecutionReport`.
+    /// Executes an approved order and returns a deterministic `ExecutionReport`
+    /// for the policy sanity check fixture.
+    ///
+    /// `realized_pnl_usd` here is **declared-edge arithmetic** — the intent's
+    /// `expected_edge_bps` minus the modelled round-trip fee and modelled
+    /// spread, applied to the approved notional. It is not a market outcome:
+    /// no later `MarketEvent` prices an exit, and no fill probability, queue
+    /// position, latency, partial fill, or adverse selection is simulated. A
+    /// real fill simulator remains issue #3.
     pub fn execute(&self, order: &ApprovedOrder, timestamp_ms: u64) -> ExecutionReport {
         let round_trip_fee_bps =
             self.fee_bps_for(order.intent.venue, order.intent.order_type) * 2.0;
@@ -43,6 +51,7 @@ impl SmartExecutionRouter {
         let fill_price = order.intent.reference_price * price_adjustment;
 
         let fee_usd = order.approved_notional_usd * (round_trip_fee_bps / 10_000.0);
+        // Declared-edge arithmetic for the fixture; not a market-derived PnL.
         let net_edge_bps =
             order.intent.expected_edge_bps - round_trip_fee_bps - realized_slippage_bps;
         let realized_pnl_usd = order.approved_notional_usd * (net_edge_bps / 10_000.0);

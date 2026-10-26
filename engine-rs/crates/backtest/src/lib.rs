@@ -8,11 +8,30 @@ use robotrader_strategies::{
     ecosystem_pod_specs, strategy_pods_for_leaf, MAX_PODS_PER_BLOCKCHAIN,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
+/// Canonical machine-readable kind for the deterministic fixture.
+///
+/// The fixture is a rule and plumbing sanity check: it exercises the pod trait,
+/// the risk gate, and the anti-rug path over a synthetic event stream. It is not
+/// a fill simulation and its PnL is declared-edge arithmetic, not a market
+/// outcome. A real event-driven simulator remains issue #3.
+pub const ARTIFACT_KIND_POLICY_SANITY_CHECK: &str = "policy_sanity_check";
+
+/// Canonical source label for every deterministic fixture summary.
+pub const ARTIFACT_SOURCE_FIXTURE: &str = "FIXTURE";
+
+/// Deterministic fixture summary.
+///
+/// `artifact_kind`/`source`/`fill_simulation` are the machine-readable honesty
+/// contract: callers must not present the metrics below as backtest
+/// performance, realized returns, or a fill simulation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestSummary {
     pub leaf_id: String,
+    pub artifact_kind: String,
+    pub source: String,
+    pub fill_simulation: bool,
     pub ecosystem_pods: Vec<EcosystemPodSpec>,
     pub initial_equity_usd: f64,
     pub final_equity_usd: f64,
@@ -24,7 +43,7 @@ pub struct BacktestSummary {
     pub total_trades: usize,
     pub rejected_orders: usize,
     pub total_fees_usd: f64,
-    pub pod_pnl_attribution: HashMap<String, f64>,
+    pub pod_pnl_attribution: BTreeMap<String, f64>,
     pub executions: Vec<ExecutionReport>,
 }
 
@@ -51,6 +70,12 @@ impl BacktestEngine {
         self.run_for_leaf("leaf-solana", events, envelope)
     }
 
+    /// Runs the deterministic fixture for one leaf and returns a
+    /// `policy_sanity_check` summary.
+    ///
+    /// The PnL below is the executor's declared-edge arithmetic (intent
+    /// `expected_edge_bps` minus modelled round-trip fees and spread); no later
+    /// market event prices an exit and no fill is simulated.
     pub fn run_for_leaf(
         &self,
         leaf_id: &str,
@@ -66,7 +91,9 @@ impl BacktestEngine {
 
         let mut executions = Vec::new();
         let mut rejected_orders = 0usize;
-        let mut pod_pnl_attribution: HashMap<String, f64> = HashMap::new();
+        // A BTreeMap keeps JSON key order deterministic across runs, so the
+        // repeated-run byte-equality test holds for the whole summary.
+        let mut pod_pnl_attribution: BTreeMap<String, f64> = BTreeMap::new();
         let mut trade_returns_pct: Vec<f64> = Vec::new();
         let mut max_dd_seen_pct = 0.0f64;
 
@@ -119,6 +146,9 @@ impl BacktestEngine {
 
         BacktestSummary {
             leaf_id: leaf_id.to_string(),
+            artifact_kind: ARTIFACT_KIND_POLICY_SANITY_CHECK.to_string(),
+            source: ARTIFACT_SOURCE_FIXTURE.to_string(),
+            fill_simulation: false,
             ecosystem_pods,
             initial_equity_usd: self.initial_equity_usd,
             final_equity_usd: portfolio.current_equity_usd,
@@ -151,8 +181,12 @@ fn compute_sharpe(returns: &[f64]) -> f64 {
     (mean / std_dev) * (365.0_f64).sqrt()
 }
 
-/// Generates a realistic multi-strategy benchmark stream covering all 4 Pods + a malicious Solana rug token
-/// (to prove `HardRiskGate` blocks rug pulls while executing profitable signals).
+/// Builds the deterministic fixture stream covering all 4 Pods + a malicious
+/// Solana rug token.
+///
+/// The stream proves the pods, `HardRiskGate`, and the anti-rug path are wired
+/// correctly. It is a synthetic policy sanity check, not historical market data
+/// and not a fill simulation.
 pub fn benchmark_market_stream() -> (Vec<MarketEvent>, PolicyEnvelope) {
     let base_ts = 1_792_180_000_000u64;
     let mut pod_allocations = HashMap::new();
@@ -365,8 +399,12 @@ fn leaf_market_profile(leaf_id: &str) -> (&'static str, &'static str, f64, f64) 
     }
 }
 
-/// Builds a blockchain-isolated benchmark stream and `PolicyEnvelope` for any `leaf_id`
-/// using its adapted Rust Strategy Pods (`<= 4` pods per blockchain).
+/// Builds a blockchain-isolated deterministic fixture stream and
+/// `PolicyEnvelope` for any `leaf_id`, using its adapted Rust Strategy Pods
+/// (`<= 4` pods per blockchain).
+///
+/// This is a synthetic policy sanity check, not a historical replay and not a
+/// fill simulation.
 pub fn benchmark_market_stream_for_leaf(leaf_id: &str) -> (Vec<MarketEvent>, PolicyEnvelope) {
     if leaf_id == "leaf-solana" {
         return benchmark_market_stream();
@@ -514,14 +552,33 @@ mod tests {
         );
     }
 
+    /// The fixture's honesty contract, asserted on every summary.
+    fn assert_fixture_kind(summary: &BacktestSummary) {
+        assert_eq!(summary.artifact_kind, ARTIFACT_KIND_POLICY_SANITY_CHECK);
+        assert_eq!(summary.source, ARTIFACT_SOURCE_FIXTURE);
+        assert!(!summary.fill_simulation);
+    }
+
+    /// Per-pod attribution is the accounting view of `net_profit_usd`; the
+    /// identity is a plumbing invariant, not a performance assertion.
+    fn assert_accounting_identity(summary: &BacktestSummary) {
+        let attributed: f64 = summary.pod_pnl_attribution.values().sum();
+        assert_close(
+            attributed,
+            summary.net_profit_usd,
+            "pod attribution must equal net_profit_usd",
+        );
+    }
+
     #[test]
     fn test_full_multi_pod_backtest_and_rug_rejection() {
         let engine = BacktestEngine::default();
         let (events, envelope) = benchmark_market_stream();
         let summary = engine.run(&events, &envelope);
 
-        // Regenerated from `cargo run -p robotrader-node -- --leaf-id leaf-solana`
-        // after the cost-aware hurdle; fixture inputs are unchanged.
+        assert_fixture_kind(&summary);
+        // Exact numeric values are determinism baselines for the fixture, not
+        // performance targets or evidence of strategy edge.
         assert_eq!(summary.total_trades, 4);
         assert_eq!(summary.rejected_orders, 3);
         assert_eq!(summary.pod_pnl_attribution.len(), 2);
@@ -558,7 +615,21 @@ mod tests {
             11.112960524076215,
             "pod_momentum pnl",
         );
+        assert_accounting_identity(&summary);
         assert!(summary.ecosystem_pods.len() <= MAX_PODS_PER_BLOCKCHAIN);
+    }
+
+    #[test]
+    fn test_repeated_fixture_runs_are_byte_identical() {
+        let engine = BacktestEngine::default();
+        let (events, envelope) = benchmark_market_stream();
+
+        let first = serde_json::to_string(&engine.run(&events, &envelope))
+            .expect("first summary serializes");
+        let second = serde_json::to_string(&engine.run(&events, &envelope))
+            .expect("second summary serializes");
+
+        assert_eq!(first, second, "the fixture must be deterministic");
     }
 
     #[test]
@@ -597,7 +668,8 @@ mod tests {
     #[test]
     fn test_all_26_blockchains_have_at_most_4_adapted_rust_pods() {
         let engine = BacktestEngine::default();
-        // Exact per-leaf values regenerated from
+        // Exact per-leaf values are deterministic fixture baselines, not
+        // performance targets. They were captured from
         // `cargo run -p robotrader-node -- --leaf-id <leaf>` at this tip.
         let expected: [(&str, usize, usize, f64); 26] = [
             ("leaf-solana", 4, 3, 24.727172152519415),
@@ -639,6 +711,7 @@ mod tests {
             let (events, envelope) = benchmark_market_stream_for_leaf(leaf_id);
             let summary = engine.run_for_leaf(leaf_id, &events, &envelope);
             assert_eq!(summary.leaf_id, leaf_id);
+            assert_fixture_kind(&summary);
             assert_eq!(
                 summary.total_trades, expected_trades,
                 "Leaf {leaf_id} trade count changed"
@@ -652,6 +725,7 @@ mod tests {
                 expected_pnl,
                 &format!("Leaf {leaf_id} net_profit_usd"),
             );
+            assert_accounting_identity(&summary);
         }
     }
 }

@@ -13,7 +13,11 @@ import {
 import Dashboard from './Dashboard';
 import LLMInspectionModal from './LLMInspectionModal';
 import SourceBadge from './SourceBadge';
-import { formatMetric, formatOperational } from '../lib/provenance';
+import {
+  POLICY_SANITY_CHECK_LABEL,
+  formatMetric,
+  formatOperational,
+} from '../lib/provenance';
 
 const LeafAgentView = ({
   leafId,
@@ -371,7 +375,7 @@ const LeafAgentView = ({
             <Zap className="w-3.5 h-3.5" />
             {runningRustPods
               ? 'Exécution Rust en cours...'
-              : `🦀 Exécuter Replay Rust (${rustPods.length} Pods ${leaf.symbol})`}
+              : `🦀 Exécuter ${POLICY_SANITY_CHECK_LABEL} (${rustPods.length} Pods ${leaf.symbol})`}
           </button>
         </div>
 
@@ -414,7 +418,7 @@ const LeafAgentView = ({
                 {slotPnl !== undefined && (
                   <div className="pt-2 border-t border-gray-800/80 flex items-center justify-between text-[11px] font-mono">
                     <span className="text-gray-400 flex items-center gap-1.5">
-                      Attribution Replay Rust (`engine-rs`) :
+                      Attribution {POLICY_SANITY_CHECK_LABEL} (`engine-rs`) :
                       <SourceBadge source={rustSource} />
                     </span>
                     <span
@@ -439,12 +443,13 @@ const LeafAgentView = ({
           <div className="p-3.5 rounded-lg bg-gray-950 border border-orange-500/30 text-xs space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-bold text-orange-300 flex items-center gap-2">
-                ✅ Résultat Replay Déterministe Rust (`robotrader-node --leaf-id {leafId}`)
+                ✅ {POLICY_SANITY_CHECK_LABEL} (`robotrader-node --leaf-id {leafId}`)
                 <SourceBadge source={rustSource} />
               </span>
               <div className="flex items-center gap-3 font-mono">
                 <span className="text-emerald-400 font-bold">
-                  PnL Net : {formatMetric(effectiveRust.net_profit_usd, rustSource, 'signedMoney')}
+                  PnL fixture (edge déclaré) :{' '}
+                  {formatMetric(effectiveRust.net_profit_usd, rustSource, 'signedMoney')}
                 </span>
                 <span className="text-gray-300">
                   Sharpe :{' '}
@@ -462,6 +467,10 @@ const LeafAgentView = ({
                 </span>
               </div>
             </div>
+            <p className="text-[11px] text-gray-400">
+              {POLICY_SANITY_CHECK_LABEL} — arithmétique d’edge déclaré, pas une
+              simulation de fill ; ces lignes ne sont pas un journal de fills.
+            </p>
             <div className="space-y-1 max-h-40 overflow-y-auto">
               {(effectiveRust.executions || []).map((ex, i) => (
                 <div
