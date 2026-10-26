@@ -18,7 +18,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev",
+  "status": "merged",
   "pr": 18,
   "areas": [],
   "stages": {
@@ -39,16 +39,23 @@
       "updated_at": "2026-10-26T06:45:19Z"
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "ea4f3a9760ecc15cdef8143a73d5ebcec01a9517",
+      "updated_at": "2026-10-26T06:57:50Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/5-fix-costguard-python-gate",
   "partial_issue": true,
-  "partial_reason": "Rust-authoritative gate, real OpenRouter /credits balance and out-of-band refill, and removal of the dead Rust validator remain out of scope"
+  "partial_reason": "Rust-authoritative gate, real OpenRouter /credits balance and out-of-band refill, and removal of the dead Rust validator remain out of scope",
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-25 (run continued 2026-10-26)",
+    "at": "2026-10-26T06:59:05Z",
+    "mode": "full-auto",
+    "pr": 18,
+    "head_sha": "ea4f3a9760ecc15cdef8143a73d5ebcec01a9517"
+  }
 }

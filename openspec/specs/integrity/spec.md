@@ -263,7 +263,7 @@ A drawer whose `source` is `DETERMINISTIC_FALLBACK` MUST set `thesis_continuity`
 
 ### Requirement: Refill gating consumes null-safe measured PnL only
 
-The OpenRouter refill callers — `POST /api/v1/openrouter/refill` and the Master reflection — MUST sum only non-null `MEASURED` leaf `realized_pnl_usd` values, MUST treat a `null` as no contribution, and MUST NOT pass a `null` to a numeric conversion. They MUST NOT add the simulated `paper_model` `live_pnl_usd`. The measured total passed to the profit gate MUST be the actual sum, including `0.0` when no measured profit exists; the `max(125.0, …)` floor MUST NOT be applied. The remaining `CostGuard` defects tracked in issue #5 — the automatic path bypass, the unused Rust validator, the balance source, daily rollover, and the low-watermark constants — are out of scope.
+The OpenRouter refill callers — `POST /api/v1/openrouter/refill` and the Master reflection — MUST sum only non-null `MEASURED` leaf `realized_pnl_usd` values, MUST treat a `null` as no contribution, and MUST NOT pass a `null` to a numeric conversion. They MUST NOT add the simulated `paper_model` `live_pnl_usd`. The measured total passed to the profit gate MUST be the actual sum, including `0.0` when no measured profit exists; the `max(125.0, …)` floor MUST NOT be applied. The automatic path, the daily rolling window, the low-watermark constants, and the measured-source injection are specified by the `costguard` capability. The unused Rust validator, the real `/credits` balance source, and routing the gate through Rust remain out of scope for issue #5.
 
 #### Scenario: Null leaf PnL does not raise in the refill path
 
