@@ -49,7 +49,7 @@ flowchart TB
             P4["Pod 4: pod_sniper (Atomic DEX Pool & MEV Liquidation Sniper)"]
         end
 
-        Risk["HardRiskGate (<50µs: Drawdown Kill-Switch, Kelly Sizing, OnChainTokenSafety, RustVaultEnclave)"]
+        Risk["HardRiskGate (<50µs: Drawdown Kill-Switch, Kelly Sizing, OnChainTokenSafety, SimulatedVault (SIMULATED))"]
         Exec["Smart Execution Router (Post-Only CEX Maker / OnchainDexAggregator + MevBundleAtomic)"]
         Replay["Deterministic Backtest & Walk-Forward Runner"]
     end
@@ -132,7 +132,7 @@ flowchart TB
    - Tracks real-time equity, unrealized PnL, daily high-water mark, per-pod exposure, and order rate limits.
    - Rejects any `OrderIntent` if `daily_drawdown >= max_daily_drawdown_pct` or if `PolicyEnvelope` TTL has expired without safe-mode fallback.
 4. **`crates/exec-router`**:
-   - Supports three execution modes switchable via config: `Backtest`, `Paper` (live market data with simulated fills/fees/slippage), and `Live`.
+   - Supports four exact `ROBOTRADER_EXECUTION_MODE` values: `BACKTEST`, `PAPER` (default when unset; live market data with simulated fills/fees/slippage), `SIMULATED`, and `LIVE`. An empty or unknown value fails closed; `LIVE` still exports a `SIMULATED` vault and claims no real custody.
    - **CEX Optimization**: Uses `Post-Only` limit orders at best bid/ask with micro-repricing to capture maker rebates or low maker fees instead of paying 5–10 bps taker fees.
    - **Solana Optimization**: Quotes via Jupiter v6 and submits transactions wrapped in **Jito bundles** (`sendBundle`) so failed or front-run transactions cost zero base gas if they revert.
 
@@ -148,7 +148,8 @@ flowchart TB
 
 ## 5. Security & Capital Protection Invariants
 
-1. **Private Key Isolation**: Exchange trade API keys and Solana signing keypairs are injected exclusively into `engine-rs`. The Python LLM container (`backend`) has **zero access** to signing keys or withdrawal permissions.
-2. **No Withdrawal Permission**: CEX API keys must be restricted to `Spot & Margin/Futures Trading` only, with IP whitelisting and withdrawals disabled.
-3. **Dedicated Solana Sub-Wallet**: `engine-rs` operates with a hot trading sub-wallet holding only the active risk allocation, never a master cold treasury.
-4. **Hard Kill-Switch**: A Redis + in-memory atomic kill-switch (`POST /api/v1/risk/kill` or automatic drawdown trigger) immediately cancels all open orders and flattens directional exposure.
+1. **Simulated Vault, No Key Custody**: The `SimulatedVault` exports a `SIMULATED` manifest; addresses are explicitly non-spendable and receipts are not chain-valid. No real derivation, address encoding, chain signature, or mainnet custody is implemented.
+2. **No Python Key Custody**: The Python LLM container (`backend`) holds no signing keypair, reads no seed or private key, and never broadcasts a Solana transaction. The Solana tool is a read-only RPC client over a configured public address (`custody: NONE`).
+3. **No Exchange Keys in `engine-rs`**: `engine-rs` is not injected with exchange trade API keys or signing keypairs. Any CEX key policy remains an operator deployment concern; CEX API keys must be restricted to `Spot & Margin/Futures Trading` only, with IP whitelisting and withdrawals disabled.
+4. **Simulated Solana Actions**: Solana Devnet actions are recorded as `SIMULATED`, unsigned, and not broadcast; they are excluded from measured live performance.
+5. **Hard Kill-Switch**: A Redis + in-memory atomic kill-switch (`POST /api/v1/risk/kill` or automatic drawdown trigger) immediately cancels all open orders and flattens directional exposure.

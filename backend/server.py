@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -116,7 +116,14 @@ def get_system_status() -> Dict[str, Any]:
     executions_source = "live_testnet" if live_window else "backtest_fixture"
     row_source = provenance.execution_rows_source(executions_source)
     executions = [
-        {**row, "source": row_source}
+        {
+            **row,
+            "source": (
+                "SIMULATED"
+                if row.get("is_simulated") is True
+                else row_source
+            ),
+        }
         for row in (live_window if live_window else list(bt.get("executions", [])))
     ]
     hierarchy_snap = state_store.hierarchy.get_hierarchy_snapshot(
@@ -181,6 +188,8 @@ def checkout_from_master_treasury(req: TreasuryCheckoutRequest) -> Dict[str, Any
         target_token=req.target_token,
         destination_address=req.destination_address,
         quote_only=req.quote_only,
+        kill_switch_active=state_store.kill_switch_active,
+        kill_switch_reason=state_store.kill_switch_reason,
     )
 
 
@@ -196,12 +205,27 @@ def evaluate_cross_chain_bridge(req: BridgeEvaluationRequest) -> Dict[str, Any]:
 
 
 @app.get("/api/v1/vault/manifest")
-def get_vault_enclave_manifest() -> Dict[str, Any]:
+def get_simulated_vault_manifest() -> Dict[str, Any]:
     """
-    Returns the public-only HD wallet manifest (`BIP-32` / `BIP-44` / `SLIP-0010`)
-    exported by `RustVaultEnclave` in `engine-rs` for all 26 blockchains.
+    Returns the public `SIMULATED` manifest exported by the Rust vault.
+
+    The manifest describes non-spendable addresses and target metadata only; no
+    real derivation, address encoding, chain signature, or mainnet custody is
+    implemented. When the Rust binary is unavailable or returns a stale
+    contract, the endpoint fails closed with HTTP 503 instead of fabricating a
+    manifest.
     """
-    return state_store.hierarchy.vault_manifest
+    manifest = state_store.hierarchy.vault_manifest
+    if (
+        not manifest
+        or manifest.get("vault_mode") != "SIMULATED"
+        or manifest.get("simulated") is not True
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="SIMULATED Rust vault manifest unavailable; build engine-rs and rebuild the backend image",
+        )
+    return manifest
 
 
 @app.post("/api/v1/master/reflect")
@@ -368,6 +392,7 @@ def verify_testnet_connectivity() -> Dict[str, Any]:
 
     binance = BinanceTool()
     solana = SolanaWalletTool()
+    public_address = solana.public_address
     return {
         "binance_testnet": {
             "authenticated": binance.authenticated,
@@ -376,8 +401,9 @@ def verify_testnet_connectivity() -> Dict[str, Any]:
         },
         "solana_wallet": {
             "rpc_url": solana.rpc_url,
-            "public_key": str(solana.keypair.pubkey()) if solana.keypair else None,
-            "balance_sol": solana.get_balance(),
+            "public_address": public_address,
+            "balance_sol": solana.get_balance(public_address),
+            "custody": solana.custody,
         },
     }
 

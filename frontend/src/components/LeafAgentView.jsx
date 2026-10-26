@@ -208,19 +208,28 @@ const LeafAgentView = ({
               strictement autorisés :{' '}
               <code className="text-emerald-400">{(leaf.exclusive_assets || []).join(', ')}</code>
             </p>
-            {leaf.wallet_vault?.leaf_hot_address && (
-              <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] text-gray-400">
-                <span className="px-2 py-0.5 rounded bg-indigo-950/70 text-indigo-300 border border-indigo-500/30 font-mono">
-                  Enclave Rust : {leaf.wallet_vault.curve} ({leaf.wallet_vault.leaf_derivation_path})
+            <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] text-gray-400">
+              <span className="px-2 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-500/30 font-mono font-semibold">
+                SIMULATED
+              </span>
+              {leaf.wallet_vault?.leaf_id ? (
+                <>
+                  <span className="px-2 py-0.5 rounded bg-indigo-950/70 text-indigo-300 border border-indigo-500/30 font-mono">
+                    Cible : {leaf.wallet_vault.curve} ({leaf.wallet_vault.target_leaf_derivation_path})
+                  </span>
+                  <span className="font-mono text-gray-300">
+                    Sub-Wallet Feuille : <code className="text-cyan-300">{leaf.wallet_vault.leaf_hot_address}</code>
+                  </span>
+                  <span className="text-amber-300 font-semibold">
+                    • Adresse non dépensable (address_is_spendable=false) · Signature non valide on-chain · Aucune clé privée Python
+                  </span>
+                </>
+              ) : (
+                <span className="text-gray-500">
+                  Manifeste SIMULATED indisponible — aucune adresse affichée.
                 </span>
-                <span className="font-mono text-gray-300">
-                  Sub-Wallet Feuille : <code className="text-cyan-300">{leaf.wallet_vault.leaf_hot_address}</code>
-                </span>
-                <span className="text-emerald-400 font-semibold">
-                  • Zeroize RAM &amp; Clé Privée hors Python
-                </span>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

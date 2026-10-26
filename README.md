@@ -5,7 +5,7 @@
 It combines:
 - **Tier 1 — Master Orchestrator & Cross-Chain Treasury (`moonshotai/kimi-k3.1-pro`)**: Manages the Master Portfolio, enforces a permanent `>= 20%` `Dry Powder` safety reserve, prices cross-chain transfer viability (`2.5x` round-trip bridge hurdle rate), executes multi-chain/multi-token operator `Checkout` requests, reads across all 26 leaf agents' MemPalace wings (`wing="master_orchestrator"`), and governs profit-gated OpenRouter credit auto-refill on a `1h` (`3600s`) macro cadence.
 - **Tier 2 — 26 Specialized Blockchain & Venue Leaf Robots (`deepseek/deepseek-v4.1-flash-1017`)**: Each leaf robot is strictly isolated to **one single blockchain** (Solana, Bitcoin, Ethereum, Sui, Hyperliquid, BNB, XRP, TON, TRON, Avalanche, Cosmos, Aptos, Chainlink, Stacks, NEAR, Cardano, Polkadot, Dogecoin, ICP, Canton, Celo, Tezos, Flow, Vaulta/EOS, plus Binance CEX Multi-Pair and Paper Sandbox) with its own RSS feed, specific TA/on-chain metrics, dedicated MemPalace wing (`wing="leaf_<slug>"`), and **`1..=4` ecosystem-adapted Rust Strategy Pods** in `engine-rs`.
-- **Tier 3 — Sub-Millisecond Deterministic Rust Execution & Cryptographic Enclave (`engine-rs`, `<50µs`)**: Synchronous `HardRiskGate`, `RustVaultEnclave` (`BIP-32`/`BIP-44`/`SLIP-0010` HD wallets across all 26 chains with volatile RAM zeroization — see [Cryptographic Vault & Key Management](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)), Kelly position sizer, multi-chain `OnChainTokenSafety` anti-rug/honeypot filter, and per-blockchain Rust strategy pods (`pod_carry`, `pod_momentum`, `pod_onchain_alpha`, `pod_sniper`) with zero LLM latency in the hot path.
+- **Tier 3 — Sub-Millisecond Deterministic Rust Execution & Simulated Vault (`engine-rs`, `<50µs`)**: Synchronous `HardRiskGate`, `SimulatedVault` (`SIMULATED`: non-spendable addresses and non-chain-valid audit receipts across all 26 chains — see [Simulated Vault & Key Boundaries](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)), Kelly position sizer, multi-chain `OnChainTokenSafety` anti-rug/honeypot filter, and per-blockchain Rust strategy pods (`pod_carry`, `pod_momentum`, `pod_onchain_alpha`, `pod_sniper`) with zero LLM latency in the hot path.
 
 ---
 
@@ -46,7 +46,7 @@ Robotrader v2 solves the latency and reliability dilemma of agentic trading by e
 │                                      ▼                                 │
 │               ┌──────────────────────────────────────────┐             │
 │               │ Synchronous HardRiskGate (<50µs)         │             │
-│               │ • Kelly Position Sizer & Vault Enclave   │             │
+│               │ • Kelly Sizer & Simulated Vault          │             │
 │               │ • Drawdown Kill-Switch                   │             │
 │               │ • Multi-Chain OnChainTokenSafety Check   │             │
 │               └──────────────────────┬───────────────────┘             │
@@ -131,7 +131,7 @@ The warm-path LLM translates abstract market theses into concrete numerical rule
 - **Real-Time Dashboard**: React 19 + Tailwind v4 + Vite with live WebSocket telemetry.
 - **Cognitive Panel**: Displays active AI thesis, model used, thinking depth, Ichimoku/Fibonacci confluences, and strategy drawers.
 - **Execution Ledger**: Paginated transaction table with order timestamps, fills, and slippage.
-- **Testnet/Devnet Telemetry**: Live Solana Devnet wallet balance and real PnL tracking.
+- **Testnet/Devnet Telemetry**: Read-only Solana balance from a configured public address (`custody: NONE`); Solana Devnet actions are simulated, unsigned, and not broadcast. Measured PnL comes only from Binance Spot Testnet orders; simulated rows are excluded.
 - **ZeroTier Remote Ready**: Automatic dynamic host resolution allowing seamless access from remote LAN IPs (e.g. `http://<zerotier-ip>:5173`).
 
 ---
@@ -185,10 +185,26 @@ OPENROUTER_API_KEY=your_openrouter_api_key
 OPENROUTER_MODEL=deepseek/deepseek-v4.1-flash
 MAX_DAILY_LLM_BUDGET_USD=3.00
 COGNITIVE_BASE_INTERVAL_SEC=120
-SOLANA_NETWORK=devnet
+ROBOTRADER_EXECUTION_MODE=PAPER
 SOLANA_RPC_URL=https://api.devnet.solana.com
-SOLANA_WALLET_ADDRESS=FK286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN
+SOLANA_PUBLIC_KEY=
 ```
+
+#### Execution mode (`ROBOTRADER_EXECUTION_MODE`)
+
+The simulated vault recognizes exactly four case-sensitive values:
+
+| Value | Meaning | Seed when no secret file and no environment seed |
+|---|---|---|
+| `BACKTEST` | Deterministic replay | deterministic devnet seed |
+| `PAPER` | Paper execution (the default when unset) | deterministic devnet seed |
+| `SIMULATED` | Explicit simulation mode | deterministic devnet seed |
+| `LIVE` | Live-intended mode; still exports a `SIMULATED` manifest | construction fails closed |
+
+- **Unset** selects `PAPER`.
+- **Empty** (`ROBOTRADER_EXECUTION_MODE=`), whitespace-only, lower/mixed case (`paper`), or any unknown value fails closed: no manifest and no receipt.
+- `LIVE` requires a non-empty `/run/secrets/robotrader_master_seed` or `ROBOTRADER_VAULT_MASTER_SEED`; the deterministic devnet seed is never used in `LIVE`.
+- The mode gates seed selection only. It never enables real derivation, address encoding, chain signatures, mainnet custody, or broadcasting; every surface stays `SIMULATED`.
 
 ### 2. Run with Docker Compose
 To build and start all services in the background:
@@ -254,8 +270,10 @@ Three review rounds maximum per stage; no agent merges.
   *SPEC → PLAN → DEV lanes (M/S/L), cold-start reviewer agents with artifact-based resume, a hard three-round cap, OpenSpec-compatible specs, a ≤ 5-minute human Review Card, and a human-only merge gate.*
 - [**Performance & LLM Cost Post-Mortem Audit (`docs/PERFORMANCE_AND_COST_AUDIT.md`)**](docs/PERFORMANCE_AND_COST_AUDIT.md)  
   *Full quantitative audit of the 325 LLM cycles / 4.41M tokens (`~$2.00` OpenRouter spend), breakdown of the 3 trading populations (`backtest_fixture` 100% win rate / Sharpe 28.22, `paper_model` `+$1,155.52` over 1,500 trades, `live_testnet`), and the 4 structural remediations reducing LLM OpEx by 25x–40x.*
-- [**Cryptographic Vault Enclave & 26-Chain HD Key Management (`docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md`)**](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)  
-  *Single-seed `BIP-32` / `BIP-44` / `SLIP-0010` hierarchical deterministic derivation across all 26 blockchains (`secp256k1`, `Ed25519`, `Sr25519`), volatile RAM scrubbing (`ZeroizingBytes`), destination whitelist enforcement, and zero private-key exposure to the Python LLM runtime.*
+- [**ADR-0005: The Vault Is Simulated (`docs/adr/0005-vault-is-simulated.md`)**](docs/adr/0005-vault-is-simulated.md)  
+  *Why the vault is labelled `SIMULATED`, how execution mode and seed provenance fail closed, and why Python holds no key custody; real cryptography and mainnet custody remain open in issue #2.*
+- [**Simulated Vault & Key Boundaries (`docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md`)**](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)  
+  *The `SIMULATED` manifest and receipt contract, target metadata, execution modes, seed precedence, and the Python boundary. No real derivation, address encoding, chain signature, or mainnet custody is implemented.*
 
 ---
 

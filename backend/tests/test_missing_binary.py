@@ -140,6 +140,17 @@ import sys
 from pathlib import Path
 from unittest import mock
 
+# The vault candidate list must be patched before any import that constructs
+# the HybridStateStore singleton: the singleton loads the manifest at import
+# time, so a late patch would be a false green.
+from backend.core.hierarchy import HierarchicalFleetManager
+
+mock.patch.object(
+    HierarchicalFleetManager,
+    "_rust_binary_candidates",
+    staticmethod(lambda: [Path("/nonexistent/robotrader-node")]),
+).start()
+
 from backend.core import state_store as state_store_module
 from backend.core.errors import RustBinaryNotFoundError
 from backend.core.schemas import Message, PolicyEnvelope
@@ -210,6 +221,16 @@ reset()
 assert_503(client.get("/api/v1/status"))
 reset()
 assert_503(client.get("/api/v1/hierarchy"))
+
+# The vault endpoint fails closed with its own detail and no fabricated body.
+reset()
+vault = client.get("/api/v1/vault/manifest")
+assert vault.status_code == 503, (vault.status_code, vault.text)
+vault_body = vault.text
+assert '"wallets"' not in vault_body, vault_body
+assert "vault-fp-" not in vault_body, vault_body
+assert "whitelist" not in vault_body.lower(), vault_body
+assert store.hierarchy.vault_manifest == {}, store.hierarchy.vault_manifest
 
 # Backtest mutation endpoints.
 reset()

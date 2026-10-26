@@ -176,7 +176,7 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
         <div className="bg-amber-950/20 p-4 rounded-lg border border-amber-500/30">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <h3 className="text-sm font-semibold text-amber-300 flex items-center gap-2">
-              🧪 Mode Testnet / Devnet — Comptabilité Réelle On-Chain vs PnL Modèle (Paper)
+              🧪 Mode Testnet / Devnet — Télémétrie Solana en lecture seule (SIMULATED) vs PnL Modèle (Paper)
             </h3>
             {testnetTelemetry.solana_address && (
               <a
@@ -193,24 +193,22 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
             <div className="bg-gray-900/90 p-3.5 rounded border border-gray-800">
               <div className="flex items-center justify-between mb-1">
-                <span className="font-semibold text-white">Solana {testnetTelemetry.solana_cluster?.toUpperCase()} (On-Chain)</span>
+                <span className="font-semibold text-white">Solana {testnetTelemetry.solana_cluster?.toUpperCase()} (lecture seule · SIMULATED)</span>
                 <span className="font-mono text-emerald-400 font-bold">
                   {formatOperational(testnetTelemetry.solana_balance_sol, 'number')} SOL
                 </span>
               </div>
               <p className="text-gray-400 text-[11px] leading-relaxed">
-                Plus-value on-chain : non mesurée (pas de DEX Jupiter/Jito sur Devnet — auto-transferts de validation RPC).
+                Plus-value on-chain : non mesurée (pas de DEX Jupiter/Jito sur Devnet — actions simulées, non signées et non diffusées).
               </p>
               <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-800 text-[11px] text-gray-400">
                 <span>
-                  Transactions signées :{' '}
+                  Actions simulées (non signées) :{' '}
                   <strong className="text-white">
                     {formatOperational(testnetTelemetry.solana_tx_count, 'integer')}
                   </strong>
                 </span>
-                <span className="text-amber-400">
-                  Gas réseau consommé : -{formatOperational(testnetTelemetry.solana_gas_spent_sol, 'number')} SOL
-                </span>
+                <span className="text-amber-400">Aucune transaction diffusée</span>
               </div>
             </div>
 
@@ -222,7 +220,7 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
                 </span>
               </div>
               <p className="text-gray-400 text-[11px] leading-relaxed">
-                Cycle réel <code className="text-gray-300">OPEN BUY</code> puis <code className="text-gray-300">CLOSE SELL</code> sur le carnet Spot Testnet.
+                Cycle mesuré <code className="text-gray-300">OPEN BUY</code> puis <code className="text-gray-300">CLOSE SELL</code> sur le carnet Spot Testnet.
               </p>
               <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-800 text-[11px] text-gray-400">
                 <span>
@@ -443,7 +441,7 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
                         <div className="flex flex-col">
                           <span className="text-gray-300 font-medium">
                             {formatMetric(realPnl, rowSource, 'number')} SOL{' '}
-                            <span className="text-[10px] text-amber-400">(Gas -0.000005)</span>
+                            <span className="text-[10px] text-amber-400">(SIMULATED · non signé)</span>
                           </span>
                           <span
                             className={`text-[10px] ${
@@ -492,7 +490,7 @@ const Dashboard = ({ statusData, apiBase = 'http://localhost:8000', onRefresh })
                     </td>
                     <td className="py-2 text-gray-400">
                       <span>{ex.rationale}</span>
-                      {isDevnetTx && ex.tx_signature && ex.tx_signature.length > 20 && (
+                      {isDevnetTx && !ex.is_simulated && ex.tx_signature && ex.tx_signature.length > 20 && (
                         <a
                           href={`https://solscan.io/tx/${ex.tx_signature}?cluster=${testnetTelemetry?.solana_cluster || 'devnet'}`}
                           target="_blank"

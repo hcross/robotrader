@@ -25,7 +25,10 @@
 - [ ] `PolicyEnvelope` remains synchronized between `engine-rs/crates/common/src/lib.rs` and `backend/core/schemas.py`, including every `AssetOverride` field.
 - [ ] Capital protection is intact: dry powder ≥ 20%, Kelly sizing, drawdown kill-switch, `CostGuard` daily cap.
 - [ ] No unbounded wallet or credit refill is reintroduced.
-- [ ] `RustVaultEnclave` zeroizes volatile RAM; destination whitelist is enforced; no key material in logs/evidence.
+- [ ] The vault is labelled `SIMULATED` at every surface (`SimulatedVault`, manifest, receipt, UI): `simulated: true`, `address_is_spendable: false`, `signature_is_chain_valid: false`, `whitelist_enforcement: "SIMULATED"`.
+- [ ] Python holds no key custody: no seed read, no signing keypair, no fabricated manifest or signature, and no Solana broadcast.
+- [ ] `destination_whitelisted` and `key_zeroized_after_sign` are derived from the actual call, not compile-time literals.
+- [ ] No docstring, comment, test name, or document claims real derivation, chain-valid signing, or mainnet custody; no key material in logs/evidence.
 - [ ] Backtest == paper == live: the same deterministic code path; no look-ahead or live-only branch in strategy logic.
 - [ ] Each leaf robot stays isolated to its chain/venue and its MemPalace wing.
 - [ ] `backend/core/` still holds warm-path infrastructure; `import strands` is not shadowed.

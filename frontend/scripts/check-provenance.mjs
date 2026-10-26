@@ -79,4 +79,31 @@ for (const [name, source] of Object.entries(sources)) {
   }
 }
 
+// --- Simulated vault surface ---------------------------------------------
+const leafView = sources.LeafAgentView;
+assert.match(leafView, /SIMULATED/, 'LeafAgentView must show a SIMULATED badge');
+assert.match(
+  leafView,
+  /address_is_spendable/,
+  'LeafAgentView must render the non-spendable flag'
+);
+assert.match(
+  leafView,
+  /target_leaf_derivation_path/,
+  'LeafAgentView must read the target leaf derivation path'
+);
+
+for (const [name, source] of Object.entries(sources)) {
+  for (const forbiddenClaim of [
+    'leaf.wallet_vault.leaf_derivation_path',
+    'Zeroize RAM',
+    'Enclave Rust',
+  ]) {
+    assert.ok(
+      !source.includes(forbiddenClaim),
+      `${name} reintroduced a false vault claim: ${forbiddenClaim}`
+    );
+  }
+}
+
 console.log('provenance wiring OK');

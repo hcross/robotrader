@@ -252,6 +252,8 @@ class PopulationProvenanceTests(unittest.TestCase):
         self.assertIn("source_detail", telemetry)
         self.assertNotIn("simulated_model_pnl_usd", telemetry)
         self.assertNotIn("solana_" + "onchain_pnl_sol", telemetry)
+        # No configured public address may fabricate a balance.
+        self.assertIsNone(telemetry["solana_balance_sol"])
 
         self.store.is_testnet_mode = False
         disabled = self.store.get_testnet_telemetry()

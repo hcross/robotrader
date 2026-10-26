@@ -1,8 +1,9 @@
 use robotrader_backtest::{benchmark_market_stream_for_leaf, BacktestEngine};
 use robotrader_common::PolicyEnvelope;
-use robotrader_risk_gate::RustVaultEnclave;
+use robotrader_risk_gate::SimulatedVault;
 use std::env;
 use std::io::Read;
+use std::path::PathBuf;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -15,6 +16,7 @@ fn main() {
     let mut amount_usd: f64 = 100.0;
     let mut token = "USDC".to_string();
     let mut kill_switch = false;
+    let mut vault_secret_file: Option<PathBuf> = None;
 
     for i in 0..args.len() {
         if (args[i] == "--leaf-id" || args[i] == "--leaf") && i + 1 < args.len() {
@@ -35,6 +37,9 @@ fn main() {
             token = args[i + 1].clone();
         } else if args[i] == "--kill-switch" {
             kill_switch = true;
+        } else if args[i] == "--vault-secret-file" && i + 1 < args.len() {
+            // Test-only override; production uses the default secret mount path.
+            vault_secret_file = Some(PathBuf::from(args[i + 1].clone()));
         }
     }
 
@@ -61,8 +66,18 @@ fn main() {
     }
 
     if dump_vault_manifest {
-        let enclave = RustVaultEnclave::default();
-        let manifest = enclave.export_public_manifest();
+        let vault = match vault_secret_file {
+            Some(path) => SimulatedVault::from_env_with_secret_file(path),
+            None => SimulatedVault::from_env(),
+        };
+        let vault = match vault {
+            Ok(vault) => vault,
+            Err(err) => {
+                eprintln!("{err}");
+                std::process::exit(2);
+            }
+        };
+        let manifest = vault.export_public_manifest();
         println!(
             "{}",
             serde_json::to_string_pretty(&manifest).expect("Failed to serialize vault manifest")
@@ -71,8 +86,18 @@ fn main() {
     }
 
     if sign_transfer {
-        let enclave = RustVaultEnclave::default();
-        match enclave.validate_and_sign_transfer(
+        let vault = match vault_secret_file {
+            Some(path) => SimulatedVault::from_env_with_secret_file(path),
+            None => SimulatedVault::from_env(),
+        };
+        let vault = match vault {
+            Ok(vault) => vault,
+            Err(err) => {
+                eprintln!("{err}");
+                std::process::exit(2);
+            }
+        };
+        match vault.validate_and_sign_transfer(
             kill_switch,
             &leaf_id,
             &dest_address,
