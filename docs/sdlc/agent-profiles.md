@@ -158,6 +158,22 @@ available on every account; leave `SDLC_AGY_MODE=` empty and use the explicit
 permission bypass in a trusted worktree. Without it, headless `read_file`
 calls are auto-denied and the agent cannot work.
 
+In this headless setup, **project custom agents are read-only**: they expose
+`view_file`, search, and MCP tools, but no write or shell tools. That is fine
+for reviewers. For a write role such as `sdlc-dev`, run the default Antigravity
+agent with the profile injected:
+
+```bash
+SDLC_CLI=agy \
+SDLC_AGY_MODEL=gemini-3.8-flash-medium \
+SDLC_AGY_DANGEROUSLY_SKIP_PERMISSIONS=true \
+SDLC_AGY_USE_DEFAULT_AGENT=true \
+  scripts/sdlc/run-agent.sh sdlc-dev <brief>
+```
+
+The wrapper prepends "You are the `sdlc-dev` agent. Read
+`sdlc/agents/sdlc-dev.md`..." and omits `--agent`.
+
 ```bash
 # Claude Code
 SDLC_CLI=claude scripts/sdlc/run-agent.sh sdlc-dev-reviewer <brief>

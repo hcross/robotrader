@@ -38,6 +38,7 @@ DEFAULTS = {
     "SDLC_AGY_MODEL": "gemini-3.8-flash-medium",
     "SDLC_AGY_MODE": "",
     "SDLC_AGY_DANGEROUSLY_SKIP_PERMISSIONS": "false",
+    "SDLC_AGY_USE_DEFAULT_AGENT": "false",
     "SDLC_AUTO_MERGE": "false",
 }
 

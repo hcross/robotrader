@@ -67,6 +67,11 @@ if [ -n "${SDLC_AGENT_CWD:-}" ]; then
 fi
 
 PROMPT="$(cat "$BRIEF")"
+if [ "$CLI" = "agy" ] && [ "${SDLC_AGY_USE_DEFAULT_AGENT:-false}" = "true" ]; then
+  PROMPT="You are the \`$ROLE\` agent. Read \`sdlc/agents/$ROLE.md\` and follow it exactly.
+
+$PROMPT"
+fi
 echo "[sdlc] cold agent: role=$ROLE cli=$CLI cwd=$PWD" >&2
 
 case "$CLI" in
@@ -82,7 +87,10 @@ case "$CLI" in
       --permission-mode "${SDLC_CLAUDE_PERMISSION_MODE:-auto}"
     ;;
   agy)
-    AGY_ARGS=(--agent "$ROLE" --output-format json)
+    AGY_ARGS=(--output-format json)
+    if [ "${SDLC_AGY_USE_DEFAULT_AGENT:-false}" != "true" ]; then
+      AGY_ARGS=(--agent "$ROLE" "${AGY_ARGS[@]}")
+    fi
     if [ -n "${SDLC_AGY_MODEL:-}" ]; then
       AGY_ARGS+=(--model "$SDLC_AGY_MODEL")
     fi
