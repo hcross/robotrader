@@ -7,7 +7,7 @@ You are `sdlc-plan-author` for change `fix-costguard-python-gate`.
 - Worktree: `/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/5-fix-costguard-python-gate`
 - Artifact under work: openspec/changes/fix-costguard-python-gate/design.md + tasks.md
 - Reviewed SHA: run `git rev-parse HEAD` in the worktree and record it in the verdict.
-- Reason: initial authoring
+- Reason: revise findings from round 1
 
 Read first, in this order:
 1. `sdlc/PROTOCOL.md`
