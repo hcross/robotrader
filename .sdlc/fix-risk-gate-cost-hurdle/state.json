@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev",
+  "status": "merged",
   "pr": 20,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": "2026-10-26T08:02:07Z"
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "e3498862655c265bcfc431e5407b5e5158fe1df6",
+      "updated_at": "2026-10-26T08:13:17Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/4-fix-risk-gate-cost-hurdle",
-  "partial_issue": true
+  "partial_issue": true,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-25 (run continued 2026-10-26)",
+    "at": "2026-10-26T08:14:37Z",
+    "mode": "full-auto",
+    "pr": 20,
+    "head_sha": "e3498862655c265bcfc431e5407b5e5158fe1df6"
+  }
 }
