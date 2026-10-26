@@ -398,7 +398,7 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
             </div>
             <div className="text-[11px] text-gray-400 mt-0.5">
               Auto-Refill avant épuisement (&lt;
-              {formatOperational(openrouterCredit.low_watermark_usd ?? 5.0, 'money')}) • Cap{' '}
+              {formatOperational(openrouterCredit.low_watermark_usd, 'money')}) • Cap{' '}
               {((openrouterCredit.max_profit_share_pct ?? 0.1) * 100).toFixed(0)}% PnL
             </div>
           </div>

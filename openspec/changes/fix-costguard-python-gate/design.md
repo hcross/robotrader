@@ -212,7 +212,7 @@ The ADR's auto-refill bullet becomes: `low_watermark_usd = $2.00` resolved from 
 | No fabricated profit floor | D4 | 2.4, 2.10 |
 | Force bypasses only the low-watermark check | D5 | 2.2, 2.7, 2.10 |
 | Refills are refused while the kill switch is active | D4 | 2.3, 2.10 |
-| The epoch cap rolls over every 24 hours | D20 | 2.8–2.10, 3.5, 7.1–7.3 |
+| Profit-share and epoch caps apply on every path (the rolling 24 h window is ADR-0003's `<= $25/24h` invariant) | D4, D20 | 2.5–2.10, 3.5, 7.1–7.3 |
 | Daily spend is a rolling 24-hour window | D6, D7, D12 | 3.1–3.6 |
 | Ledger hydration is injectable, lazy, and bounded | D8–D12, D17 | 4.1–4.10 |
 | The low watermark has one backend-owned value | D14 | 5.1, 5.5, 6.1, 6.2 |

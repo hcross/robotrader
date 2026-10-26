@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from backend.agents.orchestrator import OrchestratorAgent
 from backend.core.schemas import PolicyEnvelope
@@ -7,8 +9,13 @@ from backend.core.state_store import HybridStateStore
 
 class TestHybridArchitectureV2(unittest.TestCase):
     def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
         self.store = HybridStateStore()
-        self.orchestrator = OrchestratorAgent(store=self.store)
+        self.orchestrator = OrchestratorAgent(
+            store=self.store,
+            ledger_path=Path(self._tmpdir.name) / "transcript_ledger.jsonl",
+        )
 
     def test_policy_ttl_expiration_falls_back_to_safe_baseline(self) -> None:
         env = PolicyEnvelope.default_active(now_ms=1_000_000)
@@ -25,13 +32,27 @@ class TestHybridArchitectureV2(unittest.TestCase):
         self.assertEqual(expired.global_regime, "LOW_VOL_CARRY")
         self.assertFalse(expired.pod_allocations["pod_sniper"].enabled)
 
-    def test_cost_guard_hard_cap_and_no_auto_refill(self) -> None:
+    def test_cost_guard_hard_cap_and_truthful_auto_refill_label(self) -> None:
         status = self.orchestrator.cost_guard.get_status()
-        self.assertEqual(status["auto_wallet_refill"], "DISABLED_BY_SECURITY_POLICY")
+        self.assertEqual(status["auto_wallet_refill"], "ENABLED_PROFIT_GATED")
+        self.assertEqual(
+            status["auto_refill_policy"], "PROFIT_GATED_CAPPED_BY_ORCHESTRATOR"
+        )
         self.assertFalse(status["budget_exhausted"])
 
-        self.orchestrator.cost_guard.record_usage({"agent": "CatalystScout", "cost": 10.0, "tokens": 50000})
+        self.orchestrator.cost_guard.auto_refill_enabled = False
+        disabled = self.orchestrator.cost_guard.get_status()
+        self.assertEqual(disabled["auto_wallet_refill"], "DISABLED")
+        self.assertEqual(disabled["auto_refill_policy"], "DISABLED")
+        self.orchestrator.cost_guard.auto_refill_enabled = True
+
+        # No measured profit: the automatic gate refuses, but the hard daily cap
+        # still binds the rolling spend window.
+        self.orchestrator.cost_guard.record_usage(
+            {"agent": "CatalystScout", "cost": 10.0, "tokens": 50000}
+        )
         self.assertTrue(self.orchestrator.cost_guard.budget_exhausted)
+        self.assertEqual(self.orchestrator.cost_guard.refill_history, [])
 
     def test_python_to_rust_backtest_bridge_and_regime_switching(self) -> None:
         # Capture the envelope the bridge serializes for Rust, before the binary runs.

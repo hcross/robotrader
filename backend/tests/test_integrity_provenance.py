@@ -261,7 +261,11 @@ class PopulationProvenanceTests(unittest.TestCase):
         self.assertNotIn("simulated_model_pnl_usd", disabled)
 
     def test_auditor_reports_a_fixture_source(self) -> None:
-        auditor = OrchestratorAgent(store=self.store).quant_auditor
+        with tempfile.TemporaryDirectory() as tmp:
+            auditor = OrchestratorAgent(
+                store=self.store,
+                ledger_path=Path(tmp) / "transcript_ledger.jsonl",
+            ).quant_auditor
         result = auditor.audit_latest_backtest()
         self.assertEqual(result["source"], "FIXTURE")
         self.assertIn("deterministic", result["source_detail"])
@@ -720,12 +724,16 @@ class ReflectionProvenanceTests(unittest.TestCase):
         )
         self.ta_patch.start()
         self.addCleanup(self.ta_patch.stop)
-        self.orchestrator = OrchestratorAgent(store=self.store)
+        self.orchestrator = OrchestratorAgent(
+            store=self.store,
+            ledger_path=Path(self._tmp.name) / "transcript_ledger.jsonl",
+        )
 
     def _lock_budget(self) -> None:
-        self.orchestrator.cost_guard.total_cost_usd = (
-            self.orchestrator.cost_guard.daily_budget_usd
-        )
+        cg = self.orchestrator.cost_guard
+        cg.auto_refill_enabled = False
+        cg.record_usage({"agent": "test", "cost": cg.daily_budget_usd, "tokens": 0})
+        self.assertTrue(cg.budget_exhausted)
 
     def test_fallback_without_a_call_carries_no_telemetry(self) -> None:
         self._lock_budget()
@@ -807,7 +815,10 @@ class RefillGatingTests(unittest.TestCase):
         )
         self.sub_patch.start()
         self.addCleanup(self.sub_patch.stop)
-        self.orchestrator = OrchestratorAgent(store=self.store)
+        self.orchestrator = OrchestratorAgent(
+            store=self.store,
+            ledger_path=Path(self._tmp.name) / "transcript_ledger.jsonl",
+        )
 
     def test_all_null_rows_give_zero_without_type_error(self) -> None:
         self.store.live_executions = [
@@ -851,7 +862,7 @@ class RefillGatingTests(unittest.TestCase):
             realized_trading_pnl_usd=self.store.measured_realized_pnl_usd(), force=True
         )
         self.assertEqual(negative["status"], "rejected_no_realized_profit")
-        self.assertIn("-4.00", negative["reason"])
+        self.assertIn("-$4.00", negative["reason"])
 
     def test_helper_equals_snapshot_measured_sum(self) -> None:
         self.store.live_executions = [
@@ -981,7 +992,8 @@ def _live_report(realized):
 if scenario == "status":
     server.state_store.live_executions = [_live_report(10.0)]
     payload = client.get("/api/v1/status").json()
-    assert payload["contract_version"] == 2, payload.get("contract_version")
+    assert payload["contract_version"] == 3, payload.get("contract_version")
+    assert payload["cost_guard"]["total_spent_usd"] == 0.0, payload["cost_guard"]
     engine = payload["engine_metrics"]
     assert engine["backtest_fixture"]["source"] == "FIXTURE"
     assert engine["paper_model"]["source"] == "SIMULATED"
@@ -1076,12 +1088,21 @@ class ServerPayloadTests(unittest.TestCase):
     """
 
     def _run(self, scenario: str) -> None:
-        result = subprocess.run(
-            [sys.executable, "-c", SERVER_CHILD_SCRIPT, scenario],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        # The child imports backend.server, so isolate the CostGuard ledger from
+        # any developer ledger at the production default.
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [sys.executable, "-c", SERVER_CHILD_SCRIPT, scenario],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env={
+                    **os.environ,
+                    "COSTGUARD_LEDGER_PATH": str(
+                        Path(tmp) / "transcript_ledger.jsonl"
+                    ),
+                },
+            )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f"server provenance contract ok:{scenario}", result.stdout)
         self.assertNotIn("backend.server", sys.modules)

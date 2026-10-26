@@ -26,7 +26,10 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
 
         self.store = HybridStateStore()
         self.store.palace.storage_path = Path(self._tmpdir.name) / "palace.jsonl"
-        self.orchestrator = OrchestratorAgent(store=self.store)
+        self.orchestrator = OrchestratorAgent(
+            store=self.store,
+            ledger_path=Path(self._tmpdir.name) / "transcript_ledger.jsonl",
+        )
 
     def tearDown(self) -> None:
         transcript_palace.storage_path = self._orig_transcript_path
@@ -204,10 +207,13 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         Verifies that leaf agents write to their isolated wing (`wing=leaf_bitcoin`)
         and the Master Orchestrator reads across all wings (`wing=master_orchestrator`).
         """
-        # Lock LLM budget to deterministic fallback so unit test runs offline in <10ms
-        self.orchestrator.cost_guard.total_cost_usd = (
-            self.orchestrator.cost_guard.daily_budget_usd
+        # Lock LLM budget to deterministic fallback so unit test runs offline in <10ms.
+        cg = self.orchestrator.cost_guard
+        cg.auto_refill_enabled = False
+        cg.record_usage(
+            {"agent": "test", "cost": cg.daily_budget_usd, "tokens": 0}
         )
+        self.assertTrue(cg.budget_exhausted)
 
         leaf_res = self.orchestrator.run_leaf_agent_reflection(
             "leaf-bitcoin", trigger_source="UNIT_TEST"
@@ -254,7 +260,7 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         and epoch-capped.
         """
         cg = self.orchestrator.cost_guard
-        cg.openrouter_credit_balance_usd = 1.80  # Below $2.50 low watermark
+        cg.openrouter_credit_balance_usd = 1.80  # Below the $2.00 low watermark
 
         # Negative PnL -> rejected
         rej = cg.trigger_openrouter_refill(realized_trading_pnl_usd=-15.0, force=False)
@@ -317,6 +323,10 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertEqual(hydrated["hydrated_calls"], 1)
         # 0.1M * $0.30 + 0.02M * $1.10 = $0.03 + $0.022 = $0.052
         self.assertAlmostEqual(hydrated["hydrated_cost_usd"], 0.052, places=4)
+        # The explicit return is the local scan sum, and reading the aggregate
+        # afterwards neither recurses nor hydrates a second time.
+        self.assertAlmostEqual(cg.total_cost_usd, hydrated["hydrated_cost_usd"], places=6)
+        self.assertAlmostEqual(cg.total_cost_usd, 0.052, places=4)
 
     def test_rust_vault_enclave_26_chains_and_whitelist_enforcement(self) -> None:
         """
