@@ -76,15 +76,28 @@ echo "[sdlc] cold agent: role=$ROLE cli=$CLI cwd=$PWD" >&2
 
 case "$CLI" in
   claude)
+    CLAUDE_ARGS=(-p "$PROMPT" --agent "$ROLE" --output-format json)
+    if [ -n "${SDLC_CLAUDE_MODEL:-}" ]; then
+      CLAUDE_ARGS+=(--model "$SDLC_CLAUDE_MODEL")
+    fi
+    if [ "${SDLC_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS:-false}" = "true" ]; then
+      CLAUDE_ARGS+=(--dangerously-skip-permissions)
+    else
+      CLAUDE_ARGS+=(--permission-mode "${SDLC_CLAUDE_PERMISSION_MODE:-auto}")
+    fi
+    if [ "${SDLC_CLAUDE_LAUNCHER:-direct}" = "ollama" ]; then
+      # `ollama launch claude` starts a separate Claude Code process backed by
+      # the Ollama Cloud model; it is not a recursive in-process agent.
+      exec ollama launch claude \
+        --model "${SDLC_CLAUDE_OLLAMA_MODEL:-glm-5.3-flash:cloud}" \
+        -y -- "${CLAUDE_ARGS[@]}"
+    fi
     if [ -n "${CLAUDECODE:-}" ] && [ "${SDLC_ALLOW_NESTED_CLAUDE:-0}" != "1" ]; then
       echo "error: refusing to nest claude inside a Claude Code session." >&2
-      echo "       set SDLC_CLI=agy, or SDLC_ALLOW_NESTED_CLAUDE=1 to override." >&2
+      echo "       set SDLC_CLI=agy, SDLC_CLAUDE_LAUNCHER=ollama, or SDLC_ALLOW_NESTED_CLAUDE=1 to override." >&2
       exit 2
     fi
-    exec claude -p "$PROMPT" \
-      --agent "$ROLE" \
-      --output-format json \
-      --permission-mode "${SDLC_CLAUDE_PERMISSION_MODE:-auto}"
+    exec claude "${CLAUDE_ARGS[@]}"
     ;;
   agy)
     AGY_ARGS=(--output-format json)

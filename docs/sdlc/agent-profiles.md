@@ -174,6 +174,25 @@ SDLC_AGY_USE_DEFAULT_AGENT=true \
 The wrapper prepends "You are the `sdlc-dev` agent. Read
 `sdlc/agents/sdlc-dev.md`..." and omits `--agent`.
 
+### Dev on GLM-5.3 Flash through Ollama
+
+A separate Claude Code process can be launched through Ollama Cloud with a
+specific model:
+
+```bash
+SDLC_CLI=claude \
+SDLC_CLAUDE_LAUNCHER=ollama \
+SDLC_CLAUDE_OLLAMA_MODEL=glm-5.3-flash:cloud \
+SDLC_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=true \
+  scripts/sdlc/run-agent.sh sdlc-dev <brief>
+```
+
+`run-agent.sh` invokes `ollama launch claude --model <model> -y -- -p ... --agent sdlc-dev ...`.
+Claude Code prints `claude-code:unrecognized_model` because GLM is not in its
+registry; the `modelUsage` block in the JSON output confirms the request
+actually used `glm-5.3-flash:cloud`. This path is a separate process, so it is
+allowed even when `CLAUDECODE` is set.
+
 ```bash
 # Claude Code
 SDLC_CLI=claude scripts/sdlc/run-agent.sh sdlc-dev-reviewer <brief>

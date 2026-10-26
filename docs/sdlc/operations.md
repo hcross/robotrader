@@ -229,6 +229,8 @@ risk, and a recommendation. The agent stops; it does not choose the risky path.
 | Antigravity: `unknown agent` | adapter missing | `scripts/sdlc/install-agents.sh` |
 | Antigravity headless: `read_file` auto-denied | no permission bypass or allow-rule | set `SDLC_AGY_DANGEROUSLY_SKIP_PERMISSIONS=true` in a trusted worktree, or add allow-rules |
 | Antigravity: `--mode auto is not available` | account plan does not expose `auto` | leave `SDLC_AGY_MODE=` empty and use the permission bypass above |
+| Claude/Ollama: `claude-code:unrecognized_model` | GLM id is not in Claude's registry | harmless; check `modelUsage` in the JSON output for the real model |
+| Claude/Ollama: `ollama launch` prompts | first launch confirmation | `run-agent.sh` passes `-y`; or set `SDLC_CLAUDE_LAUNCHER=direct` |
 | Claude: nested session refused | `CLAUDECODE` set | `SDLC_CLI=agy` or `SDLC_ALLOW_NESTED_CLAUDE=1` |
 | `gh pr checks` pending | CI still running | wait; do not bypass the gate |
 
