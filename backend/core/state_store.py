@@ -266,7 +266,7 @@ class HybridStateStore:
                 )
             )
             self.solana_devnet_gas_sol = round(
-                float(data.get("solana_devnet_gas_sol", self.solana_devnet_tx_count * 0.000005)),
+                float(data.get("solana_devnet_gas_sol", 0.0)),
                 6,
             )
             if isinstance(data.get("testnet_wallet_snapshot"), dict):
