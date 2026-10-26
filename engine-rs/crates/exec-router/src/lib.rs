@@ -1,4 +1,6 @@
-use robotrader_common::{ApprovedOrder, ExecutionReport, OrderType, Side, Venue};
+use robotrader_common::{
+    fee_bps_for, spread_bps_for, ApprovedOrder, ExecutionReport, OrderType, Side, Venue,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,25 +20,14 @@ impl SmartExecutionRouter {
         Self { mode }
     }
 
+    /// Per-side fee in basis points, delegated to the canonical cost model.
     pub fn fee_bps_for(&self, venue: Venue, order_type: OrderType) -> f64 {
-        match (venue, order_type) {
-            // Post-Only Maker on CEX drastically reduces fee drag (1.5 to 2.0 bps vs 5-10 bps taker)
-            (Venue::BinanceSpot | Venue::BinancePerp, OrderType::PostOnlyMaker) => 1.8,
-            (Venue::HyperliquidPerp, OrderType::PostOnlyMaker) => 1.0,
-            (Venue::BinanceSpot | Venue::BinancePerp | Venue::HyperliquidPerp, _) => 5.0,
-            // On-chain DEX aggregator + MEV bundle fee + priority tip
-            (Venue::OnchainDexAggregator, _) => 8.0,
-            (Venue::OnchainAtomicPool, _) => 12.0,
-        }
+        fee_bps_for(venue, order_type)
     }
 
+    /// Spread component in basis points, delegated to the canonical cost model.
     pub fn slippage_bps_for(&self, order: &ApprovedOrder) -> f64 {
-        match order.intent.order_type {
-            OrderType::PostOnlyMaker => 0.5, // Maker fills capture spread
-            OrderType::Limit => 2.0,
-            OrderType::Market => 8.0,
-            OrderType::MevBundleAtomic => (order.mev_priority_tip_bps as f64) * 0.6,
-        }
+        spread_bps_for(order.intent.order_type, order.mev_priority_tip_bps)
     }
 
     /// Executes an approved order and returns a deterministic `ExecutionReport`.
@@ -71,5 +62,101 @@ impl SmartExecutionRouter {
             realized_pnl_usd,
             rationale: order.intent.rationale.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use robotrader_common::{fee_bps_for, spread_bps_for, OrderIntent, PodId};
+
+    const ALL_VENUES: [Venue; 5] = [
+        Venue::BinanceSpot,
+        Venue::BinancePerp,
+        Venue::HyperliquidPerp,
+        Venue::OnchainDexAggregator,
+        Venue::OnchainAtomicPool,
+    ];
+    const ALL_ORDER_TYPES: [OrderType; 4] = [
+        OrderType::PostOnlyMaker,
+        OrderType::Limit,
+        OrderType::Market,
+        OrderType::MevBundleAtomic,
+    ];
+
+    fn approved_order(venue: Venue, order_type: OrderType, tip_bps: u32) -> ApprovedOrder {
+        ApprovedOrder {
+            intent: OrderIntent {
+                pod_id: PodId::PodCarry,
+                symbol: "SOL-USDT".to_string(),
+                venue,
+                side: Side::Buy,
+                order_type,
+                reference_price: 150.0,
+                win_probability: 0.68,
+                reward_risk_ratio: 2.2,
+                asset_volatility_pct: 2.0,
+                expected_edge_bps: 12.0,
+                max_slippage_bps: 2,
+                requested_leverage: 1.0,
+                stop_loss_pct: 1.2,
+                take_profit_pct: 2.6,
+                token_safety: None,
+                rationale: "parity fixture".to_string(),
+            },
+            approved_notional_usd: 10_000.0,
+            approved_quantity: 10_000.0 / 150.0,
+            clamped_leverage: 1.0,
+            mev_priority_tip_bps: tip_bps,
+        }
+    }
+
+    #[test]
+    fn test_fee_bps_delegates_to_the_canonical_table_for_every_pair() {
+        let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
+        for venue in ALL_VENUES {
+            for order_type in ALL_ORDER_TYPES {
+                assert_eq!(
+                    router.fee_bps_for(venue, order_type),
+                    fee_bps_for(venue, order_type),
+                    "fee divergence for {venue:?}/{order_type:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_slippage_bps_delegates_to_the_canonical_table_for_all_order_types() {
+        let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
+        let expected = [
+            (OrderType::PostOnlyMaker, 0.5),
+            (OrderType::Limit, 2.0),
+            (OrderType::Market, 8.0),
+            (OrderType::MevBundleAtomic, 6.0),
+        ];
+
+        for (order_type, expected_bps) in expected {
+            let order = approved_order(Venue::BinancePerp, order_type, 10);
+            assert_eq!(
+                router.slippage_bps_for(&order),
+                expected_bps,
+                "spread divergence for {order_type:?}"
+            );
+            assert_eq!(
+                router.slippage_bps_for(&order),
+                spread_bps_for(order_type, 10),
+                "router and canonical spread helper disagree for {order_type:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_execute_charges_the_round_trip_fee_for_binance_maker() {
+        let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
+        let order = approved_order(Venue::BinancePerp, OrderType::PostOnlyMaker, 2);
+        let report = router.execute(&order, 1_000);
+
+        let charged_bps = report.fee_usd / report.notional_usd * 10_000.0;
+        assert!((charged_bps - 3.6).abs() < 1e-9, "charged {charged_bps} bps");
     }
 }

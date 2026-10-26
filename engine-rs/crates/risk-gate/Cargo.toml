@@ -7,3 +7,18 @@ edition.workspace = true
 robotrader-common = { path = "../common" }
 serde.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+# Test-only parity edge (PLAN-R1-F06): these tests compare the gate's cost
+# terms with the execution router. This is a dev-dependency, so it does not
+# enter the release graph and creates no cycle (`exec-router` depends only on
+# `common`). It is required by task 1.4.
+robotrader-exec-router = { path = "../exec-router" }
+# Criterion is dev-only and never linked into release binaries. Default
+# features pull in `plotters` and `rayon`; neither is needed for the CI/CLI
+# benchmark output, so only the cargo-bench harness support is enabled.
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "validate"
+harness = false

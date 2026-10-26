@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod cost;
+
+pub use cost::{fee_bps_for, spread_bps_for};
+
 /// Shared policy contract file, resolved at compile time so `safe_baseline()`
 /// stays allocation-free on the `HardRiskGate` fallback path.
 const POLICY_CONTRACT: &str = include_str!("../../../../contracts/policy_contract.conf");

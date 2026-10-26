@@ -1,7 +1,8 @@
 pub mod vault;
 
 use robotrader_common::{
-    ApprovedOrder, OnChainTokenSafety, OrderIntent, PolicyEnvelope, PortfolioState,
+    fee_bps_for, spread_bps_for, ApprovedOrder, OnChainTokenSafety, OrderIntent, PolicyEnvelope,
+    PortfolioState,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -39,6 +40,11 @@ pub enum RiskRejection {
     VaultSigningRejected { reason: String },
 }
 
+/// Hard risk limits enforced by [`HardRiskGate::validate`].
+///
+/// `min_edge_buffer_bps` is the only execution-cost knob: the gate derives the
+/// rest of the hurdle from the intent's venue, order type, and declared
+/// `max_slippage_bps`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskLimits {
     pub max_daily_drawdown_pct: f64,
@@ -46,7 +52,10 @@ pub struct RiskLimits {
     pub max_leverage_ceiling: f64,
     pub kelly_fraction: f64,
     pub target_annual_volatility_pct: f64,
-    pub min_edge_over_cost_bps: f64,
+    /// Minimum margin, in basis points, by which `expected_edge_bps` must
+    /// exceed estimated execution cost. The effective value is sanitized to
+    /// `0.0` when the configured value is negative or non-finite.
+    pub min_edge_buffer_bps: f64,
     pub max_slippage_ceiling_bps: u32,
     #[serde(alias = "min_solana_lp_locked_pct")]
     pub min_onchain_lp_locked_pct: f64,
@@ -62,7 +71,7 @@ impl Default for RiskLimits {
             max_leverage_ceiling: 3.0,
             kelly_fraction: 0.25,          // Quarter-Kelly for safety
             target_annual_volatility_pct: 25.0,
-            min_edge_over_cost_bps: 12.0,
+            min_edge_buffer_bps: 2.0,
             max_slippage_ceiling_bps: 150,
             min_onchain_lp_locked_pct: 80.0,
             max_onchain_top10_holder_pct: 35.0,
@@ -208,7 +217,16 @@ impl HardRiskGate {
         desired_notional.min(hard_cap_notional)
     }
 
-    /// Synchronous pre-trade firewall (<50µs execution).
+    /// Synchronous pre-trade firewall.
+    ///
+    /// Gates run in this order: kill switch, daily drawdown circuit breaker,
+    /// effective-envelope resolution and pod enablement, slippage ceiling,
+    /// on-chain token safety when present, per-intent execution-cost hurdle,
+    /// leverage clamp, then fractional-Kelly sizing and zero-position
+    /// rejection. The hurdle is
+    /// `2 x fee + spread + max_slippage_bps + effective_buffer_bps` and is
+    /// computed from the intent alone; no portfolio, chain, or sibling-leaf
+    /// state is read. See `README.md` for the measured hot-path budget.
     pub fn validate(
         &mut self,
         intent: &OrderIntent,
@@ -250,15 +268,8 @@ impl HardRiskGate {
                 envelope_id: envelope.envelope_id.clone(),
             })?;
 
-        // 3. Validate expected alpha edge vs execution cost hurdle
-        if intent.expected_edge_bps < self.limits.min_edge_over_cost_bps {
-            return Err(RiskRejection::InsufficientEdge {
-                edge_bps: intent.expected_edge_bps,
-                min_bps: self.limits.min_edge_over_cost_bps,
-            });
-        }
-
-        // 4. Validate slippage bounds
+        // 3. Validate slippage bounds before economic gates: a safety rejection
+        //    must keep its own variant instead of becoming `InsufficientEdge`.
         let effective_slippage_cap = pod_alloc
             .max_slippage_bps
             .unwrap_or(self.limits.max_slippage_ceiling_bps)
@@ -271,9 +282,34 @@ impl HardRiskGate {
             });
         }
 
-        // 5. On-chain token anti-rug gate (mandatory if safety payload is present)
+        // 4. On-chain token anti-rug gate (mandatory if safety payload is present)
         if let Some(ref safety) = intent.token_safety {
             self.validate_token_safety(safety)?;
+        }
+
+        // 5. Validate expected alpha edge against the per-intent execution-cost
+        //    hurdle: round-trip fee + spread + declared impact + buffer.
+        //
+        //    The priority tip is computed once here and reused unchanged in the
+        //    `ApprovedOrder`. `!(edge > hurdle)` is the strict boundary: it also
+        //    rejects a `NaN` edge. A `+inf` edge is strictly above every finite
+        //    hurdle and is therefore approved, matching the spec's `>` rule.
+        let mev_priority_tip_bps = ((intent.expected_edge_bps * 0.10) as u32).clamp(2, 25);
+        let round_trip_fee_bps = fee_bps_for(intent.venue, intent.order_type) * 2.0;
+        let spread_bps = spread_bps_for(intent.order_type, mev_priority_tip_bps);
+        let impact_bps = intent.max_slippage_bps as f64;
+        let effective_buffer_bps = if self.limits.min_edge_buffer_bps.is_finite() {
+            self.limits.min_edge_buffer_bps.max(0.0)
+        } else {
+            0.0
+        };
+        let hurdle_bps = round_trip_fee_bps + spread_bps + impact_bps + effective_buffer_bps;
+
+        if !(intent.expected_edge_bps > hurdle_bps) {
+            return Err(RiskRejection::InsufficientEdge {
+                edge_bps: intent.expected_edge_bps,
+                min_bps: hurdle_bps,
+            });
         }
 
         // 6. Clamp leverage against both AI AssetOverride and Hard Ceiling
@@ -302,7 +338,6 @@ impl HardRiskGate {
         }
 
         let approved_quantity = approved_notional_usd / intent.reference_price;
-        let mev_priority_tip_bps = ((intent.expected_edge_bps * 0.10) as u32).clamp(2, 25);
 
         Ok(ApprovedOrder {
             intent: intent.clone(),
@@ -318,6 +353,21 @@ impl HardRiskGate {
 mod tests {
     use super::*;
     use robotrader_common::{OrderType, PodId, Side, Venue};
+    use robotrader_exec_router::{ExecutionMode, SmartExecutionRouter};
+
+    const ALL_VENUES: [Venue; 5] = [
+        Venue::BinanceSpot,
+        Venue::BinancePerp,
+        Venue::HyperliquidPerp,
+        Venue::OnchainDexAggregator,
+        Venue::OnchainAtomicPool,
+    ];
+    const ALL_ORDER_TYPES: [OrderType; 4] = [
+        OrderType::PostOnlyMaker,
+        OrderType::Limit,
+        OrderType::Market,
+        OrderType::MevBundleAtomic,
+    ];
 
     fn sample_intent() -> OrderIntent {
         OrderIntent {
@@ -423,6 +473,434 @@ mod tests {
         assert!(matches!(
             cap_hit,
             Err(RiskRejection::InferenceRefillRejected { .. })
+        ));
+    }
+
+    fn enable_pod(envelope: &mut PolicyEnvelope, pod: PodId, weight: f64, cap_bps: u32) {
+        let alloc = envelope
+            .pod_allocations
+            .get_mut(pod.as_str())
+            .expect("safe baseline declares every pod");
+        alloc.enabled = true;
+        alloc.capital_weight = weight;
+        alloc.max_slippage_bps = Some(cap_bps);
+    }
+
+    fn intent_for(
+        pod_id: PodId,
+        venue: Venue,
+        order_type: OrderType,
+        expected_edge_bps: f64,
+        max_slippage_bps: u32,
+    ) -> OrderIntent {
+        OrderIntent {
+            pod_id,
+            symbol: "SOL-USDT".to_string(),
+            venue,
+            side: Side::Buy,
+            order_type,
+            reference_price: 150.0,
+            win_probability: 0.68,
+            reward_risk_ratio: 2.2,
+            asset_volatility_pct: 2.0,
+            expected_edge_bps,
+            max_slippage_bps,
+            requested_leverage: 1.0,
+            stop_loss_pct: 1.2,
+            take_profit_pct: 2.6,
+            token_safety: None,
+            rationale: "hurdle fixture".to_string(),
+        }
+    }
+
+    fn rejection_min_bps(result: Result<ApprovedOrder, RiskRejection>) -> f64 {
+        match result {
+            Err(RiskRejection::InsufficientEdge { min_bps, .. }) => min_bps,
+            other => panic!("expected InsufficientEdge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_cost_terms_match_the_execution_router_for_every_pair() {
+        let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
+        for venue in ALL_VENUES {
+            for order_type in ALL_ORDER_TYPES {
+                assert_eq!(
+                    fee_bps_for(venue, order_type),
+                    router.fee_bps_for(venue, order_type),
+                    "fee divergence for {venue:?}/{order_type:?}"
+                );
+
+                let approved = ApprovedOrder {
+                    intent: intent_for(PodId::PodCarry, venue, order_type, 12.0, 2),
+                    approved_notional_usd: 1_000.0,
+                    approved_quantity: 1_000.0 / 150.0,
+                    clamped_leverage: 1.0,
+                    mev_priority_tip_bps: 10,
+                };
+                assert_eq!(
+                    spread_bps_for(order_type, 10),
+                    router.slippage_bps_for(&approved),
+                    "spread divergence for {venue:?}/{order_type:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_hurdle_differentiates_venue_and_order_type() {
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        let portfolio = PortfolioState::new(10_000.0);
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let now_ms = 1_000_500;
+
+        let mut sniper_envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        enable_pod(&mut sniper_envelope, PodId::PodSniper, 0.10, 150);
+        let onchain = intent_for(
+            PodId::PodSniper,
+            Venue::OnchainAtomicPool,
+            OrderType::MevBundleAtomic,
+            12.0,
+            150,
+        );
+        match gate.validate(&onchain, &portfolio, &sniper_envelope, now_ms) {
+            Err(RiskRejection::InsufficientEdge { edge_bps, min_bps }) => {
+                assert_eq!(edge_bps, 12.0);
+                assert_eq!(min_bps, 177.2);
+            }
+            other => panic!("expected InsufficientEdge, got {other:?}"),
+        }
+
+        let maker = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            12.0,
+            2,
+        );
+        assert!(gate
+            .validate(&maker, &portfolio, &envelope, now_ms)
+            .is_ok());
+
+        let taker = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::Market,
+            12.0,
+            2,
+        );
+        match gate.validate(&taker, &portfolio, &envelope, now_ms) {
+            Err(RiskRejection::InsufficientEdge { edge_bps, min_bps }) => {
+                assert_eq!(edge_bps, 12.0);
+                assert_eq!(min_bps, 22.0);
+            }
+            other => panic!("expected InsufficientEdge, got {other:?}"),
+        }
+
+        let hyperliquid_maker = intent_for(
+            PodId::PodCarry,
+            Venue::HyperliquidPerp,
+            OrderType::PostOnlyMaker,
+            7.0,
+            2,
+        );
+        assert!(gate
+            .validate(&hyperliquid_maker, &portfolio, &envelope, now_ms)
+            .is_ok());
+
+        let binance_maker = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            7.0,
+            2,
+        );
+        match gate.validate(&binance_maker, &portfolio, &envelope, now_ms) {
+            Err(RiskRejection::InsufficientEdge { edge_bps, min_bps }) => {
+                assert_eq!(edge_bps, 7.0);
+                assert_eq!(min_bps, 8.1);
+            }
+            other => panic!("expected InsufficientEdge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_buffer_default_shift_and_sanitization() {
+        assert_eq!(RiskLimits::default().min_edge_buffer_bps, 2.0);
+
+        let portfolio = PortfolioState::new(10_000.0);
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let now_ms = 1_000_500;
+        let failing = intent_for(
+            PodId::PodCarry,
+            Venue::HyperliquidPerp,
+            OrderType::PostOnlyMaker,
+            1.0,
+            2,
+        );
+
+        let mut default_gate = HardRiskGate::new(RiskLimits::default());
+        let default_min = rejection_min_bps(default_gate.validate(
+            &failing,
+            &portfolio,
+            &envelope,
+            now_ms,
+        ));
+        assert_eq!(default_min, 6.5);
+
+        let mut shifted_limits = RiskLimits::default();
+        shifted_limits.min_edge_buffer_bps = 5.0;
+        let mut shifted_gate = HardRiskGate::new(shifted_limits);
+        let shifted_min = rejection_min_bps(shifted_gate.validate(
+            &failing,
+            &portfolio,
+            &envelope,
+            now_ms,
+        ));
+        assert_eq!(shifted_min, 9.5);
+        assert_eq!(shifted_min - default_min, 3.0);
+
+        let at_cost = intent_for(
+            PodId::PodCarry,
+            Venue::HyperliquidPerp,
+            OrderType::PostOnlyMaker,
+            4.5,
+            2,
+        );
+        let mut zero_limits = RiskLimits::default();
+        zero_limits.min_edge_buffer_bps = 0.0;
+        let mut zero_gate = HardRiskGate::new(zero_limits);
+        let zero_min =
+            rejection_min_bps(zero_gate.validate(&at_cost, &portfolio, &envelope, now_ms));
+        assert_eq!(zero_min, 4.5);
+
+        for buffer in [-5.0, f64::NAN] {
+            let mut limits = RiskLimits::default();
+            limits.min_edge_buffer_bps = buffer;
+            let mut gate = HardRiskGate::new(limits);
+            let sanitized_min =
+                rejection_min_bps(gate.validate(&at_cost, &portfolio, &envelope, now_ms));
+            assert_eq!(sanitized_min, 4.5, "buffer {buffer} must sanitize to 0.0");
+        }
+    }
+
+    #[test]
+    fn test_hurdle_boundary_is_strict() {
+        let portfolio = PortfolioState::new(10_000.0);
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let now_ms = 1_000_500;
+
+        for edge_bps in [4.4, 4.5, 6.5] {
+            let mut gate = HardRiskGate::new(RiskLimits::default());
+            let intent = intent_for(
+                PodId::PodCarry,
+                Venue::HyperliquidPerp,
+                OrderType::PostOnlyMaker,
+                edge_bps,
+                2,
+            );
+            assert!(
+                matches!(
+                    gate.validate(&intent, &portfolio, &envelope, now_ms),
+                    Err(RiskRejection::InsufficientEdge { .. })
+                ),
+                "edge {edge_bps} must be rejected at or below the hurdle"
+            );
+        }
+
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        let above = intent_for(
+            PodId::PodCarry,
+            Venue::HyperliquidPerp,
+            OrderType::PostOnlyMaker,
+            6.6,
+            2,
+        );
+        assert!(gate.validate(&above, &portfolio, &envelope, now_ms).is_ok());
+
+        let taker = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::Market,
+            12.0,
+            2,
+        );
+        match gate.validate(&taker, &portfolio, &envelope, now_ms) {
+            Err(RiskRejection::InsufficientEdge { edge_bps, min_bps }) => {
+                assert_eq!(edge_bps, 12.0);
+                assert_eq!(min_bps, 22.0);
+            }
+            other => panic!("expected InsufficientEdge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_safety_gates_precede_the_hurdle() {
+        let portfolio = PortfolioState::new(10_000.0);
+        let now_ms = 1_000_500;
+        let mut envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        enable_pod(&mut envelope, PodId::PodOnchainAlpha, 0.15, 80);
+
+        let mut scam = intent_for(
+            PodId::PodOnchainAlpha,
+            Venue::OnchainDexAggregator,
+            OrderType::MevBundleAtomic,
+            81.0,
+            65,
+        );
+        scam.symbol = "SCAM-SOL".to_string();
+        scam.token_safety = Some(OnChainTokenSafety {
+            supply_mint_immutable: false,
+            transfer_freeze_disabled: false,
+            no_honeypot_or_transfer_tax: false,
+            lp_locked_pct: 10.0,
+            top10_holder_pct: 82.0,
+            tx_simulation_success: true,
+        });
+
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        match gate.validate(&scam, &portfolio, &envelope, now_ms) {
+            Err(RiskRejection::OnChainRugCheckFailed { .. }) => {}
+            other => panic!("expected OnChainRugCheckFailed, got {other:?}"),
+        }
+
+        let mut without_safety = scam.clone();
+        without_safety.token_safety = None;
+        match gate.validate(&without_safety, &portfolio, &envelope, now_ms) {
+            Err(RiskRejection::InsufficientEdge { edge_bps, min_bps }) => {
+                assert_eq!(edge_bps, 81.0);
+                assert_eq!(min_bps, 87.8);
+            }
+            other => panic!("expected InsufficientEdge, got {other:?}"),
+        }
+
+        let carry_envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let slippage = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            1.0,
+            30,
+        );
+        match gate.validate(&slippage, &portfolio, &carry_envelope, now_ms) {
+            Err(RiskRejection::ExcessiveSlippage {
+                requested_bps,
+                max_bps,
+            }) => {
+                assert_eq!(requested_bps, 30);
+                assert_eq!(max_bps, 25);
+            }
+            other => panic!("expected ExcessiveSlippage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_non_regression_gates_keep_their_variants() {
+        let portfolio = PortfolioState::new(10_000.0);
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let now_ms = 1_000_500;
+        let hurdle_failing = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::Market,
+            1.0,
+            2,
+        );
+
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        gate.trigger_kill_switch("operator halt");
+        assert!(matches!(
+            gate.validate(&hurdle_failing, &portfolio, &envelope, now_ms),
+            Err(RiskRejection::KillSwitchActive { .. })
+        ));
+
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        let mut drawdown = PortfolioState::new(10_000.0);
+        drawdown.apply_pnl(-350.0);
+        assert!(matches!(
+            gate.validate(&hurdle_failing, &drawdown, &envelope, now_ms),
+            Err(RiskRejection::DailyDrawdownExceeded { .. })
+        ));
+        assert!(gate.kill_switch_active);
+
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        let sniper = intent_for(
+            PodId::PodSniper,
+            Venue::OnchainAtomicPool,
+            OrderType::MevBundleAtomic,
+            200.0,
+            100,
+        );
+        assert!(matches!(
+            gate.validate(&sniper, &portfolio, &envelope, now_ms),
+            Err(RiskRejection::PodDisabled { .. })
+        ));
+
+        let mut expired = PolicyEnvelope::safe_baseline(1_000_000);
+        expired.ttl_seconds = 900;
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        match gate.validate(&sniper, &portfolio, &expired, 1_900_001) {
+            Err(RiskRejection::PodDisabled { envelope_id, .. }) => {
+                assert_eq!(envelope_id, "safe_baseline_fallback");
+            }
+            other => panic!("expected PodDisabled, got {other:?}"),
+        }
+
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        let mut passing = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            12.0,
+            2,
+        );
+        passing.requested_leverage = 10.0;
+        let approved = gate
+            .validate(&passing, &portfolio, &envelope, now_ms)
+            .expect("a hurdle-passing intent must be approved");
+        assert_eq!(approved.clamped_leverage, 3.0);
+
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        let mut zero_kelly = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            12.0,
+            2,
+        );
+        zero_kelly.win_probability = 0.01;
+        zero_kelly.reward_risk_ratio = 0.1;
+        assert!(matches!(
+            gate.validate(&zero_kelly, &portfolio, &envelope, now_ms),
+            Err(RiskRejection::ZeroPositionSize)
+        ));
+
+        let gate = HardRiskGate::new(RiskLimits::default());
+        assert_eq!(
+            gate.validate_inference_refill(10.0, 1.20, 2.00, 5.0, 25.0),
+            Ok(10.0)
+        );
+        assert!(matches!(
+            gate.validate_inference_refill(10.0, 4.50, 2.00, 5.0, 25.0),
+            Err(RiskRejection::InferenceRefillRejected { .. })
+        ));
+    }
+
+    #[test]
+    fn test_nan_edge_fails_closed() {
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        let portfolio = PortfolioState::new(10_000.0);
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let intent = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            f64::NAN,
+            2,
+        );
+        assert!(matches!(
+            gate.validate(&intent, &portfolio, &envelope, 1_000_500),
+            Err(RiskRejection::InsufficientEdge { .. })
         ));
     }
 
