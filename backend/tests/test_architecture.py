@@ -86,18 +86,30 @@ class TestHybridArchitectureV2(unittest.TestCase):
         # execution-cost hurdle and SCAM-SOL still fails the anti-rug gate.
         self.assertEqual(bt_full["total_trades"], 4)
         self.assertEqual(bt_full["rejected_orders"], 3)
-        self.assertGreater(bt_full["net_profit_usd"], 0.0)
+        self.assertEqual(bt_full["artifact_kind"], "policy_sanity_check")
+        self.assertEqual(bt_full["source"], "FIXTURE")
+        self.assertIs(bt_full["fill_simulation"], False)
+        # Plumbing invariant, not a performance target or evidence of edge:
+        # per-pod attribution is the accounting view of net profit.
+        self.assertAlmostEqual(
+            sum(bt_full["pod_pnl_attribution"].values()),
+            bt_full["net_profit_usd"],
+            places=9,
+        )
 
         # 2. Defensive Carry regime (only Pod 1 & Pod 2 enabled)
         resp_def = self.orchestrator.process_user_command("switch to defensive carry")
         bt_def = resp_def["backtest"]
         self.assertEqual(bt_def["total_trades"], 4)  # Pods 3 & 4 disabled -> 0 Solana meme trades
+        self.assertEqual(bt_def["artifact_kind"], "policy_sanity_check")
 
         # 3. Hard Kill-Switch lockdown -> 0 trades executed in Rust engine
         resp_kill = self.orchestrator.process_user_command("activate kill switch")
         self.assertEqual(resp_kill["action"], "KILL_SWITCH_ACTIVATED")
         bt_kill = self.store.run_rust_backtest()
         self.assertEqual(bt_kill["total_trades"], 0)
+        self.assertEqual(bt_kill["artifact_kind"], "policy_sanity_check")
+        self.assertIs(bt_kill["fill_simulation"], False)
 
     def test_pro_ta_engine_and_budget_driven_cognitive_depth(self) -> None:
         from backend.tools.ta_tools import TechnicalAnalysisTool

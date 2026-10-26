@@ -21,6 +21,37 @@ TESTNET_SOURCE_DETAIL = (
     "binance spot testnet + solana devnet wallet and order telemetry, refreshed by the live worker"
 )
 
+# Canonical human/machine description of the deterministic artefact. The
+# fixture exercises the pod trait, the risk gate, and the anti-rug path; it is
+# not a fill simulation and its PnL is declared-edge arithmetic.
+FIXTURE_SOURCE_DETAIL = (
+    "deterministic policy sanity check on a synthetic fixture; not a fill simulation"
+)
+
+
+def canonical_fixture_kind(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Stamp and validate the fixture honesty contract in place.
+
+    The Rust node already emits the three fields. A legacy or mocked summary
+    that omits them is still the same deterministic fixture, so the canonical
+    values are filled rather than served as null. An explicit conflicting kind,
+    source, or fill flag fails closed: a different artefact must never be
+    relabelled as this one.
+    """
+    kind = result.get("artifact_kind")
+    if kind is not None and kind != provenance.ARTIFACT_KIND_POLICY_SANITY_CHECK:
+        raise ValueError(f"unexpected fixture artifact_kind: {kind!r}")
+    source = result.get("source")
+    if source is not None and source != provenance.METRIC_SOURCES[2]:
+        raise ValueError(f"unexpected fixture source: {source!r}")
+    fill_simulation = result.get("fill_simulation")
+    if fill_simulation is not None and fill_simulation is not False:
+        raise ValueError(f"unexpected fill_simulation: {fill_simulation!r}")
+    result["artifact_kind"] = provenance.ARTIFACT_KIND_POLICY_SANITY_CHECK
+    result["source"] = provenance.METRIC_SOURCES[2]
+    result["fill_simulation"] = False
+    return result
+
 
 def _redis_cmd(redis_url: str, *args: str) -> Optional[str]:
     """Minimal zero-dependency RESP client for persisting state to Redis."""
@@ -791,13 +822,18 @@ class HybridStateStore:
     def run_rust_backtest(self, policy: Optional[PolicyEnvelope] = None) -> Dict[str, Any]:
         """
         Invokes the compiled Rust `robotrader-node` binary with the active PolicyEnvelope
-        to run a deterministic multi-pod backtest & anti-rug verification.
+        to run the deterministic policy sanity check fixture and its anti-rug
+        verification.
 
-        Returns the **fixture** summary exactly as the Rust engine computed it. Live
-        testnet executions and paper-model PnL are deliberately NOT merged here: doing so
-        used to add `len(live_executions)` to `total_trades` while leaving `win_rate_pct`
-        from the fixture, so the displayed ratio had a fixture numerator and a live
-        denominator. Callers that want the live populations use `get_population_metrics`.
+        Returns the **policy sanity check** summary (`artifact_kind:
+        policy_sanity_check`, `source: FIXTURE`, `fill_simulation: false`) as the
+        Rust engine computed it. Its PnL is declared-edge arithmetic, not a fill
+        simulation or a measured market result. Live testnet executions and
+        paper-model PnL are deliberately NOT merged here: doing so used to add
+        `len(live_executions)` to `total_trades` while leaving `win_rate_pct` from
+        the fixture, so the displayed ratio had a fixture numerator and a live
+        denominator. Callers that want the live populations use
+        `get_population_metrics`.
         """
         effective_policy = policy or self.get_effective_policy()
         repo_root = Path(__file__).resolve().parents[2]
@@ -817,9 +853,9 @@ class HybridStateStore:
             timeout=30,
         )
         result: Dict[str, Any] = json.loads(proc.stdout)
+        canonical_fixture_kind(result)
         result["executions_source"] = "backtest_fixture"
-        result["source"] = provenance.METRIC_SOURCES[2]  # FIXTURE
-        result["source_detail"] = "engine-rs deterministic replay (synthetic scenario)"
+        result["source_detail"] = FIXTURE_SOURCE_DETAIL
 
         with self._lock:
             self.last_backtest_result = result
@@ -827,8 +863,12 @@ class HybridStateStore:
 
     def run_rust_backtest_for_leaf(self, leaf_id: str) -> Dict[str, Any]:
         """
-        Executes the deterministic Rust `BacktestEngine` (`robotrader-node --leaf-id <leaf_id>`)
-        using the target blockchain's adapted Rust Strategy Pods (1..=4 pods max).
+        Executes the deterministic Rust policy sanity check fixture
+        (`robotrader-node --leaf-id <leaf_id>`) using the target blockchain's
+        adapted Rust Strategy Pods (1..=4 pods max).
+
+        The artefact is a rule and plumbing check: its PnL is declared-edge
+        arithmetic, not a fill simulation.
         """
         if leaf_id == "leaf-solana":
             return self.run_rust_backtest()
@@ -850,21 +890,21 @@ class HybridStateStore:
         result: Dict[str, Any] = json.loads(proc.stdout)
         # A per-leaf replay is the deterministic fixture population run for one
         # leaf; it is not a fourth population token.
+        canonical_fixture_kind(result)
         result["executions_source"] = "backtest_fixture"
-        result["source"] = provenance.METRIC_SOURCES[2]  # FIXTURE
-        result["source_detail"] = (
-            "engine-rs deterministic leaf replay (robotrader-node --leaf-id)"
-        )
+        result["source_detail"] = FIXTURE_SOURCE_DETAIL
 
         if leaf_id in self.hierarchy.leaves:
             with self.hierarchy._lock:
                 self.hierarchy.leaves[leaf_id]["last_rust_backtest"] = {
+                    "artifact_kind": result["artifact_kind"],
+                    "source": result["source"],
+                    "fill_simulation": result["fill_simulation"],
                     "net_profit_usd": round(float(result.get("net_profit_usd", 0.0)), 2),
                     "sharpe_ratio": round(float(result.get("sharpe_ratio", 0.0)), 2),
                     "win_rate_pct": round(float(result.get("win_rate_pct", 0.0)), 1),
                     "total_trades": int(result.get("total_trades", 0)),
                     "pod_pnl_attribution": dict(result.get("pod_pnl_attribution", {})),
-                    "source": result["source"],
                     "source_detail": result["source_detail"],
                 }
         return result
@@ -922,7 +962,10 @@ class HybridStateStore:
         Three performance populations, each measured on its own PnL column and never
         mixed:
 
-        - `backtest_fixture`  : the deterministic `engine-rs` replay (synthetic scenario).
+        - `backtest_fixture`  : the deterministic policy sanity check fixture
+                                (`policy_sanity_check` / `FIXTURE`); declared-edge
+                                arithmetic on a synthetic scenario, not a fill
+                                simulation and not a measured market result.
         - `paper_model`       : cumulative PnL of the paper simulation (`simulated_pnl_usd`).
         - `live_testnet`      : what the testnet/devnet orders actually realised
                                 (`realized_pnl_usd`).
@@ -962,8 +1005,10 @@ class HybridStateStore:
 
         return {
             "backtest_fixture": {
+                "artifact_kind": provenance.ARTIFACT_KIND_POLICY_SANITY_CHECK,
                 "source": provenance.METRIC_SOURCES[2],  # FIXTURE
-                "source_detail": "engine-rs deterministic replay (synthetic scenario)",
+                "fill_simulation": False,
+                "source_detail": FIXTURE_SOURCE_DETAIL,
                 "initial_equity_usd": initial,
                 "final_equity_usd": round(float(bt.get("final_equity_usd", initial)), 2),
                 "cumulative_pnl_usd": round(float(bt.get("net_profit_usd", 0.0)), 2),

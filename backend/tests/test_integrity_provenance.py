@@ -209,9 +209,13 @@ class PopulationProvenanceTests(unittest.TestCase):
         self.assertEqual(populations["backtest_fixture"]["source"], "FIXTURE")
         self.assertEqual(populations["paper_model"]["source"], "SIMULATED")
         self.assertEqual(populations["live_testnet"]["source"], "MEASURED")
+        fixture = populations["backtest_fixture"]
+        self.assertEqual(fixture["artifact_kind"], "policy_sanity_check")
+        self.assertIs(fixture["fill_simulation"], False)
         self.assertEqual(
-            populations["backtest_fixture"]["source_detail"],
-            "engine-rs deterministic replay (synthetic scenario)",
+            fixture["source_detail"],
+            "deterministic policy sanity check on a synthetic fixture; "
+            "not a fill simulation",
         )
         self.assertIn(
             "L2 slippage", populations["paper_model"]["source_detail"]
@@ -231,19 +235,23 @@ class PopulationProvenanceTests(unittest.TestCase):
         self.assertAlmostEqual(two["sharpe_ratio"], 1.4142, places=4)
 
     def test_both_backtest_branches_are_labelled(self) -> None:
+        detail = "deterministic policy sanity check on a synthetic fixture; not a fill simulation"
         solana = self.store.run_rust_backtest_for_leaf("leaf-solana")
+        self.assertEqual(solana["artifact_kind"], "policy_sanity_check")
         self.assertEqual(solana["source"], "FIXTURE")
+        self.assertIs(solana["fill_simulation"], False)
         self.assertEqual(solana["executions_source"], "backtest_fixture")
 
         btc = self.store.run_rust_backtest_for_leaf("leaf-bitcoin")
+        self.assertEqual(btc["artifact_kind"], "policy_sanity_check")
         self.assertEqual(btc["source"], "FIXTURE")
+        self.assertIs(btc["fill_simulation"], False)
         self.assertEqual(btc["executions_source"], "backtest_fixture")
-        self.assertEqual(
-            btc["source_detail"],
-            "engine-rs deterministic leaf replay (robotrader-node --leaf-id)",
-        )
+        self.assertEqual(btc["source_detail"], detail)
         stored = self.store.hierarchy.leaves["leaf-bitcoin"]["last_rust_backtest"]
+        self.assertEqual(stored["artifact_kind"], "policy_sanity_check")
         self.assertEqual(stored["source"], "FIXTURE")
+        self.assertIs(stored["fill_simulation"], False)
         self.assertEqual(stored["source_detail"], btc["source_detail"])
 
     def test_testnet_telemetry_is_measured_and_drops_mixed_fields(self) -> None:
@@ -269,9 +277,13 @@ class PopulationProvenanceTests(unittest.TestCase):
                 ledger_path=Path(tmp) / "transcript_ledger.jsonl",
             ).quant_auditor
         result = auditor.audit_latest_backtest()
+        self.assertEqual(result["artifact_kind"], "policy_sanity_check")
         self.assertEqual(result["source"], "FIXTURE")
-        self.assertIn("deterministic", result["source_detail"])
-        self.assertTrue(result["verdict"].startswith("FIXTURE_"))
+        self.assertIs(result["fill_simulation"], False)
+        self.assertIn("policy sanity check", result["source_detail"])
+        self.assertIn("not a fill simulation", result["source_detail"])
+        self.assertEqual(result["verdict"], "POLICY_SANITY_CHECK_COMPLETE")
+        self.assertIn("no strategy edge or health claim", result["verdict_detail"])
 
 
 class LeafPerformanceTests(unittest.TestCase):
@@ -388,6 +400,11 @@ class HierarchyProvenanceTests(unittest.TestCase):
                 "performance": {
                     "live_testnet": {"realized_pnl_usd": None, "source": "MEASURED"},
                     "paper_model": {"paper_pnl_usd": 100.0, "source": "SIMULATED"},
+                    "backtest_fixture": {
+                        "cumulative_pnl_usd": 25.66,
+                        "source": "FIXTURE",
+                        "artifact_kind": "policy_sanity_check",
+                    },
                 }
             },
         }
@@ -920,6 +937,9 @@ from backend.core.state_store import HybridStateStore
 from backend.agents.orchestrator import OrchestratorAgent
 
 FIXTURE_SUMMARY = {
+    "artifact_kind": "policy_sanity_check",
+    "source": "FIXTURE",
+    "fill_simulation": False,
     "initial_equity_usd": 10000.0,
     "final_equity_usd": 10025.66,
     "net_profit_usd": 25.66,
@@ -962,8 +982,10 @@ backtest = mock.patch.object(
     side_effect=lambda *args, **kwargs: dict(
         FIXTURE_SUMMARY,
         executions_source="backtest_fixture",
-        source="FIXTURE",
-        source_detail="engine-rs deterministic replay (synthetic scenario)",
+        source_detail=(
+            "deterministic policy sanity check on a synthetic fixture; "
+            "not a fill simulation"
+        ),
     ),
 )
 backtest.start()
@@ -997,7 +1019,14 @@ if scenario == "status":
     assert payload["contract_version"] == 3, payload.get("contract_version")
     assert payload["cost_guard"]["total_spent_usd"] == 0.0, payload["cost_guard"]
     engine = payload["engine_metrics"]
-    assert engine["backtest_fixture"]["source"] == "FIXTURE"
+    fixture = engine["backtest_fixture"]
+    assert fixture["artifact_kind"] == "policy_sanity_check"
+    assert fixture["source"] == "FIXTURE"
+    assert fixture["fill_simulation"] is False
+    assert fixture["source_detail"] == (
+        "deterministic policy sanity check on a synthetic fixture; "
+        "not a fill simulation"
+    )
     assert engine["paper_model"]["source"] == "SIMULATED"
     assert engine["live_testnet"]["source"] == "MEASURED"
     assert engine["executions_source"] == "live_testnet"
@@ -1031,6 +1060,9 @@ elif scenario == "fixture-rows":
     assert engine["executions_source"] == "backtest_fixture"
     assert engine["executions"]
     assert all(row["source"] == "FIXTURE" for row in engine["executions"])
+    fixture = engine["backtest_fixture"]
+    assert fixture["artifact_kind"] == "policy_sanity_check"
+    assert fixture["fill_simulation"] is False
 elif scenario == "leaf-endpoints":
     populations = {
         "live_testnet": {
@@ -1082,7 +1114,9 @@ elif scenario == "leaf-solana-backtest":
         response = client.post("/api/v1/leaf/leaf-solana/backtest")
     assert response.status_code == 200, response.text
     summary = response.json()["summary"]
+    assert summary["artifact_kind"] == "policy_sanity_check"
     assert summary["source"] == "FIXTURE"
+    assert summary["fill_simulation"] is False
     assert summary["executions_source"] == "backtest_fixture"
 else:
     raise SystemExit(f"unknown scenario: {scenario}")

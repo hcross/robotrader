@@ -39,7 +39,9 @@ class CatalystScoutAgent(BaseWarmAgent):
 class QuantAuditorAgent(BaseWarmAgent):
     """
     Warm-Path Post-Mortem & Drift Auditor.
-    Audits deterministic Rust execution telemetry (slippage, fee drag, Sharpe, rug rejections).
+    Audits the deterministic Rust policy sanity check fixture (slippage, fee
+    drag, rug rejections). It reports plumbing outcomes only and never claims a
+    strategy edge, health, or measured performance from the fixture.
     """
 
     def __init__(self, name: str = "QuantAuditor", store: Optional[HybridStateStore] = None):
@@ -61,8 +63,13 @@ class QuantAuditorAgent(BaseWarmAgent):
         )
         return {
             "auditor": self.agent_name,
+            "artifact_kind": provenance.ARTIFACT_KIND_POLICY_SANITY_CHECK,
             "source": provenance.METRIC_SOURCES[2],  # FIXTURE
-            "source_detail": "engine-rs deterministic replay (robotrader-node backtest)",
+            "fill_simulation": False,
+            "source_detail": (
+                "deterministic policy sanity check on a synthetic fixture; "
+                "not a fill simulation"
+            ),
             "total_trades": bt.get("total_trades", 0),
             "rejected_rug_orders": bt.get("rejected_orders", 0),
             "net_profit_usd": round(float(bt.get("net_profit_usd", 0.0)), 2),
@@ -70,10 +77,9 @@ class QuantAuditorAgent(BaseWarmAgent):
             "avg_slippage_bps": round(avg_slippage_bps, 2),
             "total_fees_usd": round(float(bt.get("total_fees_usd", 0.0)), 2),
             "pod_pnl_attribution": bt.get("pod_pnl_attribution", {}),
-            "verdict": (
-                "FIXTURE_HEALTHY_EDGE"
-                if float(bt.get("sharpe_ratio", 0.0)) >= 1.5
-                else "FIXTURE_REVIEW_REQUIRED"
+            "verdict": "POLICY_SANITY_CHECK_COMPLETE",
+            "verdict_detail": (
+                "rule and plumbing check only; no strategy edge or health claim"
             ),
         }
 

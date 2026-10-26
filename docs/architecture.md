@@ -12,7 +12,7 @@ Robotrader v2 separates **deterministic low-latency execution** from **asynchron
 
 1. **Zero LLM in the Hot Path**: Market data ingestion, orderbook state, quantitative signal calculation, pre-trade risk enforcement, and order routing execute deterministically in **Rust (`engine-rs`)** in `<1ms`.
 2. **AI as Warm-Path Meta-Controller**: Python AI agents (`backend/`) ingest unstructured real-time catalysts (listings, macro events, governance, whale clusters), classify market regimes, and publish TTL-bounded **`PolicyEnvelope`** states to Redis.
-3. **Zero Code Drift (`Backtest == Paper == Live`)**: Strategy pods implement a unified Rust trait (`StrategyPod`) that processes identical `MarketEvent` streams whether replaying historical Parquet/DuckDB ticks, paper-trading live WebSockets, or executing with real capital.
+3. **Single Strategy Code Path (`Backtest == Paper == Live`, intended target)**: Strategy pods implement a unified Rust trait (`StrategyPod`) that processes `MarketEvent` streams on one deterministic path. This is an architectural target, not a demonstrated property: the current `backtest` artefact is a deterministic **policy sanity check** fixture (`policy_sanity_check`, `FIXTURE`, `fill_simulation: false`), not a historical fill simulation. It has no L2 replay, historical ingest, queue position, latency, fill probability, partial fill, adverse selection, or later-market-event exit pricing; the real event-driven simulator remains issue #3.
 4. **Synchronous Hard Risk Firewall**: No order reaches an exchange or Solana RPC without passing through `HardRiskGate`, which enforces fractional Kelly sizing, daily drawdown kill-switches, a per-intent execution-cost hurdle (round-trip fee + spread + declared impact + configurable buffer), and on-chain token safety checks.
 
 ---
@@ -36,7 +36,7 @@ flowchart TB
 
     subgraph Bus["Low-Latency IPC & Persistence"]
         Redis[("Redis 7 (Streams: Events/Fills | KV: TTL PolicyEnvelope)")]
-        Storage[("DuckDB / Parquet (Historical Ticks, Candles & Trade Ledger)")]
+        Storage[("DuckDB / Parquet (historical replay target — not implemented; issue #3)")]
     end
 
     subgraph HotPath["Hot Path Execution & Replay Engine (Rust / Tokio Workspace)"]
@@ -51,7 +51,7 @@ flowchart TB
 
         Risk["HardRiskGate (measured 0.244µs: Drawdown Kill-Switch, Cost-Aware Edge Hurdle, Kelly Sizing, OnChainTokenSafety, SimulatedVault (SIMULATED))"]
         Exec["Smart Execution Router (Post-Only CEX Maker / OnchainDexAggregator + MevBundleAtomic)"]
-        Replay["Deterministic Backtest & Walk-Forward Runner"]
+        Replay["Deterministic Policy Sanity Check Fixture (not a fill simulator; real replay: issue #3)"]
     end
 
     subgraph Venues["External Venues & Networks"]
@@ -94,7 +94,7 @@ flowchart TB
 │   │   ├── risk-gate/          # Synchronous HardRiskGate, Kelly sizer, Drawdown kill-switch, Rug filter
 │   │   ├── strategies/         # StrategyPod trait + Pod 1 (Carry), Pod 2 (Momentum), Pod 3 (Solana), Pod 4 (Sniper)
 │   │   ├── exec-router/        # Post-only CEX router, Jupiter v6 client, Jito bundle signer, Paper simulator
-│   │   ├── backtest/           # Historical Parquet/DuckDB replay engine & performance metrics (Sharpe/Sortino/DD)
+│   │   ├── backtest/           # Deterministic policy sanity check fixture (not a fill simulation; real Parquet/DuckDB replay in issue #3)
 │   │   └── node/               # Main hot-path binary connecting Ingest -> Pods -> Risk -> Exec <-> Redis
 ├── backend/                    # Python Warm-Path AI Meta-Controller & Control Plane (Poetry)
 │   ├── core/                   # Redis IPC client, Pydantic schemas (matching engine-rs/common), LLM router
@@ -137,6 +137,10 @@ flowchart TB
    - Supports four exact `ROBOTRADER_EXECUTION_MODE` values: `BACKTEST`, `PAPER` (default when unset; live market data with simulated fills/fees/slippage), `SIMULATED`, and `LIVE`. An empty or unknown value fails closed; `LIVE` still exports a `SIMULATED` vault and claims no real custody.
    - **CEX Optimization**: Uses `Post-Only` limit orders at best bid/ask with micro-repricing to capture maker rebates or low maker fees instead of paying 5–10 bps taker fees.
    - **Solana Optimization**: Quotes via Jupiter v6 and submits transactions wrapped in **Jito bundles** (`sendBundle`) so failed or front-run transactions cost zero base gas if they revert.
+5. **`crates/backtest` (Policy sanity check fixture)**:
+   - Runs a deterministic synthetic event stream through the real `StrategyPod` trait and `HardRiskGate` to prove rule and plumbing wiring, including the SCAM-SOL anti-rug rejection and the cost hurdle.
+   - Emits `artifact_kind: policy_sanity_check`, `source: FIXTURE`, and `fill_simulation: false`. Its PnL is declared-edge arithmetic (`notional × (expected_edge_bps − modelled round-trip fees − modelled spread)`), not a market-derived or realized result.
+   - It is **not** a fill simulation: no historical/L2 ingest, queue position, latency, fill probability, partial fill, adverse selection, or later-`MarketEvent` exit pricing. The real replay engine remains issue #3.
 
 ### 4.2. Python Warm-Path AI Layer (`backend/`)
 

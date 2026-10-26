@@ -4,6 +4,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  ARTIFACT_KIND_POLICY_SANITY_CHECK,
+  POLICY_SANITY_CHECK_LABEL,
   badgeFor,
   formatMetric,
   formatOperational,
@@ -55,7 +57,19 @@ for (const name of ['MasterOverview', 'LeafAgentView', 'Dashboard']) {
   );
 }
 
+// --- Fixture artefact labels ----------------------------------------------
+assert.equal(ARTIFACT_KIND_POLICY_SANITY_CHECK, 'policy_sanity_check');
+assert.equal(POLICY_SANITY_CHECK_LABEL, 'Policy sanity check');
+for (const name of ['Dashboard', 'LeafAgentView']) {
+  assert.match(
+    sources[name],
+    /POLICY_SANITY_CHECK_LABEL/,
+    `${name} must render the shared policy sanity check label`
+  );
+}
+
 const forbidden = [
+  'Fixture Backtest Rust',
   'realized_pnl_usd || 0',
   'sharpe_ratio || 0',
   'win_rate_pct || 0',

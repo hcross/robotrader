@@ -105,6 +105,15 @@ class OpenRouterRefillRequest(BaseModel):
 
 @app.get("/api/v1/status")
 def get_system_status() -> Dict[str, Any]:
+    """
+    Full control-plane snapshot.
+
+    `engine_metrics.backtest_fixture` is the deterministic policy sanity check
+    fixture (`policy_sanity_check` / `FIXTURE` / `fill_simulation: false`). Its
+    PnL and Sharpe are declared-edge arithmetic on a synthetic scenario, not a
+    fill simulation and not measured performance. `engine_metrics.live_testnet`
+    is the only measured population.
+    """
     bt = state_store.run_rust_backtest()
     populations = state_store.get_population_metrics(bt)
     live_window = list(state_store.live_executions[:200])
@@ -161,6 +170,11 @@ def get_system_status() -> Dict[str, Any]:
 
 @app.get("/api/v1/hierarchy")
 def get_hierarchy_status() -> Dict[str, Any]:
+    """
+    Master/leaf hierarchy snapshot. Any `leaf.last_rust_backtest` block is the
+    deterministic policy sanity check fixture (`policy_sanity_check` /
+    `FIXTURE` / `fill_simulation: false`), not a measured backtest result.
+    """
     bt = state_store.run_rust_backtest()
     populations = state_store.get_population_metrics(bt)
     cost_status = orchestrator.cost_guard.get_status()
@@ -269,8 +283,12 @@ def liquidate_leaf_positions(leaf_id: str, req: LeafLiquidateRequest) -> Dict[st
 @app.post("/api/v1/leaf/{leaf_id}/backtest")
 def run_leaf_rust_backtest(leaf_id: str) -> Dict[str, Any]:
     """
-    Runs the Rust `engine-rs` execution & backtest engine on the target blockchain's
-    adapted Strategy Pods (max 4 pods per blockchain).
+    Runs the deterministic policy sanity check fixture on the target
+    blockchain's adapted Strategy Pods (max 4 pods per blockchain).
+
+    The returned summary carries `artifact_kind: policy_sanity_check`, `source:
+    FIXTURE`, and `fill_simulation: false`. It is a rule and plumbing check, not
+    a fill simulation, and its PnL is declared-edge arithmetic.
     """
     bt = state_store.run_rust_backtest_for_leaf(leaf_id)
     return {
@@ -346,6 +364,11 @@ def toggle_cognitive_scheduler(req: SchedulerToggleRequest) -> Dict[str, Any]:
 
 @app.post("/api/v1/backtest/run")
 def run_backtest() -> Dict[str, Any]:
+    """
+    Runs the deterministic policy sanity check fixture and returns its summary
+    (`policy_sanity_check` / `FIXTURE` / `fill_simulation: false`). The legacy
+    route name is an identifier; the artefact is not a fill simulation.
+    """
     bt = state_store.run_rust_backtest()
     return {
         "status": "completed",
@@ -356,6 +379,11 @@ def run_backtest() -> Dict[str, Any]:
 
 @app.post("/api/v1/policy/regime")
 def set_regime(req: RegimeRequest) -> Dict[str, Any]:
+    """
+    Applies a regime preset and returns its `backtest_summary`, which is the
+    deterministic policy sanity check fixture (`policy_sanity_check` /
+    `FIXTURE` / `fill_simulation: false`), not a measured backtest result.
+    """
     # Build the envelope without committing it: the preset becomes the effective
     # policy only after the backtest succeeds, so a missing binary leaves the
     # previous envelope in force.
@@ -371,6 +399,11 @@ def set_regime(req: RegimeRequest) -> Dict[str, Any]:
 
 @app.post("/api/v1/risk/kill")
 def toggle_kill_switch(req: KillSwitchRequest) -> Dict[str, Any]:
+    """
+    Toggles the kill switch and returns a fresh `backtest_summary`. That summary
+    is the deterministic policy sanity check fixture (`policy_sanity_check` /
+    `FIXTURE` / `fill_simulation: false`), not a measured backtest result.
+    """
     state = state_store.set_kill_switch(req.active, req.reason)
     bt = state_store.run_rust_backtest()
     return {
