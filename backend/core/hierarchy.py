@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import subprocess
 import threading
@@ -1062,58 +1060,101 @@ class HierarchicalFleetManager:
 
     def _load_rust_vault_manifest(self) -> Dict[str, Any]:
         """
-        Queries `robotrader-node --vault-manifest` in `engine-rs` to retrieve the public-only
-        BIP-32 / BIP-44 / SLIP-0010 wallet descriptors for all 26 blockchains.
-        Private keys never leave the `ZeroizingBytes` buffer inside Rust.
-        """
-        for candidate in self._rust_binary_candidates():
-            if candidate.exists():
-                try:
-                    proc = subprocess.run(
-                        [str(candidate), "--vault-manifest"],
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                        check=True,
-                    )
-                    parsed = json.loads(proc.stdout)
-                    if isinstance(parsed, dict) and parsed.get("wallets"):
-                        return parsed
-                except Exception:
-                    pass
+        Queries `robotrader-node --vault-manifest` in `engine-rs` for the public
+        `SIMULATED` manifest. The manifest describes non-spendable addresses and
+        target metadata only; Python never fabricates or substitutes values.
 
-        # Deterministic public-only fallback if binary is not built yet
-        wallets = []
-        for spec in LEAF_ECOSYSTEM_CATALOG:
-            lid = spec["leaf_id"]
-            h_m = hashlib.sha256(f"master:{lid}".encode()).hexdigest()
-            h_l = hashlib.sha256(f"leaf:{lid}".encode()).hexdigest()
-            wallets.append(
-                {
-                    "leaf_id": lid,
-                    "chain": spec["chain"],
-                    "symbol": spec["symbol"],
-                    "curve": "ED25519_SLIP0010" if lid in ("leaf-solana", "leaf-sui", "leaf-aptos", "leaf-ton", "leaf-near", "leaf-icp", "leaf-tezos") else "SECP256K1_ECDSA_BIP44",
-                    "slip44_coin_type": 501 if lid == "leaf-solana" else 60,
-                    "master_derivation_path": "m/44'/501'/0'/0/0" if lid == "leaf-solana" else "m/44'/60'/0'/0/0",
-                    "leaf_derivation_path": "m/44'/501'/1'/0/0" if lid == "leaf-solana" else "m/44'/60'/1'/0/0",
-                    "master_treasury_address": f"0x{h_m[:40]}",
-                    "leaf_hot_address": f"0x{h_l[:40]}",
-                    "key_fingerprint": f"fp-{h_l[:8]}",
-                    "key_isolation_mode": "RUST_ENCLAVE_HD_ZEROIZE (Private Key Never Enters Python)",
-                    "withdrawal_whitelist_enforced": True,
-                }
-            )
-        return {
-            "enclave_version": "robotrader-vault-enclave/v3.0",
-            "vault_mode": "DEVNET_DETERMINISTIC_ENCLAVE",
-            "master_seed_fingerprint": "vault-fp-c502227ea219",
-            "zeroize_on_drop": True,
-            "python_private_key_access": False,
-            "operator_whitelist_count": 17,
-            "canonical_bridge_contracts_count": 6,
-            "wallets": wallets,
-        }
+        Every failure (absent binary, timeout, non-zero exit, unparsable output,
+        or a stale non-`SIMULATED` contract) yields an empty mapping and a short
+        ``vault_manifest_error``; the loader never raises.
+        """
+        self.vault_manifest_error: Optional[str] = None
+        for candidate in self._rust_binary_candidates():
+            if not candidate.exists():
+                continue
+            try:
+                proc = subprocess.run(
+                    [str(candidate), "--vault-manifest"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+            except subprocess.TimeoutExpired:
+                self.vault_manifest_error = "timeout"
+                continue
+            except Exception:
+                self.vault_manifest_error = "unavailable"
+                continue
+
+            if proc.returncode != 0:
+                self.vault_manifest_error = "non_zero_exit"
+                continue
+
+            try:
+                parsed = json.loads(proc.stdout)
+            except Exception:
+                self.vault_manifest_error = "unparsable"
+                continue
+
+            if self._is_valid_simulated_manifest(parsed):
+                self.vault_manifest_error = None
+                return parsed
+            self.vault_manifest_error = "invalid_contract"
+
+        if self.vault_manifest_error is None:
+            self.vault_manifest_error = "unavailable"
+        return {}
+
+    @staticmethod
+    def _is_valid_simulated_manifest(parsed: Any) -> bool:
+        """Accept only the honest simulated contract; a stale manifest is unavailable."""
+        if not isinstance(parsed, dict):
+            return False
+        if parsed.get("vault_mode") != "SIMULATED" or parsed.get("simulated") is not True:
+            return False
+        wallets = parsed.get("wallets")
+        if not isinstance(wallets, list) or not wallets:
+            return False
+        return all(
+            isinstance(wallet, dict)
+            and wallet.get("simulated") is True
+            and wallet.get("address_is_spendable") is False
+            for wallet in wallets
+        )
+
+    @staticmethod
+    def _is_valid_simulated_receipt(
+        receipt: Any,
+        leaf_id_or_chain: str,
+        destination_address: str,
+        amount_usd: float,
+    ) -> bool:
+        """Validate the simulated receipt before any checkout mutation."""
+        if not isinstance(receipt, dict):
+            return False
+        if receipt.get("simulated") is not True:
+            return False
+        if receipt.get("signature_is_chain_valid") is not False:
+            return False
+        if receipt.get("whitelist_enforcement") != "SIMULATED":
+            return False
+        if receipt.get("destination_whitelisted") is not True:
+            return False
+        signature = receipt.get("signature_hex")
+        if not isinstance(signature, str) or not signature.strip():
+            return False
+        requested = str(leaf_id_or_chain).lower()
+        leaf_id = str(receipt.get("leaf_id", "")).lower()
+        chain = str(receipt.get("chain", "")).lower()
+        if requested not in (leaf_id, chain):
+            return False
+        if receipt.get("destination_address") != destination_address:
+            return False
+        try:
+            receipt_amount = float(receipt.get("amount_usd"))
+        except (TypeError, ValueError):
+            return False
+        return abs(receipt_amount - float(amount_usd)) <= 0.01
 
     def sign_transfer_in_rust_enclave(
         self,
@@ -1122,62 +1163,64 @@ class HierarchicalFleetManager:
         amount_usd: float,
         token: str,
         kill_switch_active: bool = False,
+        kill_switch_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Delegates transfer validation & cryptographic signing to `robotrader-node --sign-transfer`
-        so private keys are derived and immediately zeroized inside Rust.
+        Delegates transfer validation and simulated receipt generation to
+        `robotrader-node --sign-transfer`. No Python HMAC or local signing
+        primitive is used; every failure carries no receipt fields.
         """
-        for candidate in self._rust_binary_candidates():
-            if candidate.exists():
-                cmd = [
-                    str(candidate),
-                    "--sign-transfer",
-                    "--leaf-id",
-                    str(leaf_id_or_chain),
-                    "--dest",
-                    str(destination_address),
-                    "--amount-usd",
-                    str(round(float(amount_usd), 4)),
-                    "--token",
-                    str(token),
-                ]
-                if kill_switch_active:
-                    cmd.append("--kill-switch")
-                try:
-                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                    parsed = json.loads(proc.stdout) if proc.stdout.strip() else {}
-                    if proc.returncode == 0 and isinstance(parsed, dict) and parsed.get("signature_hex"):
-                        return {"status": "signed", **parsed}
-                    if proc.returncode != 0:
-                        return {
-                            "status": "rejected_by_rust_enclave",
-                            "error": parsed.get("error", proc.stderr.strip() or "Rejected by Rust Enclave"),
-                        }
-                except Exception:
-                    pass
-
         if kill_switch_active:
-            return {"status": "rejected_by_rust_enclave", "error": "Kill-switch is active"}
-        if any(bad in destination_address for bad in ("attacker", "drain", "untrusted")):
             return {
                 "status": "rejected_by_rust_enclave",
-                "error": f"Destination '{destination_address}' rejected by whitelist",
+                "error": kill_switch_reason or "Kill-switch is active",
             }
-        sig = hmac.new(
-            b"fallback-enclave",
-            f"{leaf_id_or_chain}:{destination_address}:{amount_usd}:{token}".encode(),
-            hashlib.sha256,
-        ).hexdigest()
+
+        for candidate in self._rust_binary_candidates():
+            if not candidate.exists():
+                continue
+            cmd = [
+                str(candidate),
+                "--sign-transfer",
+                "--leaf-id",
+                str(leaf_id_or_chain),
+                "--dest",
+                str(destination_address),
+                "--amount-usd",
+                str(round(float(amount_usd), 4)),
+                "--token",
+                str(token),
+            ]
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            except subprocess.TimeoutExpired:
+                continue
+            except Exception:
+                continue
+
+            parsed: Any = {}
+            if proc.stdout.strip():
+                try:
+                    parsed = json.loads(proc.stdout)
+                except Exception:
+                    parsed = {}
+
+            if proc.returncode != 0:
+                error = (
+                    parsed.get("error")
+                    if isinstance(parsed, dict)
+                    else None
+                ) or proc.stderr.strip() or "Rejected by simulated Rust vault"
+                return {"status": "rejected_by_rust_enclave", "error": error}
+
+            if self._is_valid_simulated_receipt(
+                parsed, leaf_id_or_chain, destination_address, amount_usd
+            ):
+                return {"status": "signed", **parsed}
+
         return {
-            "status": "signed",
-            "leaf_id": leaf_id_or_chain,
-            "chain": leaf_id_or_chain,
-            "destination_address": destination_address,
-            "amount_usd": amount_usd,
-            "token": token.upper(),
-            "destination_whitelisted": True,
-            "signature_hex": f"0x{sig}",
-            "key_zeroized_after_sign": True,
+            "status": "rejected_vault_unavailable",
+            "error": "Simulated Rust vault unavailable or returned an invalid receipt",
         }
 
     def _build_rust_pods_for_leaf(self, spec: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1773,6 +1816,8 @@ class HierarchicalFleetManager:
         target_token: str,
         destination_address: str = "operator_wallet_default",
         quote_only: bool = False,
+        kill_switch_active: bool = False,
+        kill_switch_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         amt = round(float(amount_usd), 2)
         if amt <= 0:
@@ -1817,17 +1862,23 @@ class HierarchicalFleetManager:
             if destination_address and destination_address.strip() not in ("", "operator_wallet_default")
             else "FK286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN"
         )
-        enclave_sig = self.sign_transfer_in_rust_enclave(
+        simulated_receipt = self.sign_transfer_in_rust_enclave(
             leaf_id_or_chain=quote["to_chain"],
             destination_address=eff_dest,
             amount_usd=amt,
             token=quote["target_token"],
-            kill_switch_active=False,
+            kill_switch_active=kill_switch_active,
+            kill_switch_reason=kill_switch_reason,
         )
-        if enclave_sig.get("status") == "rejected_by_rust_enclave":
+        if simulated_receipt.get("status") != "signed":
             return {
-                "status": "rejected_by_rust_enclave",
-                "message": enclave_sig.get("error", "Rejected by Rust Vault Enclave whitelist"),
+                "status": simulated_receipt.get(
+                    "status", "rejected_vault_unavailable"
+                ),
+                "message": simulated_receipt.get(
+                    "error",
+                    "Simulated Rust vault unavailable; checkout rejected without mutation",
+                ),
             }
 
         if from_leaves > 0 and self.deployed_capital_usd > 0:
@@ -1855,14 +1906,16 @@ class HierarchicalFleetManager:
             "from_dry_powder_usd": round(from_dry_powder, 2),
             "recalled_from_leaves_usd": from_leaves,
             **quote,
-            "tx_hash": enclave_sig.get("signature_hex", f"0x{hex(now_ms)[2:]}c7f9b2a1"),
-            "enclave_receipt": enclave_sig,
+            "simulated_receipt_id": simulated_receipt.get("signature_hex", ""),
+            "simulated_vault_receipt": simulated_receipt,
         }
         self.checkout_history.insert(0, receipt)
         self.checkout_history = self.checkout_history[:25]
         self.persist()
         return {
             "status": "completed",
+            "simulated": True,
+            "simulation_notice": "SIMULATED VAULT: no transaction was signed or broadcast.",
             "receipt": receipt,
             "bridge_quote": quote,
             "target_chain": quote["to_chain"],

@@ -155,7 +155,12 @@ pub struct EcosystemPodSpec {
     pub description: String,
 }
 
-/// Cryptographic curve or authentication mechanism used by the Rust Vault Enclave for a blockchain/venue.
+/// Target scheme metadata for a blockchain/venue.
+///
+/// These identifiers name the scheme the simulated vault would target; they do
+/// not imply that any derivation or signing scheme is implemented. The
+/// simulated vault produces non-spendable addresses and non-chain-valid audit
+/// signatures only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CryptographicCurve {
@@ -169,43 +174,81 @@ pub enum CryptographicCurve {
     VirtualZeroKey,
 }
 
-/// Public-only wallet descriptor exported by the Rust Vault Enclave (`engine-rs`).
-/// Private keys and master seed bytes never leave the `ZeroizingSeed` buffer inside Rust.
+/// Execution mode requested through `ROBOTRADER_EXECUTION_MODE`.
+///
+/// The mode gates seed selection and fail-closed construction only. It never
+/// enables real custody: every mode still exports a `SIMULATED` manifest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ExecutionMode {
+    Backtest,
+    Paper,
+    Simulated,
+    Live,
+}
+
+/// Provenance of the seed the simulated vault selected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SeedSource {
+    SecretFile,
+    Environment,
+    DeterministicDevnet,
+}
+
+/// Public-only wallet descriptor exported by the simulated vault.
+///
+/// Addresses are non-spendable and the target derivation metadata is not an
+/// implemented derivation. Private key material never leaves Rust.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicWalletDescriptor {
     pub leaf_id: String,
     pub chain: String,
     pub symbol: String,
     pub curve: CryptographicCurve,
-    pub slip44_coin_type: u32,
-    pub master_derivation_path: String,
-    pub leaf_derivation_path: String,
+    pub simulated: bool,
+    pub address_is_spendable: bool,
+    pub target_slip44_coin_type: u32,
+    pub target_master_derivation_path: String,
+    pub target_leaf_derivation_path: String,
     pub master_treasury_address: String,
     pub leaf_hot_address: String,
     pub key_fingerprint: String,
-    pub key_isolation_mode: String,
-    pub withdrawal_whitelist_enforced: bool,
 }
 
-/// Full public manifest of all 26 ecosystems' derived wallets and enclave status.
+/// Public manifest of the 26 simulated wallet descriptors.
+///
+/// No field claims an implemented cryptographic guarantee: `vault_mode` is
+/// always `SIMULATED`, and the simulation notice states that addresses are not
+/// spendable and signatures are not chain-valid.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VaultEnclaveManifest {
-    pub enclave_version: String,
+pub struct SimulatedVaultManifest {
+    pub vault_version: String,
     pub vault_mode: String,
+    pub execution_mode: ExecutionMode,
+    pub simulated: bool,
+    pub simulation_notice: String,
+    pub seed_source: SeedSource,
     pub master_seed_fingerprint: String,
-    pub zeroize_on_drop: bool,
     pub python_private_key_access: bool,
-    pub operator_whitelist_count: usize,
+    pub whitelist_enforcement: String,
+    pub simulated_whitelist_entry_count: usize,
     pub canonical_bridge_contracts_count: usize,
     pub wallets: Vec<PublicWalletDescriptor>,
 }
 
-/// Receipt returned when the Rust Vault Enclave validates and signs a checkout or bridge transfer.
+/// Receipt returned by the simulated vault for an accepted checkout or bridge transfer.
+///
+/// `signature_hex` is a simulated HMAC audit token, not a chain signature. No
+/// consumer may infer chain validity from its length or encoding.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedTransferReceipt {
     pub leaf_id: String,
     pub chain: String,
     pub curve: CryptographicCurve,
+    pub simulated: bool,
+    pub signature_is_chain_valid: bool,
+    pub whitelist_enforcement: String,
     pub signer_address: String,
     pub destination_address: String,
     pub amount_usd: f64,

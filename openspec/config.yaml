@@ -18,8 +18,12 @@ context: |
     `engine-rs/crates/common/src/lib.rs` and `backend/core/schemas.py`.
   - Capital protection is never weakened: dry-powder floor >= 20%, Kelly
     sizing, drawdown kill-switch, `CostGuard` daily cap, no unbounded refills.
-  - Vault material never leaves `RustVaultEnclave`; zeroize volatile RAM; no
-    key material in logs, transcripts, fixtures, or review evidence.
+  - The vault is `SimulatedVault` and every vault surface is `SIMULATED`:
+    non-spendable addresses, non-chain-valid receipts, and a simulated
+    whitelist label. Python holds no key custody and never broadcasts. No
+    derivation, address encoding, chain signature, or mainnet custody is
+    claimed as implemented; no key material appears in logs, transcripts,
+    fixtures, or review evidence.
   - Backtest, paper, and live share the same deterministic code path; no
     look-ahead and no live-only branch in strategy logic.
   - Each leaf robot stays isolated to its own chain/venue and MemPalace wing.

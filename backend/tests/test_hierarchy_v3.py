@@ -328,23 +328,51 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertAlmostEqual(cg.total_cost_usd, hydrated["hydrated_cost_usd"], places=6)
         self.assertAlmostEqual(cg.total_cost_usd, 0.052, places=4)
 
-    def test_rust_vault_enclave_26_chains_and_whitelist_enforcement(self) -> None:
+    def test_simulated_vault_manifest_contract(self) -> None:
         """
-        Verifies that all 26 blockchains derive public-only HD wallets from the Rust Vault Enclave
-        (`python_private_key_access == False`) and that untrusted checkout addresses are blocked.
+        Verifies the public simulated vault contract for all 26 blockchains and
+        that untrusted checkout destinations are rejected before any mutation.
         """
         manifest = self.store.hierarchy.vault_manifest
+        self.assertEqual(manifest["vault_mode"], "SIMULATED")
+        self.assertTrue(manifest["simulated"])
         self.assertFalse(manifest["python_private_key_access"])
-        self.assertTrue(manifest["zeroize_on_drop"])
+        self.assertEqual(manifest["whitelist_enforcement"], "SIMULATED")
         self.assertEqual(len(manifest["wallets"]), 26)
 
         for lid, leaf in self.store.hierarchy.leaves.items():
             wv = leaf.get("wallet_vault", {})
             self.assertEqual(wv.get("leaf_id"), lid)
+            self.assertTrue(wv.get("simulated"))
+            self.assertFalse(wv.get("address_is_spendable"))
+            self.assertTrue(wv.get("target_leaf_derivation_path"))
             self.assertTrue(wv.get("master_treasury_address"))
             self.assertTrue(wv.get("leaf_hot_address"))
+            for legacy in (
+                "key_isolation_mode",
+                "withdrawal_whitelist_enforced",
+                "leaf_derivation_path",
+                "slip44_coin_type",
+            ):
+                self.assertNotIn(legacy, wv)
 
-        # Untrusted destination must be rejected by the Rust Enclave
+        completed = self.store.hierarchy.checkout_funds(
+            amount_usd=10.0,
+            target_chain="Solana",
+            target_token="SOL",
+            quote_only=False,
+        )
+        self.assertEqual(completed["status"], "completed")
+        self.assertTrue(completed["simulated"])
+        receipt = completed["receipt"]["simulated_vault_receipt"]
+        self.assertTrue(receipt["simulated"])
+        self.assertFalse(receipt["signature_is_chain_valid"])
+        self.assertEqual(receipt["whitelist_enforcement"], "SIMULATED")
+        self.assertNotIn("tx_hash", completed["receipt"])
+        self.assertNotIn("enclave_receipt", completed["receipt"])
+
+        capital_before = self.store.hierarchy.total_capital_usd
+        history_before = list(self.store.hierarchy.checkout_history)
         rejected = self.store.hierarchy.checkout_funds(
             amount_usd=500.0,
             target_chain="Solana",
@@ -353,6 +381,8 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
             quote_only=False,
         )
         self.assertEqual(rejected["status"], "rejected_by_rust_enclave")
+        self.assertEqual(self.store.hierarchy.total_capital_usd, capital_before)
+        self.assertEqual(self.store.hierarchy.checkout_history, history_before)
 
 
 if __name__ == "__main__":

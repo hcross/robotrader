@@ -118,13 +118,15 @@ Le moteur `paper_model` applique sur chaque tick un modèle de microstructure p�
 
 *Observation* : La fenêtre récente de 200 trades (`-$35.33`, win rate `49.5%`) s'explique par le maintien temporaire d'un biais `LONG_BIAS` alors que le carnet L2 `SOL/USDT` s'était inversé (`OBI = -0.571` à `$85.56`). Cela démontre que le simulateur `paper_model` n'est pas complaisant et sanctionne fidèlement tout retard d'invalidation.
 
-### 3.3 Population 3 — Exécution Réelle Testnet (`live_testnet` : Binance Spot Testnet + Solana Devnet) [`MEASURED`]
+### 3.3 Population 3 — Exécution Réelle Testnet (`live_testnet` : Binance Spot Testnet) [`MEASURED`]
 
 > Source: `[MEASURED]` — these are the only measured trading results in this document. The window figures use the retained recent 200-row window; the CEX cumulative figure is a lifetime figure.
 
-- **Exécutions dans la fenêtre active** : `200` (`16` gains / `22` pertes / `162` transactions Devnet self-transfer neutres)
+- **Exécutions dans la fenêtre active** : `200` (`16` gains / `22` pertes / `162` actions Solana Devnet simulées, exclues de la population mesurée)
 - **PnL CEX Testnet réalisé** : `-$4.6036` cumulé (`-$0.1539` sur la fenêtre récente), lié au spread bid-ask du carnet Binance Spot Testnet à faible liquidité.
 - **Stabilité opérationnelle** : `100%` de disponibilité RPC, zéro crash, latence WebSocket/REST nominale.
+
+> **Correction datée 2026-10-26** — Les `162` auto-transferts Solana Devnet historiques ne sont pas des exécutions mesurées : ils sont désormais enregistrés comme actions simulées (`is_simulated: true`, non signées, non diffusées) et exclus de `live_testnet` et de `measured_realized_pnl_usd`. Seul le Binance Spot Testnet reste mesuré.
 
 ---
 

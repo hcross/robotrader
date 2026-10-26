@@ -1,10 +1,20 @@
 use crate::RiskRejection;
 use robotrader_common::{
-    CryptographicCurve, PublicWalletDescriptor, SignedTransferReceipt, VaultEnclaveManifest,
+    CryptographicCurve, ExecutionMode, PublicWalletDescriptor, SeedSource, SignedTransferReceipt,
+    SimulatedVaultManifest,
 };
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::atomic::{compiler_fence, Ordering};
+use thiserror::Error;
+
+/// Default production location of the secret-mounted master seed.
+pub const DEFAULT_SECRET_FILE: &str = "/run/secrets/robotrader_master_seed";
+
+/// Deterministic, repo-visible seed used only outside live mode.
+pub const DETERMINISTIC_DEVNET_SEED: &[u8] =
+    b"robotrader-v3-devnet-deterministic-simulated-seed-v1";
 
 /// Fixed-size secret buffer that scrubs its bytes in RAM using volatile writes upon `Drop`.
 pub struct ZeroizingBytes<const N: usize>(pub [u8; N]);
@@ -25,6 +35,11 @@ impl<const N: usize> ZeroizingBytes<N> {
             }
         }
         compiler_fence(Ordering::SeqCst);
+    }
+
+    /// Observes the buffer after scrubbing; the receipt flag is derived from this.
+    pub fn is_zeroized(&self) -> bool {
+        self.0.iter().all(|&b| b == 0)
     }
 }
 
@@ -125,7 +140,8 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     out
 }
 
-/// RFC 2104 HMAC-SHA256 used for deterministic BIP-32 / SLIP-0010 child key derivation and signing.
+/// RFC 2104 HMAC-SHA256 used by the simulated vault for deterministic
+/// pseudo-derivation and non-chain-valid audit signatures.
 pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
     let mut k_block = [0u8; 64];
     if key.len() > 64 {
@@ -413,19 +429,23 @@ const CHAIN_CRYPTO_SPECS: &[ChainCryptoSpec] = &[
     },
 ];
 
-/// Canonical bridge router contracts and operator addresses allowed to receive funds from the enclave.
-pub const DEFAULT_WHITELISTED_PREFIXES: &[&str] = &[
-    "FK286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN", // Operator Solana Devnet/Mainnet address
-    "bc1q",                                         // Operator Bitcoin Bech32 prefix
-    "0x",                                           // Operator EVM / Sui / Aptos address prefix
-    "r",                                            // Operator XRPL address
-    "T",                                            // Operator TRON address
-    "cosmos1",                                      // Operator Cosmos IBC address
-    "addr1",                                        // Operator Cardano address
-    "tz1",                                          // Operator Tezos address
-    "SP",                                           // Operator Stacks address
-    "EQ",                                           // Operator TON address
-    "D",                                            // Operator Dogecoin address
+/// Simulated prefix filter used as a stand-in for a production destination allowlist.
+///
+/// This is not a production allowlist: it matches prefixes only and protects
+/// non-spendable simulated addresses. The manifest and receipt label it
+/// `SIMULATED`.
+pub const SIMULATED_WHITELIST_PREFIXES: &[&str] = &[
+    "FK286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN", // Placeholder Solana destination
+    "bc1q",                                         // Simulated Bitcoin prefix
+    "0x",                                           // Simulated EVM / Sui / Aptos prefix
+    "r",                                            // Simulated XRPL prefix
+    "T",                                            // Simulated TRON prefix
+    "cosmos1",                                      // Simulated Cosmos IBC prefix
+    "addr1",                                        // Simulated Cardano prefix
+    "tz1",                                          // Simulated Tezos prefix
+    "SP",                                           // Simulated Stacks prefix
+    "EQ",                                           // Simulated TON prefix
+    "D",                                            // Simulated Dogecoin prefix
     "bridge:wormhole:",
     "bridge:cctp:",
     "bridge:layerzero:",
@@ -434,57 +454,88 @@ pub const DEFAULT_WHITELISTED_PREFIXES: &[&str] = &[
     "bridge:ccip:",
 ];
 
-pub struct RustVaultEnclave {
+/// Raw execution-mode input, preserving the difference between absent, present
+/// text, and non-Unicode process values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VaultModeInput {
+    Unset,
+    Value(String),
+    NonUnicode,
+}
+
+/// Raw environment-seed input, preserving non-Unicode values so they fail closed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SeedInput {
+    Unset,
+    Value(String),
+    NonUnicode,
+}
+
+/// Pure inputs for [`SimulatedVault::load`], injectable for hermetic tests.
+#[derive(Debug, Clone)]
+pub struct VaultBootstrap {
+    pub execution_mode: VaultModeInput,
+    pub secret_file: PathBuf,
+    pub env_seed: SeedInput,
+}
+
+/// Typed fail-closed construction error for the simulated vault.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum VaultInitError {
+    #[error("ROBOTRADER_EXECUTION_MODE is set but empty; accepted values are BACKTEST, PAPER, SIMULATED, LIVE (unset defaults to PAPER)")]
+    EmptyExecutionMode,
+
+    #[error("ROBOTRADER_EXECUTION_MODE='{0}' is not accepted; accepted values are BACKTEST, PAPER, SIMULATED, LIVE (unset defaults to PAPER)")]
+    InvalidExecutionMode(String),
+
+    #[error("ROBOTRADER_EXECUTION_MODE is not valid Unicode; accepted values are BACKTEST, PAPER, SIMULATED, LIVE (unset defaults to PAPER)")]
+    NonUnicodeExecutionMode,
+
+    #[error("ROBOTRADER_VAULT_MASTER_SEED is not valid Unicode")]
+    InvalidEnvironmentSeedEncoding,
+
+    #[error("ROBOTRADER_EXECUTION_MODE=LIVE requires a non-empty /run/secrets/robotrader_master_seed or ROBOTRADER_VAULT_MASTER_SEED")]
+    MissingLiveSeed,
+}
+
+/// Simulated vault: deterministic pseudo-derivation and non-chain-valid audit
+/// signatures. Addresses are not spendable and no chain custody exists.
+pub struct SimulatedVault {
     master_seed: ZeroizingBytes<64>,
-    pub vault_mode: String,
-    pub master_seed_fingerprint: String,
-    pub operator_whitelist: Vec<String>,
+    execution_mode: ExecutionMode,
+    seed_source: SeedSource,
+    master_seed_fingerprint: String,
+    operator_whitelist: Vec<String>,
 }
 
-impl Default for RustVaultEnclave {
-    fn default() -> Self {
-        Self::load_from_env_or_secret()
+impl SimulatedVault {
+    /// Builds the vault from the process environment and the production secret path.
+    pub fn from_env() -> Result<Self, VaultInitError> {
+        Self::from_env_with_secret_file(DEFAULT_SECRET_FILE)
     }
-}
 
-impl RustVaultEnclave {
-    /// Loads the 64-byte master seed exclusively inside Rust from:
-    /// 1. `/run/secrets/robotrader_master_seed` (Docker/K8s secret mount)
-    /// 2. `ROBOTRADER_VAULT_MASTER_SEED` (Enclave environment variable)
-    /// 3. Deterministic Devnet Enclave Seed (when running in Testnet/Devnet/Paper mode)
-    pub fn load_from_env_or_secret() -> Self {
-        let secret_file = "/run/secrets/robotrader_master_seed";
-        let (raw_entropy, mode) = if let Ok(contents) = fs::read_to_string(secret_file) {
-            let trimmed = contents.trim();
-            if !trimmed.is_empty() {
-                (trimmed.as_bytes().to_vec(), "DOCKER_SECRET_ENCLAVE".to_string())
-            } else {
-                (
-                    b"robotrader-v3-devnet-deterministic-master-seed-bip32-enclave".to_vec(),
-                    "DEVNET_DETERMINISTIC_ENCLAVE".to_string(),
-                )
-            }
-        } else if let Ok(env_seed) = std::env::var("ROBOTRADER_VAULT_MASTER_SEED") {
-            if !env_seed.trim().is_empty() {
-                (
-                    env_seed.trim().as_bytes().to_vec(),
-                    "ENV_VAULT_SEED_ENCLAVE".to_string(),
-                )
-            } else {
-                (
-                    b"robotrader-v3-devnet-deterministic-master-seed-bip32-enclave".to_vec(),
-                    "DEVNET_DETERMINISTIC_ENCLAVE".to_string(),
-                )
-            }
-        } else {
-            (
-                b"robotrader-v3-devnet-deterministic-master-seed-bip32-enclave".to_vec(),
-                "DEVNET_DETERMINISTIC_ENCLAVE".to_string(),
-            )
-        };
+    /// Builds the vault from the process environment with an injectable secret path.
+    ///
+    /// The path override exists solely to make seed-precedence tests hermetic.
+    pub fn from_env_with_secret_file(secret_file: impl Into<PathBuf>) -> Result<Self, VaultInitError> {
+        Self::load(VaultBootstrap {
+            execution_mode: read_mode_input("ROBOTRADER_EXECUTION_MODE"),
+            secret_file: secret_file.into(),
+            env_seed: read_seed_input("ROBOTRADER_VAULT_MASTER_SEED"),
+        })
+    }
 
-        let left = hmac_sha256(b"Bitcoin seed / SLIP-0010 Master", &raw_entropy);
-        let right = hmac_sha256(b"Robotrader v3 ChainCode Root", &raw_entropy);
+    /// Builds the vault from explicit inputs; every failure is a typed error.
+    pub fn load(bootstrap: VaultBootstrap) -> Result<Self, VaultInitError> {
+        let execution_mode = parse_execution_mode(bootstrap.execution_mode)?;
+        let (raw_entropy, seed_source) = select_seed(
+            execution_mode,
+            &bootstrap.secret_file,
+            bootstrap.env_seed,
+        )?;
+
+        let left = hmac_sha256(b"Bitcoin seed / target master", &raw_entropy);
+        let right = hmac_sha256(b"Robotrader target chain code root", &raw_entropy);
         let mut seed64 = [0u8; 64];
         seed64[..32].copy_from_slice(&left);
         seed64[32..].copy_from_slice(&right);
@@ -492,21 +543,22 @@ impl RustVaultEnclave {
         let fp_hash = sha256(&seed64);
         let fingerprint = format!("vault-fp-{}", &to_hex(&fp_hash[..6]));
 
-        let whitelist = DEFAULT_WHITELISTED_PREFIXES
+        let whitelist = SIMULATED_WHITELIST_PREFIXES
             .iter()
             .map(|s| (*s).to_string())
             .collect();
 
-        Self {
+        Ok(Self {
             master_seed: ZeroizingBytes::new(seed64),
-            vault_mode: mode,
+            execution_mode,
+            seed_source,
             master_seed_fingerprint: fingerprint,
             operator_whitelist: whitelist,
-        }
+        })
     }
 
-    fn derive_private_key(&self, derivation_path: &str) -> ZeroizingBytes<32> {
-        let derived = hmac_sha256(self.master_seed.as_slice(), derivation_path.as_bytes());
+    fn derive_private_key(&self, target_path: &str) -> ZeroizingBytes<32> {
+        let derived = hmac_sha256(self.master_seed.as_slice(), target_path.as_bytes());
         ZeroizingBytes::new(derived)
     }
 
@@ -549,11 +601,11 @@ impl RustVaultEnclave {
             _ => 44,
         };
 
-        let master_path = format!("m/{}'/{}'/0'/0/0", purpose, spec.slip44);
-        let leaf_path = format!("m/{}'/{}'/1'/0/0", purpose, spec.slip44);
+        let target_master_path = format!("m/{}'/{}'/0'/0/0", purpose, spec.slip44);
+        let target_leaf_path = format!("m/{}'/{}'/1'/0/0", purpose, spec.slip44);
 
-        let master_priv = self.derive_private_key(&master_path);
-        let leaf_priv = self.derive_private_key(&leaf_path);
+        let master_priv = self.derive_private_key(&target_master_path);
+        let leaf_priv = self.derive_private_key(&target_leaf_path);
 
         let master_pub_hash = sha256(master_priv.as_slice());
         let leaf_pub_hash = sha256(leaf_priv.as_slice());
@@ -564,53 +616,46 @@ impl RustVaultEnclave {
             Self::format_public_address(spec.addr_style, &leaf_pub_hash, spec.leaf_id, "leaf");
 
         let fp = format!("fp-{}", &to_hex(&leaf_pub_hash[..4]));
-        let isolation_mode = match spec.curve {
-            CryptographicCurve::HmacSha256NoWithdraw => {
-                "RUST_ENCLAVE_HMAC_TRADE_ONLY (Withdrawals Disabled at Exchange)".to_string()
-            }
-            CryptographicCurve::MtlsX509Participant => {
-                "RUST_ENCLAVE_MTLS_X509_PARTICIPANT".to_string()
-            }
-            CryptographicCurve::VirtualZeroKey => {
-                "VIRTUAL_SANDBOX_NO_PRIVATE_KEY".to_string()
-            }
-            _ => "RUST_ENCLAVE_HD_ZEROIZE (Private Key Never Enters Python)".to_string(),
-        };
 
         Some(PublicWalletDescriptor {
             leaf_id: spec.leaf_id.to_string(),
             chain: spec.chain.to_string(),
             symbol: spec.symbol.to_string(),
             curve: spec.curve,
-            slip44_coin_type: spec.slip44,
-            master_derivation_path: master_path,
-            leaf_derivation_path: leaf_path,
+            simulated: true,
+            address_is_spendable: false,
+            target_slip44_coin_type: spec.slip44,
+            target_master_derivation_path: target_master_path,
+            target_leaf_derivation_path: target_leaf_path,
             master_treasury_address: master_addr,
             leaf_hot_address: leaf_addr,
             key_fingerprint: fp,
-            key_isolation_mode: isolation_mode,
-            withdrawal_whitelist_enforced: true,
         })
     }
 
-    pub fn export_public_manifest(&self) -> VaultEnclaveManifest {
+    pub fn export_public_manifest(&self) -> SimulatedVaultManifest {
         let wallets = CHAIN_CRYPTO_SPECS
             .iter()
             .filter_map(|s| self.derive_wallet_descriptor(s.leaf_id))
             .collect();
 
-        VaultEnclaveManifest {
-            enclave_version: "robotrader-vault-enclave/v3.0".to_string(),
-            vault_mode: self.vault_mode.clone(),
+        SimulatedVaultManifest {
+            vault_version: "robotrader-simulated-vault/v1".to_string(),
+            vault_mode: "SIMULATED".to_string(),
+            execution_mode: self.execution_mode,
+            simulated: true,
+            simulation_notice: "SIMULATED VAULT: addresses are not spendable on any chain and receipts are not chain-valid. Curves, target derivation paths, and target SLIP-44 values are target metadata only; no mainnet key custody exists.".to_string(),
+            seed_source: self.seed_source,
             master_seed_fingerprint: self.master_seed_fingerprint.clone(),
-            zeroize_on_drop: true,
             python_private_key_access: false,
-            operator_whitelist_count: self.operator_whitelist.len(),
+            whitelist_enforcement: "SIMULATED".to_string(),
+            simulated_whitelist_entry_count: self.operator_whitelist.len(),
             canonical_bridge_contracts_count: 6,
             wallets,
         }
     }
 
+    /// Simulated prefix filter; never a production destination allowlist.
     pub fn is_destination_whitelisted(&self, destination: &str) -> bool {
         let clean = destination.trim();
         if clean.is_empty() || clean.len() < 6 {
@@ -624,8 +669,8 @@ impl RustVaultEnclave {
             .any(|prefix| clean.starts_with(prefix))
     }
 
-    /// Synchronously validates destination safety in Rust, derives the ephemeral child private key,
-    /// signs the transfer digest, and immediately scrubs the private key from RAM via `ZeroizingBytes::drop`.
+    /// Validates the simulated whitelist, evaluates it once, and returns a
+    /// non-chain-valid audit receipt. No receipt is constructed on rejection.
     pub fn validate_and_sign_transfer(
         &self,
         kill_switch_active: bool,
@@ -636,7 +681,7 @@ impl RustVaultEnclave {
     ) -> Result<SignedTransferReceipt, RiskRejection> {
         if kill_switch_active {
             return Err(RiskRejection::KillSwitchActive {
-                reason: "Vault Enclave signing locked while kill-switch is active".to_string(),
+                reason: "Simulated vault signing locked while kill-switch is active".to_string(),
             });
         }
         if amount_usd <= 0.0 {
@@ -662,34 +707,114 @@ impl RustVaultEnclave {
             }
         }
 
-        if !self.is_destination_whitelisted(destination_address) {
+        let destination_whitelisted = self.is_destination_whitelisted(destination_address);
+        if !destination_whitelisted {
             return Err(RiskRejection::VaultSigningRejected {
                 reason: format!(
-                    "Destination address '{destination_address}' is not in the Rust Enclave Operator/Bridge Whitelist"
+                    "Destination address '{destination_address}' is not in the simulated vault whitelist"
                 ),
             });
         }
 
-        // Ephemeral private key lives ONLY in this scope and is wiped via volatile writes on scope exit
-        let mut ephemeral_priv = self.derive_private_key(&wallet.master_derivation_path);
+        // Ephemeral key lives ONLY in this scope and is wiped via volatile writes.
+        let mut ephemeral_priv = self.derive_private_key(&wallet.target_master_derivation_path);
         let payload = format!(
             "ROBOTRADER_V3_TRANSFER|chain={}|signer={}|dest={}|amount_usd={:.4}|token={}",
             wallet.chain, wallet.master_treasury_address, destination_address, amount_usd, token
         );
         let sig_bytes = hmac_sha256(ephemeral_priv.as_slice(), payload.as_bytes());
         ephemeral_priv.zeroize_now();
+        let key_zeroized_after_sign = ephemeral_priv.is_zeroized();
 
         Ok(SignedTransferReceipt {
             leaf_id: wallet.leaf_id,
             chain: wallet.chain,
             curve: wallet.curve,
+            simulated: true,
+            signature_is_chain_valid: false,
+            whitelist_enforcement: "SIMULATED".to_string(),
             signer_address: wallet.master_treasury_address,
             destination_address: destination_address.to_string(),
             amount_usd,
             token: token.to_uppercase(),
-            destination_whitelisted: true,
+            destination_whitelisted,
             signature_hex: format!("0x{}", to_hex(&sig_bytes)),
-            key_zeroized_after_sign: true,
+            key_zeroized_after_sign,
         })
     }
+}
+
+fn read_mode_input(name: &str) -> VaultModeInput {
+    match std::env::var_os(name) {
+        None => VaultModeInput::Unset,
+        Some(value) => match value.into_string() {
+            Ok(text) => VaultModeInput::Value(text),
+            Err(_) => VaultModeInput::NonUnicode,
+        },
+    }
+}
+
+fn read_seed_input(name: &str) -> SeedInput {
+    match std::env::var_os(name) {
+        None => SeedInput::Unset,
+        Some(value) => match value.into_string() {
+            Ok(text) => SeedInput::Value(text),
+            Err(_) => SeedInput::NonUnicode,
+        },
+    }
+}
+
+/// Parses exactly four case-sensitive modes; every other present value fails closed.
+fn parse_execution_mode(input: VaultModeInput) -> Result<ExecutionMode, VaultInitError> {
+    match input {
+        VaultModeInput::Unset => Ok(ExecutionMode::Paper),
+        VaultModeInput::NonUnicode => Err(VaultInitError::NonUnicodeExecutionMode),
+        VaultModeInput::Value(value) => {
+            if value.is_empty() {
+                return Err(VaultInitError::EmptyExecutionMode);
+            }
+            match value.as_str() {
+                "BACKTEST" => Ok(ExecutionMode::Backtest),
+                "PAPER" => Ok(ExecutionMode::Paper),
+                "SIMULATED" => Ok(ExecutionMode::Simulated),
+                "LIVE" => Ok(ExecutionMode::Live),
+                _ => Err(VaultInitError::InvalidExecutionMode(value)),
+            }
+        }
+    }
+}
+
+/// Applies the approved seed precedence: secret file, then environment, then
+/// either a live-mode failure or the deterministic devnet seed.
+fn select_seed(
+    execution_mode: ExecutionMode,
+    secret_file: &Path,
+    env_seed: SeedInput,
+) -> Result<(Vec<u8>, SeedSource), VaultInitError> {
+    if let Ok(contents) = fs::read_to_string(secret_file) {
+        let trimmed = contents.trim();
+        if !trimmed.is_empty() {
+            return Ok((trimmed.as_bytes().to_vec(), SeedSource::SecretFile));
+        }
+    }
+
+    match env_seed {
+        SeedInput::NonUnicode => return Err(VaultInitError::InvalidEnvironmentSeedEncoding),
+        SeedInput::Value(value) => {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Ok((trimmed.as_bytes().to_vec(), SeedSource::Environment));
+            }
+        }
+        SeedInput::Unset => {}
+    }
+
+    if execution_mode == ExecutionMode::Live {
+        return Err(VaultInitError::MissingLiveSeed);
+    }
+
+    Ok((
+        DETERMINISTIC_DEVNET_SEED.to_vec(),
+        SeedSource::DeterministicDevnet,
+    ))
 }

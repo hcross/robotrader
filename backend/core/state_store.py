@@ -139,7 +139,7 @@ class HybridStateStore:
             "binance_free_usdt": 10000.0,
             "binance_total_usdt": 10000.0,
             "solana_address": os.getenv("SOLANA_PUBLIC_KEY", ""),
-            "solana_balance_sol": 5.0,
+            "solana_balance_sol": None,
         }
 
         # ADR-0002 & ADR-0003: Infinite Strategy Palace Memory + Hierarchical Fleet Manager
@@ -168,13 +168,24 @@ class HybridStateStore:
 
     def _normalize_legacy_execution(self, ex: Dict[str, Any]) -> Dict[str, Any]:
         venue = str(ex.get("venue", ""))
+        if venue == "SOLANA_DEVNET_ONCHAIN":
+            # Every Solana Devnet self-transfer is a simulated action, including
+            # rows persisted before this contract.
+            ex["is_simulated"] = True
+            ex["source"] = "SIMULATED"
+            ex.setdefault("tx_signature", None)
         if venue == "SOLANA_DEVNET_ONCHAIN" and "pnl_type" not in ex:
             sim_pnl = float(ex.get("simulated_pnl_usd", ex.get("realized_pnl_usd", 0.0)))
             ex["simulated_pnl_usd"] = sim_pnl
             ex["realized_pnl_usd"] = 0.0
-            ex["gas_fee_sol"] = float(ex.get("gas_fee_sol", 0.000005))
-            ex["pnl_type"] = "DEVNET_SELF_TX"
+            ex["gas_fee_sol"] = float(ex.get("gas_fee_sol", 0.0))
+            ex["pnl_type"] = "SIMULATED_SELF_TX"
             ex["is_testnet_devnet"] = True
+            # Historical Solana Devnet self-transfers are simulated, not measured
+            # on-chain executions; keep them out of the measured population.
+            ex["is_simulated"] = True
+            ex["source"] = "SIMULATED"
+            ex.setdefault("tx_signature", None)
         elif venue == "BINANCE_TESTNET_LIVE" and "pnl_type" not in ex:
             sim_pnl = float(ex.get("simulated_pnl_usd", ex.get("realized_pnl_usd", 0.0)))
             ex["simulated_pnl_usd"] = sim_pnl
@@ -255,7 +266,7 @@ class HybridStateStore:
                 )
             )
             self.solana_devnet_gas_sol = round(
-                float(data.get("solana_devnet_gas_sol", self.solana_devnet_tx_count * 0.000005)),
+                float(data.get("solana_devnet_gas_sol", 0.0)),
                 6,
             )
             if isinstance(data.get("testnet_wallet_snapshot"), dict):
@@ -390,16 +401,20 @@ class HybridStateStore:
                 "source_detail": TESTNET_SOURCE_DETAIL,
             }
         with self._lock:
+            solana_address = self.testnet_wallet_snapshot.get("solana_address") or os.getenv(
+                "SOLANA_PUBLIC_KEY", ""
+            )
+            raw_solana_balance = self.testnet_wallet_snapshot.get("solana_balance_sol")
+            solana_balance_sol: Optional[float] = None
+            if solana_address and isinstance(raw_solana_balance, (int, float)):
+                solana_balance_sol = round(float(raw_solana_balance), 6)
             return {
                 "enabled": True,
                 "source": provenance.METRIC_SOURCES[0],
                 "source_detail": TESTNET_SOURCE_DETAIL,
                 "solana_cluster": self.solana_cluster,
-                "solana_address": self.testnet_wallet_snapshot.get("solana_address")
-                or os.getenv("SOLANA_PUBLIC_KEY", ""),
-                "solana_balance_sol": round(
-                    float(self.testnet_wallet_snapshot.get("solana_balance_sol", 5.0)), 6
-                ),
+                "solana_address": solana_address,
+                "solana_balance_sol": solana_balance_sol,
                 "solana_tx_count": self.solana_devnet_tx_count,
                 "solana_gas_spent_sol": round(self.solana_devnet_gas_sol, 6),
                 "binance_free_usdt": round(
@@ -586,71 +601,72 @@ class HybridStateStore:
         chosen_pod = active_pods[self.live_tick_count % len(active_pods)]
 
         if chosen_pod in ("pod_onchain_alpha", "pod_solana_alpha", "pod_sniper"):
+            # Simulated Solana branch: no signing key, no transaction, no broadcast.
             solana = SolanaWalletTool()
-            if solana.keypair:
-                pubkey_str = str(solana.keypair.pubkey())
-                sol_price = self._last_prices.get("SOL/USDT") or binance.get_price("SOL/USDT") or 85.0
-                tx_res = solana.transfer_sol(pubkey_str, 0.0005, simulate_only=False)
-                sig = str(tx_res.get("signature", ""))
-                short_sig = f"{sig[:10]}...{sig[-6:]}" if len(sig) > 16 else (sig or "sim_ok")
-                sol_bal = solana.get_balance(pubkey_str)
+            public_address = getattr(solana, "public_address", None)
+            sol_price = self._last_prices.get("SOL/USDT") or binance.get_price("SOL/USDT") or 85.0
 
-                notional_usd = round(sol_price * 1.5, 2)
-                fee_usd = round(0.000005 * sol_price, 6)
-                with self._lock:
-                    self.solana_devnet_tx_count += 1
-                    self.solana_devnet_gas_sol = round(self.solana_devnet_gas_sol + 0.000005, 6)
-                    self.testnet_wallet_snapshot["solana_address"] = pubkey_str
-                    if sol_bal > 0:
-                        self.testnet_wallet_snapshot["solana_balance_sol"] = sol_bal
+            sol_bal: Optional[float] = None
+            if isinstance(public_address, str) and public_address:
+                sol_bal = solana.get_balance(public_address)
 
-                sol_ta = self.latest_ta_snapshots.get("SOL/USDT", {})
-                sol_fib = sol_ta.get("fibonacci", {}).get("golden_pocket_618", round(sol_price * 0.99, 2))
-                sol_rsi = float(sol_ta.get("rsi", {}).get("rsi_14", 50.0))
-                sol_obi = float(self._last_obi.get("SOL/USDT", obi))
-                sol_rule = policy.asset_overrides.get("SOL-USDT")
-                paper_eval = self.compute_paper_execution_pnl(
-                    notional_usd=notional_usd,
-                    fee_usd=round(notional_usd * 0.0008, 4),
-                    side="BUY",
-                    obi=sol_obi,
-                    price_change_bps=price_change_bps,
-                    rsi_val=sol_rsi,
-                    spread_bps=6.0,
-                    entry_obi_threshold=sol_rule.entry_obi_threshold if sol_rule else 0.08,
-                    max_rsi_long=sol_rule.max_rsi_long if sol_rule else 68.0,
-                    min_rsi_short=sol_rule.min_rsi_short if sol_rule else 30.0,
-                    venue="SOLANA_DEVNET_ONCHAIN",
-                    pod_id=chosen_pod,
-                )
-                sim_pnl_usd = paper_eval["simulated_pnl_usd"]
-                report = {
-                    "timestamp_ms": now_ms,
-                    "pod_id": chosen_pod,
-                    "symbol": "SOL-DEVNET",
-                    "venue": "SOLANA_DEVNET_ONCHAIN",
-                    "side": "BUY",
-                    "filled_quantity": 0.0005,
-                    "fill_price": round(sol_price, 2),
-                    "notional_usd": notional_usd,
-                    "fee_usd": fee_usd,
-                    "gas_fee_sol": 0.000005,
-                    "tx_signature": sig,
-                    "realized_slippage_bps": paper_eval["realized_slippage_bps"],
-                    "adverse_selection_bps": paper_eval["adverse_selection_bps"],
-                    "expected_edge_bps": paper_eval["net_edge_bps"],
-                    "realized_pnl_usd": 0.0,
-                    "simulated_pnl_usd": sim_pnl_usd,
-                    "pnl_type": "DEVNET_SELF_TX",
-                    "is_testnet_devnet": True,
-                    "rationale": (
-                        f"Règle Rust [{chosen_pod}] : RSI={sol_rsi:.1f} | OBI={sol_obi:+.2f} | "
-                        f"Edge net={paper_eval['net_edge_bps']:+.1f}bps (Adv -{paper_eval['adverse_selection_bps']:.1f}bps) | "
-                        f"Fib 0.618=${sol_fib} | Auto-TX Devnet {short_sig}"
-                    ),
-                }
-                self._record_live_execution(report)
-                return report
+            notional_usd = round(sol_price * 1.5, 2)
+            fee_usd = 0.0
+            with self._lock:
+                if isinstance(public_address, str) and public_address:
+                    self.testnet_wallet_snapshot["solana_address"] = public_address
+                if isinstance(sol_bal, (int, float)):
+                    self.testnet_wallet_snapshot["solana_balance_sol"] = round(float(sol_bal), 6)
+
+            sol_ta = self.latest_ta_snapshots.get("SOL/USDT", {})
+            sol_fib = sol_ta.get("fibonacci", {}).get("golden_pocket_618", round(sol_price * 0.99, 2))
+            sol_rsi = float(sol_ta.get("rsi", {}).get("rsi_14", 50.0))
+            sol_obi = float(self._last_obi.get("SOL/USDT", obi))
+            sol_rule = policy.asset_overrides.get("SOL-USDT")
+            paper_eval = self.compute_paper_execution_pnl(
+                notional_usd=notional_usd,
+                fee_usd=round(notional_usd * 0.0008, 4),
+                side="BUY",
+                obi=sol_obi,
+                price_change_bps=price_change_bps,
+                rsi_val=sol_rsi,
+                spread_bps=6.0,
+                entry_obi_threshold=sol_rule.entry_obi_threshold if sol_rule else 0.08,
+                max_rsi_long=sol_rule.max_rsi_long if sol_rule else 68.0,
+                min_rsi_short=sol_rule.min_rsi_short if sol_rule else 30.0,
+                venue="SOLANA_DEVNET_ONCHAIN",
+                pod_id=chosen_pod,
+            )
+            sim_pnl_usd = paper_eval["simulated_pnl_usd"]
+            report = {
+                "timestamp_ms": now_ms,
+                "pod_id": chosen_pod,
+                "symbol": "SOL-DEVNET",
+                "venue": "SOLANA_DEVNET_ONCHAIN",
+                "side": "BUY",
+                "filled_quantity": 0.0005,
+                "fill_price": round(sol_price, 2),
+                "notional_usd": notional_usd,
+                "fee_usd": fee_usd,
+                "tx_signature": None,
+                "source": "SIMULATED",
+                "is_simulated": True,
+                "simulation_notice": "Simulated Solana action; no transaction was signed or broadcast.",
+                "realized_slippage_bps": paper_eval["realized_slippage_bps"],
+                "adverse_selection_bps": paper_eval["adverse_selection_bps"],
+                "expected_edge_bps": paper_eval["net_edge_bps"],
+                "realized_pnl_usd": 0.0,
+                "simulated_pnl_usd": sim_pnl_usd,
+                "pnl_type": "SIMULATED_SELF_TX",
+                "is_testnet_devnet": True,
+                "rationale": (
+                    f"Règle Rust [{chosen_pod}] : RSI={sol_rsi:.1f} | OBI={sol_obi:+.2f} | "
+                    f"Edge net={paper_eval['net_edge_bps']:+.1f}bps (Adv -{paper_eval['adverse_selection_bps']:.1f}bps) | "
+                    f"Fib 0.618=${sol_fib} | Action simulée (non signée, non diffusée)"
+                ),
+            }
+            self._record_live_execution(report)
+            return report
 
         # CEX Binance Testnet Live Execution (Pod 1 Carry or Pod 2 Momentum — Solana Ecosystem Only)
         qty_map = {"SOL/USDT": 0.25, "JUP/USDT": 15.0, "RAY/USDT": 8.0}
@@ -893,6 +909,8 @@ class HybridStateStore:
             rows = list(self.live_executions)
         total = 0.0
         for row in rows:
+            if row.get("is_simulated") is True:
+                continue
             value = row.get("realized_pnl_usd")
             if value is None:
                 continue
@@ -916,6 +934,7 @@ class HybridStateStore:
         bt = backtest or self.run_rust_backtest()
         with self._lock:
             live = list(self.live_executions)
+            measured_live = [row for row in live if row.get("is_simulated") is not True]
             paper_pnl = float(self.live_pnl_usd)
             paper_fees = float(self.live_fees_usd)
             pod_pnl = dict(self.live_pod_pnl)
@@ -972,9 +991,9 @@ class HybridStateStore:
             },
             "live_testnet": {
                 "source": provenance.METRIC_SOURCES[0],  # MEASURED
-                "source_detail": "realized_pnl_usd (testnet/devnet orders)",
+                "source_detail": "realized_pnl_usd (Binance Spot Testnet orders; simulated Solana rows excluded)",
                 "cumulative_cex_pnl_usd": round(cex_realized, 4),
-                "recent": self._sample_stats(live, "realized_pnl_usd"),
+                "recent": self._sample_stats(measured_live, "realized_pnl_usd"),
             },
         }
 

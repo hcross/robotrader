@@ -5,7 +5,9 @@ use robotrader_common::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-pub use vault::{RustVaultEnclave, ZeroizingBytes};
+pub use vault::{
+    SeedInput, SimulatedVault, VaultBootstrap, VaultInitError, VaultModeInput, ZeroizingBytes,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Error)]
 pub enum RiskRejection {
@@ -33,7 +35,7 @@ pub enum RiskRejection {
     #[error("OpenRouter auto-refill rejected: {reason}")]
     InferenceRefillRejected { reason: String },
 
-    #[error("Vault Enclave signing rejected: {reason}")]
+    #[error("Simulated vault signing rejected: {reason}")]
     VaultSigningRejected { reason: String },
 }
 
@@ -424,68 +426,267 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_vault_enclave_26_chains_hd_derivation_and_whitelist_signing() {
-        let enclave = RustVaultEnclave::default();
-        let manifest = enclave.export_public_manifest();
+    mod simulated_vault_tests {
+        use super::*;
+        use robotrader_common::{ExecutionMode, SeedSource};
+        use std::fs;
+        use std::path::PathBuf;
+        use std::sync::atomic::{AtomicU64, Ordering};
 
-        assert_eq!(manifest.wallets.len(), 26);
-        assert!(manifest.zeroize_on_drop);
-        assert!(!manifest.python_private_key_access);
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
-        // Verify distinct master vs leaf addresses and native formatting
-        let sol = enclave.derive_wallet_descriptor("leaf-solana").unwrap();
-        assert_ne!(sol.master_treasury_address, sol.leaf_hot_address);
-        assert_eq!(sol.master_derivation_path, "m/44'/501'/0'/0/0");
-        assert_eq!(sol.leaf_derivation_path, "m/44'/501'/1'/0/0");
+        const OPERATOR_DESTINATION: &str = "FK286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN";
 
-        let btc = enclave.derive_wallet_descriptor("leaf-bitcoin").unwrap();
-        assert!(btc.master_treasury_address.starts_with("bc1q"));
-        assert_eq!(btc.master_derivation_path, "m/84'/0'/0'/0/0");
+        fn temporary_seed_path(tag: &str) -> PathBuf {
+            std::env::temp_dir().join(format!(
+                "robotrader-simulated-vault-{}-{}-{tag}.seed",
+                std::process::id(),
+                NEXT_TEMP.fetch_add(1, Ordering::SeqCst)
+            ))
+        }
 
-        let eth = enclave.derive_wallet_descriptor("leaf-ethereum").unwrap();
-        assert!(eth.master_treasury_address.starts_with("0x"));
-        assert_eq!(eth.master_treasury_address.len(), 42);
+        fn load(
+            execution_mode: VaultModeInput,
+            secret_file: impl Into<PathBuf>,
+            env_seed: SeedInput,
+        ) -> Result<SimulatedVault, VaultInitError> {
+            SimulatedVault::load(VaultBootstrap {
+                execution_mode,
+                secret_file: secret_file.into(),
+                env_seed,
+            })
+        }
 
-        // Whitelisted operator address succeeds and zeroizes ephemeral key
-        let receipt = enclave
-            .validate_and_sign_transfer(
+        fn paper_vault() -> SimulatedVault {
+            load(VaultModeInput::Unset, temporary_seed_path("absent"), SeedInput::Unset)
+                .expect("default PAPER configuration must construct")
+        }
+
+        fn write_seed_file(tag: &str, contents: &str) -> PathBuf {
+            let path = temporary_seed_path(tag);
+            fs::write(&path, contents).expect("temporary seed file");
+            path
+        }
+
+        #[test]
+        fn test_simulated_vault_manifest_contract() {
+            let vault = paper_vault();
+            let manifest = vault.export_public_manifest();
+
+            assert_eq!(manifest.vault_mode, "SIMULATED");
+            assert!(manifest.simulated);
+            assert!(!manifest.python_private_key_access);
+            assert_eq!(manifest.whitelist_enforcement, "SIMULATED");
+            assert_eq!(manifest.seed_source, SeedSource::DeterministicDevnet);
+            assert_eq!(manifest.execution_mode, ExecutionMode::Paper);
+            assert!(!manifest.simulation_notice.is_empty());
+            assert!(manifest.simulation_notice.contains("not spendable"));
+            assert_eq!(manifest.wallets.len(), 26);
+
+            for wallet in &manifest.wallets {
+                assert!(wallet.simulated);
+                assert!(!wallet.address_is_spendable);
+                assert!(!wallet.target_master_derivation_path.is_empty());
+                assert!(!wallet.target_leaf_derivation_path.is_empty());
+            }
+
+            let sol = vault.derive_wallet_descriptor("leaf-solana").unwrap();
+            assert_ne!(sol.master_treasury_address, sol.leaf_hot_address);
+            assert_eq!(sol.target_master_derivation_path, "m/44'/501'/0'/0/0");
+            assert_eq!(sol.target_leaf_derivation_path, "m/44'/501'/1'/0/0");
+            assert_eq!(sol.target_slip44_coin_type, 501);
+
+            let btc = vault.derive_wallet_descriptor("leaf-bitcoin").unwrap();
+            assert!(btc.master_treasury_address.starts_with("bc1q"));
+            assert_eq!(btc.target_master_derivation_path, "m/84'/0'/0'/0/0");
+
+            let eth = vault.derive_wallet_descriptor("leaf-ethereum").unwrap();
+            assert!(eth.master_treasury_address.starts_with("0x"));
+            assert_eq!(eth.master_treasury_address.len(), 42);
+        }
+
+        #[test]
+        fn test_execution_mode_parsing() {
+            let absent = temporary_seed_path("mode-absent");
+            let env = SeedInput::Value("test-only-not-a-secret".to_string());
+
+            let unset = load(VaultModeInput::Unset, &absent, SeedInput::Unset).unwrap();
+            assert_eq!(
+                unset.export_public_manifest().execution_mode,
+                ExecutionMode::Paper
+            );
+            assert_eq!(
+                unset.export_public_manifest().seed_source,
+                SeedSource::DeterministicDevnet
+            );
+
+            for (value, expected) in [
+                ("BACKTEST", ExecutionMode::Backtest),
+                ("PAPER", ExecutionMode::Paper),
+                ("SIMULATED", ExecutionMode::Simulated),
+                ("LIVE", ExecutionMode::Live),
+            ] {
+                let vault = load(
+                    VaultModeInput::Value(value.to_string()),
+                    &absent,
+                    env.clone(),
+                )
+                .unwrap_or_else(|err| panic!("{value} must be accepted: {err}"));
+                assert_eq!(vault.export_public_manifest().execution_mode, expected);
+            }
+
+            let empty = load(
+                VaultModeInput::Value(String::new()),
+                &absent,
+                SeedInput::Unset,
+            )
+            .err().expect("expected a vault init error");
+            assert_eq!(empty, VaultInitError::EmptyExecutionMode);
+            assert!(empty.to_string().contains("ROBOTRADER_EXECUTION_MODE"));
+            assert!(empty.to_string().contains("BACKTEST"));
+
+            for value in [" ", "paper", "PAPER ", " Paper", "BOGUS"] {
+                let err = load(
+                    VaultModeInput::Value(value.to_string()),
+                    &absent,
+                    SeedInput::Unset,
+                )
+                .err().expect("expected a vault init error");
+                assert_eq!(
+                    err,
+                    VaultInitError::InvalidExecutionMode(value.to_string()),
+                    "{value:?} must fail closed"
+                );
+                assert!(err.to_string().contains("ROBOTRADER_EXECUTION_MODE"));
+                assert!(err.to_string().contains("accepted values are"));
+            }
+
+            let non_unicode =
+                load(VaultModeInput::NonUnicode, &absent, SeedInput::Unset).err().expect("expected a vault init error");
+            assert_eq!(non_unicode, VaultInitError::NonUnicodeExecutionMode);
+            assert!(non_unicode.to_string().contains("ROBOTRADER_EXECUTION_MODE"));
+        }
+
+        #[test]
+        fn test_seed_precedence() {
+            let live = VaultModeInput::Value("LIVE".to_string());
+            let secret = write_seed_file("precedence-secret", "test-only-not-a-secret\n");
+            let empty_secret = write_seed_file("precedence-empty", "   \n");
+
+            let from_secret = load(
+                live.clone(),
+                &secret,
+                SeedInput::Value("environment-seed".to_string()),
+            )
+            .expect("a readable non-empty secret must win");
+            assert_eq!(
+                from_secret.export_public_manifest().seed_source,
+                SeedSource::SecretFile
+            );
+
+            let from_environment = load(
+                live.clone(),
+                &empty_secret,
+                SeedInput::Value("environment-seed".to_string()),
+            )
+            .expect("an empty secret must fall through to the environment");
+            assert_eq!(
+                from_environment.export_public_manifest().seed_source,
+                SeedSource::Environment
+            );
+
+            let missing = load(live.clone(), temporary_seed_path("live-absent"), SeedInput::Unset)
+                .err().expect("expected a vault init error");
+            assert_eq!(missing, VaultInitError::MissingLiveSeed);
+
+            let live_environment = load(
+                live,
+                temporary_seed_path("live-absent"),
+                SeedInput::Value("environment-seed".to_string()),
+            )
+            .expect("live mode accepts an environment seed");
+            assert_eq!(
+                live_environment.export_public_manifest().seed_source,
+                SeedSource::Environment
+            );
+
+            let deterministic = load(
+                VaultModeInput::Unset,
+                temporary_seed_path("non-live-absent"),
+                SeedInput::Unset,
+            )
+            .expect("non-live mode uses the deterministic seed");
+            assert_eq!(
+                deterministic.export_public_manifest().seed_source,
+                SeedSource::DeterministicDevnet
+            );
+
+            let non_unicode = load(
+                VaultModeInput::Unset,
+                temporary_seed_path("non-unicode"),
+                SeedInput::NonUnicode,
+            )
+            .err().expect("expected a vault init error");
+            assert_eq!(non_unicode, VaultInitError::InvalidEnvironmentSeedEncoding);
+
+            fs::remove_file(secret).ok();
+            fs::remove_file(empty_secret).ok();
+        }
+
+        #[test]
+        fn test_simulated_receipt_contract() {
+            let vault = paper_vault();
+            let receipt = vault
+                .validate_and_sign_transfer(false, "Solana", OPERATOR_DESTINATION, 1500.0, "SOL")
+                .expect("the simulated whitelist accepts the placeholder destination");
+
+            assert!(receipt.simulated);
+            assert!(!receipt.signature_is_chain_valid);
+            assert_eq!(receipt.whitelist_enforcement, "SIMULATED");
+            assert!(receipt.destination_whitelisted);
+            assert!(receipt.key_zeroized_after_sign);
+            assert!(receipt.signature_hex.starts_with("0x"));
+            assert!(!receipt.signature_hex.is_empty());
+            assert_eq!(receipt.destination_address, OPERATOR_DESTINATION);
+            assert_eq!(receipt.amount_usd, 1500.0);
+        }
+
+        #[test]
+        fn test_rejected_destination_no_receipt() {
+            let vault = paper_vault();
+            let rejected = vault.validate_and_sign_transfer(
                 false,
                 "Solana",
-                "FK286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN",
+                "attacker_drain_wallet_999999999",
                 1500.0,
                 "SOL",
-            )
-            .expect("Whitelisted operator address should be signed");
-        assert!(receipt.destination_whitelisted);
-        assert!(receipt.key_zeroized_after_sign);
-        assert!(receipt.signature_hex.starts_with("0x"));
-        assert_eq!(receipt.signature_hex.len(), 66);
+            );
+            assert!(matches!(
+                rejected,
+                Err(RiskRejection::VaultSigningRejected { .. })
+            ));
 
-        // Untrusted / attacker address is rejected by Rust enclave
-        let bad = enclave.validate_and_sign_transfer(
-            false,
-            "Solana",
-            "attacker_drain_wallet_999999999",
-            1500.0,
-            "SOL",
-        );
-        assert!(matches!(bad, Err(RiskRejection::VaultSigningRejected { .. })));
+            let killed = vault.validate_and_sign_transfer(
+                true,
+                "Solana",
+                OPERATOR_DESTINATION,
+                1500.0,
+                "SOL",
+            );
+            assert!(matches!(killed, Err(RiskRejection::KillSwitchActive { .. })));
+        }
 
-        // Kill-switch active blocks all signing
-        let killed = enclave.validate_and_sign_transfer(
-            true,
-            "Solana",
-            "FK286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN",
-            1500.0,
-            "SOL",
-        );
-        assert!(matches!(killed, Err(RiskRejection::KillSwitchActive { .. })));
+        #[test]
+        fn test_key_zeroization_observation() {
+            let mut secret = ZeroizingBytes::new([0xAAu8; 32]);
+            assert!(!secret.is_zeroized());
+            secret.zeroize_now();
+            assert!(secret.is_zeroized());
+            assert!(secret.as_slice().iter().all(|&b| b == 0));
 
-        // Verify volatile zeroization
-        let mut secret = ZeroizingBytes::new([0xAAu8; 32]);
-        assert_eq!(secret.as_slice()[0], 0xAA);
-        secret.zeroize_now();
-        assert!(secret.as_slice().iter().all(|&b| b == 0));
+            let already_zero = ZeroizingBytes::new([0u8; 32]);
+            assert!(already_zero.is_zeroized());
+        }
+
     }
 }
