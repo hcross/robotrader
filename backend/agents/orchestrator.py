@@ -4,6 +4,7 @@ import json
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..core import provenance
@@ -29,7 +30,12 @@ class OrchestratorAgent(BaseWarmAgent):
     - Self-schedules its next wakeup (`next_wakeup_sec`) based on market urgency and TA proximity
     """
 
-    def __init__(self, name: str = "Orchestrator", store: Optional[HybridStateStore] = None):
+    def __init__(
+        self,
+        name: str = "Orchestrator",
+        store: Optional[HybridStateStore] = None,
+        ledger_path: Optional[Path | str] = None,
+    ):
         super().__init__(
             name,
             role="Autonomous Quantitative CIO, Pro Technical Analyst & Swarm Coordinator",
@@ -39,8 +45,11 @@ class OrchestratorAgent(BaseWarmAgent):
         self._reflection_lock = threading.Lock()
         self._last_tool_timings: List[Dict[str, Any]] = []
 
-        # Instantiate and interconnect the Warm-Path swarm
-        self.cost_guard = LLMMonitorAgent(name="CostGuard")
+        # Instantiate and interconnect the Warm-Path swarm. The CostGuard receives
+        # this orchestrator's own store as its measured PnL source.
+        self.cost_guard = LLMMonitorAgent(
+            name="CostGuard", store=self.store, ledger_path=ledger_path
+        )
         self.catalyst_scout = CatalystScoutAgent(name="CatalystScout", store=self.store)
         self.quant_auditor = QuantAuditorAgent(name="QuantAuditor", store=self.store)
         self.meta_allocator = MetaAllocatorAgent(name="MetaAllocator", store=self.store)

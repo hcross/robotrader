@@ -27,7 +27,7 @@ We evolve Robotrader into a **Two-Tier Hierarchical Multi-Ecosystem System (Robo
   $$\text{Expected Alpha (bps)} \ge 2.5 \times \text{Round-Trip Transfer Cost (bps)}$$
 - **Multi-Chain / Multi-Token Operator Checkout (`POST /api/v1/treasury/checkout`)**: Allows the operator to request a withdrawal of any USD amount delivered in a target token (`SOL`, `BTC`, `ETH`, `USDC`, `USDT`, `SUI`, `HYPE`, `ATOM`, etc.) on any supported blockchain, quoting fees/finality and drawing from Dry Powder first.
 - **Cross-Wing MemPalace Access**: Persists its own macro reflections in `wing="master_orchestrator"` (plus raw LLM transcripts in `TranscriptPalace`) and has **read access across all 26 leaf agents' MemPalace wings** (`StrategyMemoryPalace.format_cross_wing_digest`).
-- **Profit-Gated & Epoch-Capped OpenRouter Auto-Refill**: Monitors the OpenRouter credit balance (`low_watermark_usd = $5.00`) and automatically tops up credits before exhaustion, strictly gated by `HardRiskGate::validate_inference_refill` in Rust (`realized_trading_pnl_usd > 0`, `refill <= 10%` of realized PnL, `<= $25/24h` epoch cap, and kill-switch inactive).
+- **Profit-Gated & Epoch-Capped OpenRouter Auto-Refill**: Monitors the OpenRouter credit balance (`low_watermark_usd = $2.00`, resolved from `OPENROUTER_LOW_WATERMARK_USD`) and automatically tops up credits before exhaustion. The four conditions are enforced by the Python `CostGuard` gate until the Rust routing follow-up lands: `measured realized_trading_pnl_usd > 0`, `refill <= 10%` of measured PnL, a fixed single-refill bound `(0, $25.00]` plus a configured epoch cap `<= $25/24h` maintained as a rolling 24 h window, and `kill_switch_active == false` (see [`design.md`](../../openspec/changes/fix-costguard-python-gate/design.md)).
 
 ### 2. Tier 2 — 26 Specialized Blockchain & Venue Leaf Robots (`deepseek/deepseek-v4.1-flash-1017`)
 - **Strict Single-Ecosystem Isolation**: Each leaf agent monitors and trades **exclusively** its assigned blockchain (or dedicated multi-crypto/paper venue), reads **only** its ecosystem-scoped RSS feeds (`EcosystemRSSAggregator`), computes ecosystem-specific TA/on-chain metrics, and writes to its dedicated MemPalace wing (`wing="leaf_<slug>"`).
@@ -48,6 +48,15 @@ We evolve Robotrader into a **Two-Tier Hierarchical Multi-Ecosystem System (Robo
   2. Request a multi-chain / multi-token withdrawal (`Checkout`).
   3. Inspect current portfolio allocation, Dry Powder reserve, OpenRouter credit auto-refill status, cross-chain bridge hurdle pricer, and the long-term strategy formulated by `moonshotai/kimi-k3.1-pro`.
 - **26 Leaf Tabs (`LeafAgentView.jsx` & `Dashboard.jsx`)**: Dedicated per-ecosystem tabs displaying the leaf's Master mandate, exclusive assets, specific TA/on-chain indicators, ecosystem RSS feed, and `wing="leaf_<slug>"` MemPalace drawers.
+
+## Amendment — 2026-10-26 (fix-costguard-python-gate)
+
+The auto-refill bullet above is corrected to match the gate that actually runs. Full design: [`design.md`](../../openspec/changes/fix-costguard-python-gate/design.md).
+
+- **Low watermark**: `$2.00`, resolved from `OPENROUTER_LOW_WATERMARK_USD`. The previous `$5.00` contradicted both the backend default and the operator-facing threshold.
+- **Gate ownership**: the four conditions are enforced by the Python `CostGuard` (`backend/agents/monitor.py`) on both the automatic and operator paths. Routing the gate through `HardRiskGate::validate_inference_refill` remains a follow-up on issue #5.
+- **Measured source**: realized PnL is injected from the orchestrator's own state store; there is no module-global fallback and no fabricated profit floor.
+- **Epoch cap**: a rolling 24 h window of refill events (`(timestamp_ms, amount_usd)`), so headroom returns within the process without a restart. The window is in memory: a restart starts a new window, and persistence across restarts is a follow-up on issue #5.
 
 ## Consequences
 

@@ -15,6 +15,7 @@ assert.equal(formatMetric(0, 'MEASURED', 'money'), '$0.00');
 assert.equal(formatMetric(0, 'BOOTSTRAP', 'money'), '—');
 assert.equal(formatMetric(undefined, null, 'number'), '—');
 assert.equal(formatOperational(null, 'money'), '—');
+assert.equal(formatOperational(undefined, 'money'), '—');
 assert.equal(formatOperational(0, 'money'), '$0.00');
 assert.equal(badgeFor(null), 'UNATTRIBUTED');
 assert.equal(badgeFor(undefined), 'UNATTRIBUTED');
@@ -60,6 +61,7 @@ const forbidden = [
   'win_rate_pct || 0',
   '|| 11',
   '?? 24.5',
+  '?? 5.0',
   "|| 'backtest_fixture'",
   '|| "backtest_fixture"',
   '25000',

@@ -127,7 +127,7 @@ def get_system_status() -> Dict[str, Any]:
     return {
         "architecture": "hybrid_rust_python_v2",
         "hierarchy_version": "v3_hierarchical_multi_ecosystem",
-        "contract_version": 2,
+        "contract_version": 3,
         "kill_switch": {
             "active": state_store.kill_switch_active,
             "reason": state_store.kill_switch_reason,
@@ -258,9 +258,8 @@ def run_leaf_rust_backtest(leaf_id: str) -> Dict[str, Any]:
 
 @app.post("/api/v1/openrouter/refill")
 def trigger_openrouter_refill(req: OpenRouterRefillRequest) -> Dict[str, Any]:
-    return orchestrator.cost_guard.trigger_openrouter_refill(
-        realized_trading_pnl_usd=state_store.measured_realized_pnl_usd(),
-        requested_amount_usd=req.amount_usd,
+    return orchestrator.cost_guard.operator_refill(
+        amount_usd=req.amount_usd,
         force=req.force,
     )
 

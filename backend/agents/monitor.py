@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
+from collections import deque
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Deque, Dict, Iterator, List, Optional, Tuple
 
 from ..core.agent import BaseWarmAgent
 from ..core.schemas import Message
+
+# Rolling accounting window. An entry contributes while its age is strictly
+# below the bound; a day is a half-open interval [now - 86_400_000, now].
+ROLLING_WINDOW_MS = 86_400_000
+LEDGER_SCAN_CHUNK_BYTES = 64 * 1024
 
 # OpenRouter Frontier-Efficiency Model Catalog (Realistic effective prices in USD per 1M tokens)
 FRONTIER_FLASH_MODELS: Dict[str, Dict[str, Any]] = {
@@ -72,7 +79,14 @@ class LLMMonitorAgent(BaseWarmAgent):
     Security invariant: Unbounded automatic crypto wallet refills are strictly prohibited.
     """
 
-    def __init__(self, name: str = "CostGuard", daily_budget_usd: Optional[float] = None):
+    def __init__(
+        self,
+        name: str = "CostGuard",
+        daily_budget_usd: Optional[float] = None,
+        store: Optional[Any] = None,
+        ledger_path: Optional[Path | str] = None,
+        now_ms: Optional[Callable[[], int]] = None,
+    ):
         super().__init__(name, role="Inference Budget & Tiered Frontier-Flash Router")
         self.daily_budget_usd: float = daily_budget_usd or float(
             os.getenv("MAX_DAILY_LLM_BUDGET_USD", "5.0")
@@ -88,7 +102,19 @@ class LLMMonitorAgent(BaseWarmAgent):
         if self.master_model not in FRONTIER_FLASH_MODELS:
             self.master_model = "moonshotai/kimi-k3.1-pro"
 
-        self.total_cost_usd: float = 0.0
+        # The measured PnL source is injected by the owner (OrchestratorAgent).
+        # No module-global store is ever imported or consulted here.
+        self.store = store
+        self._now_ms: Callable[[], int] = now_ms or (lambda: int(time.time() * 1000))
+        self.ledger_path: Path = self._resolve_ledger_path(ledger_path)
+
+        # Both accounting windows are bounded deques guarded by one re-entrant
+        # lock: the scheduler and the REST thread both read and write them.
+        self._lock = threading.RLock()
+        self._spend_window: Deque[Tuple[int, float]] = deque()
+        self._epoch_window: Deque[Tuple[int, float]] = deque()
+        self._hydrated = False
+        self._hydrating = False
         self.total_tokens: int = 0
         self.total_calls: int = 0
         self.usage_log: List[Dict[str, Any]] = []
@@ -111,57 +137,135 @@ class LLMMonitorAgent(BaseWarmAgent):
         self.max_epoch_refill_usd: float = float(
             os.getenv("OPENROUTER_MAX_EPOCH_REFILL_USD", "25.00")
         )
-        self.epoch_refilled_usd: float = 0.0
         self.auto_refill_enabled: bool = True
         self.refill_history: List[Dict[str, Any]] = []
+        self.last_refill_rejection: Optional[Dict[str, Any]] = None
 
-        if os.getenv("REDIS_URL", "").strip():
+    @staticmethod
+    def _resolve_ledger_path(ledger_path: Optional[Path | str]) -> Path:
+        if ledger_path is not None:
+            return Path(ledger_path)
+        env_path = os.getenv("COSTGUARD_LEDGER_PATH", "").strip()
+        if env_path:
+            return Path(env_path)
+        # Module-anchored default: independent of the process working directory.
+        return Path(__file__).resolve().parents[1] / "data" / "transcript_ledger.jsonl"
+
+    @property
+    def measured_pnl_source_available(self) -> bool:
+        return self.store is not None
+
+    def _measured_pnl(self) -> Optional[float]:
+        if self.store is None:
+            return None
+        return float(self.store.measured_realized_pnl_usd())
+
+    def _kill_switch_active(self) -> bool:
+        if self.store is None:
+            return False
+        return bool(self.store.kill_switch_active)
+
+    def _prune_spend_window(self, now_ms: int) -> None:
+        cutoff_ms = now_ms - ROLLING_WINDOW_MS
+        window = self._spend_window
+        while window and window[0][0] <= cutoff_ms:
+            window.popleft()
+
+    def _prune_epoch_window(self, now_ms: int) -> None:
+        cutoff_ms = now_ms - ROLLING_WINDOW_MS
+        window = self._epoch_window
+        while window and window[0][0] <= cutoff_ms:
+            window.popleft()
+
+    @property
+    def total_cost_usd(self) -> float:
+        """Derived rolling 24h spend. Read-only: never assignable."""
+        self._ensure_hydrated()
+        with self._lock:
+            self._prune_spend_window(self._now_ms())
+            return round(sum(cost for _, cost in self._spend_window), 6)
+
+    @property
+    def epoch_refilled_usd(self) -> float:
+        """Derived rolling 24h refilled total. Read-only: never assignable."""
+        with self._lock:
+            self._prune_epoch_window(self._now_ms())
+            return round(sum(amount for _, amount in self._epoch_window), 6)
+
+    def _ensure_hydrated(self) -> None:
+        """Runs the lazy ledger hydration once, re-entrantly and concurrently safe."""
+        with self._lock:
+            if self._hydrated or self._hydrating:
+                return
             self.hydrate_from_ledger()
 
-    def hydrate_from_ledger(self, storage_path: Optional[Path] = None) -> Dict[str, Any]:
-        """
-        Reconstructs rolling 24h LLM spend from `backend/data/transcript_ledger.jsonl`
-        using realistic OpenRouter pricing so container restarts never reset the daily budget counter.
-        """
-        path = storage_path or (
-            Path(__file__).resolve().parents[1] / "data" / "transcript_ledger.jsonl"
-        )
-        if not path.exists():
-            return {"hydrated_calls": 0, "hydrated_cost_usd": 0.0}
+    @staticmethod
+    def _iter_reverse_lines(path: Path) -> Iterator[bytes]:
+        """Yields the file's lines newest first, reading 64 KiB blocks backwards."""
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            position = handle.tell()
+            remainder = b""
+            while position > 0:
+                chunk_size = min(LEDGER_SCAN_CHUNK_BYTES, position)
+                position -= chunk_size
+                handle.seek(position)
+                data = handle.read(chunk_size) + remainder
+                parts = data.split(b"\n")
+                remainder = parts[0]
+                for line in reversed(parts[1:]):
+                    yield line
+            if remainder:
+                yield remainder
 
-        cutoff_ms = int(time.time() * 1000) - 86_400_000
-        cost_sum = 0.0
-        tok_sum = 0
-        calls_cnt = 0
+    def _scan_ledger(
+        self, path: Path, now_ms: int
+    ) -> Tuple[int, int, float, List[Tuple[int, float]], List[Dict[str, Any]]]:
+        """Streams the active ledger then `<name>.1`, newest first, within the window.
+
+        The early stop assumes `timestamp_ms` is monotonically non-decreasing: a
+        late-appended older entry can hide earlier in-window entries. Rotated
+        segments older than `<name>.1` are out of scope.
+        """
+        cutoff_ms = now_ms - ROLLING_WINDOW_MS
+        hits: List[Tuple[int, float]] = []
         recent: List[Dict[str, Any]] = []
+        calls_cnt = 0
+        tok_sum = 0
+        cost_sum = 0.0
 
-        try:
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
+        for segment in (path, path.with_name(path.name + ".1")):
+            if not segment.exists():
+                continue
+            for raw in self._iter_reverse_lines(segment):
+                line = raw.strip()
+                if not line:
                     continue
                 try:
-                    entry = json.loads(line)
-                except Exception:
+                    entry = json.loads(line.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
                     continue
-                ts = int(entry.get("timestamp_ms", 0))
-                if ts < cutoff_ms:
+                try:
+                    ts = int(entry.get("timestamp_ms", 0))
+                except (TypeError, ValueError):
                     continue
-                p_tok = int(entry.get("prompt_tokens", 0))
-                c_tok = int(entry.get("completion_tokens", 0))
-                if p_tok <= 0 and c_tok <= 0:
-                    continue
+                if ts <= cutoff_ms:
+                    break
+                p_tok = int(entry.get("prompt_tokens", 0) or 0)
+                c_tok = int(entry.get("completion_tokens", 0) or 0)
                 model_used = str(
                     entry.get("model_used")
                     or entry.get("model_requested")
                     or self.preferred_model
                 )
                 real_cost = max(
-                    float(entry.get("cost_usd", 0.0)),
+                    float(entry.get("cost_usd", 0.0) or 0.0),
                     self.compute_call_cost(model_used, p_tok, c_tok),
                 )
                 cost_sum += real_cost
                 tok_sum += p_tok + c_tok
                 calls_cnt += 1
+                hits.append((ts, real_cost))
                 recent.append(
                     {
                         "agent": str(entry.get("agent", "unknown")),
@@ -170,14 +274,39 @@ class LLMMonitorAgent(BaseWarmAgent):
                         "tokens": p_tok + c_tok,
                     }
                 )
-        except Exception:
-            pass
 
-        self.total_cost_usd = round(cost_sum, 6)
-        self.total_tokens = tok_sum
-        self.total_calls = calls_cnt
-        self.usage_log = list(reversed(recent[-50:]))
-        return {"hydrated_calls": calls_cnt, "hydrated_cost_usd": self.total_cost_usd}
+        return calls_cnt, tok_sum, cost_sum, hits, recent
+
+    def hydrate_from_ledger(self, storage_path: Optional[Path] = None) -> Dict[str, Any]:
+        """
+        Rebuilds the rolling 24h spend window from the transcript ledger.
+
+        Missing file = empty window; malformed lines are skipped; an existing but
+        unreadable file raises. An explicit call always runs and replaces the
+        spend window (never the epoch refill window); using it after records is a
+        deliberate undercount with no production caller.
+        """
+        path = Path(storage_path) if storage_path is not None else self.ledger_path
+        with self._lock:
+            if self._hydrating:
+                return {"hydrated_calls": 0, "hydrated_cost_usd": 0.0}
+            self._hydrating = True
+            try:
+                calls_cnt, tok_sum, cost_sum, hits, recent = self._scan_ledger(
+                    path, self._now_ms()
+                )
+                # Replace, never append: a repeated hydration cannot double count.
+                self._spend_window = deque(reversed(hits))
+                self.total_tokens = tok_sum
+                self.total_calls = calls_cnt
+                self.usage_log = recent[:50]
+                self._hydrated = True
+                return {
+                    "hydrated_calls": calls_cnt,
+                    "hydrated_cost_usd": round(cost_sum, 6),
+                }
+            finally:
+                self._hydrating = False
 
     @property
     def remaining_budget_usd(self) -> float:
@@ -303,32 +432,48 @@ class LLMMonitorAgent(BaseWarmAgent):
             cost = self.compute_call_cost(model_key, prompt_tokens, completion_tokens)
 
         agent = str(content.get("agent", "unknown"))
-        self.total_cost_usd = round(self.total_cost_usd + cost, 6)
-        self.openrouter_balance_usd = round(max(0.0, self.openrouter_balance_usd - cost), 6)
-        self.total_tokens += tokens
-        self.total_calls += 1
-        self.usage_log.insert(
-            0,
-            {
-                "agent": agent,
-                "model": model_key,
-                "cost": round(cost, 6),
-                "tokens": tokens,
-            },
-        )
-        self.usage_log = self.usage_log[:50]
-
-        # Check if OpenRouter balance dropped to or below low watermark -> trigger auto-refill
-        if (
-            self.auto_refill_enabled
-            and self.openrouter_balance_usd <= self.low_watermark_usd
-            and (self.epoch_refilled_usd + self.refill_amount_usd) <= self.max_epoch_refill_usd
-        ):
-            self.trigger_openrouter_refill(
-                amount_usd=self.refill_amount_usd,
-                reason=f"Auto-refill triggered: balance ${self.openrouter_balance_usd:.2f} <= watermark ${self.low_watermark_usd:.2f}",
-                source="MASTER_ORCHESTRATOR_AUTO",
+        # Hydration precedes the first record so a call is counted exactly once:
+        # the ledger copy is already in the window, the live record is appended.
+        self._ensure_hydrated()
+        now_ms = self._now_ms()
+        with self._lock:
+            self._prune_spend_window(now_ms)
+            self._spend_window.append((now_ms, cost))
+            self.openrouter_balance_usd = round(
+                max(0.0, self.openrouter_balance_usd - cost), 6
             )
+            self.total_tokens += tokens
+            self.total_calls += 1
+            self.usage_log.insert(
+                0,
+                {
+                    "agent": agent,
+                    "model": model_key,
+                    "cost": round(cost, 6),
+                    "tokens": tokens,
+                },
+            )
+            self.usage_log = self.usage_log[:50]
+
+        # The automatic path evaluates the same gate as the operator path, with
+        # the measured PnL of the injected source and no fallback.
+        if self.auto_refill_enabled and self.openrouter_balance_usd <= self.low_watermark_usd:
+            measured_pnl = self._measured_pnl()
+            if measured_pnl is None:
+                self._record_rejection(
+                    "rejected_no_pnl_source",
+                    "No measured PnL source is injected; the refill gate is inoperative",
+                )
+            else:
+                self.trigger_openrouter_refill(
+                    realized_trading_pnl_usd=measured_pnl,
+                    amount_usd=self.refill_amount_usd,
+                    reason=(
+                        f"Auto-refill triggered: balance ${self.openrouter_balance_usd:.2f} "
+                        f"<= watermark ${self.low_watermark_usd:.2f}"
+                    ),
+                    source="MASTER_ORCHESTRATOR_AUTO",
+                )
         return self.get_status()
 
     @property
@@ -339,92 +484,159 @@ class LLMMonitorAgent(BaseWarmAgent):
     def openrouter_credit_balance_usd(self, val: float) -> None:
         self.openrouter_balance_usd = float(val)
 
+    @staticmethod
+    def _format_signed_usd(value: float) -> str:
+        return f"{'-' if float(value) < 0 else ''}${abs(float(value)):.2f}"
+
+    def _record_rejection(self, status: str, reason: str) -> None:
+        """Records the bounded diagnosis object; never a refill-history event."""
+        with self._lock:
+            self.last_refill_rejection = {
+                "status": status,
+                "reason": reason,
+                "timestamp_ms": self._now_ms(),
+            }
+
+    def _reject(self, status: str, reason: str) -> Dict[str, Any]:
+        self._record_rejection(status, reason)
+        return {
+            "status": status,
+            "reason": reason,
+            "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
+        }
+
+    def operator_refill(
+        self,
+        amount_usd: Optional[float] = None,
+        force: bool = True,
+        reason: str = "Operator-requested credit top-up",
+        source: str = "OPERATOR_REST",
+    ) -> Dict[str, Any]:
+        """Operator facade: resolves the injected measured source, then runs the gate."""
+        measured_pnl = self._measured_pnl()
+        if measured_pnl is None:
+            return self._reject(
+                "rejected_no_pnl_source",
+                "No measured PnL source is injected; the refill gate is inoperative",
+            )
+        return self.trigger_openrouter_refill(
+            realized_trading_pnl_usd=measured_pnl,
+            requested_amount_usd=amount_usd,
+            reason=reason,
+            source=source,
+            force=force,
+        )
+
     def trigger_openrouter_refill(
         self,
+        realized_trading_pnl_usd: float,
         amount_usd: Optional[float] = None,
         reason: str = "Master Orchestrator scheduled credit top-up",
         source: str = "MASTER_ORCHESTRATOR",
         force: bool = False,
-        realized_trading_pnl_usd: Optional[float] = None,
         requested_amount_usd: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Executes a bounded OpenRouter credit refill from the Master Orchestrator's OpEx reserve.
-        Enforces the HardRiskGate profit-gate (`realized_trading_pnl_usd > 0`) and epoch cap
-        (`max_epoch_refill_usd`) so a runaway loop can never drain the principal treasury.
-        """
-        import time
 
-        if realized_trading_pnl_usd is not None and float(realized_trading_pnl_usd) <= 0.0:
-            return {
-                "status": "rejected_no_realized_profit",
-                "reason": f"Realized trading PnL (${float(realized_trading_pnl_usd):.2f}) <= 0; principal treasury protected",
-                "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
-            }
+        Every path runs the same gate in this order: kill switch -> strictly
+        positive measured PnL -> fixed `(0, $25.00]` bound -> 10 % profit share ->
+        watermark (unless `force`) -> rolling 24 h epoch cap. Rejections never
+        mutate the balance, either window, or the refill history.
+        """
+        pnl = float(realized_trading_pnl_usd)
+
+        if self._kill_switch_active():
+            return self._reject(
+                "rejected_kill_switch",
+                "Kill switch active; inference credit refills are suspended",
+            )
+
+        if pnl <= 0.0:
+            return self._reject(
+                "rejected_no_realized_profit",
+                f"Realized trading PnL ({self._format_signed_usd(pnl)}) <= 0; "
+                "principal treasury protected",
+            )
 
         eff_req = requested_amount_usd if requested_amount_usd is not None else amount_usd
         amt = round(float(eff_req if eff_req is not None else self.refill_amount_usd), 2)
         if amt <= 0 or amt > 25.0:
-            return {
-                "status": "rejected",
-                "reason": f"Amount ${amt:.2f} outside allowed single-refill bounds (0, $25.00]",
-                "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
-            }
-        if (
-            realized_trading_pnl_usd is not None
-            and amt > float(realized_trading_pnl_usd) * 0.10 + 1e-6
-        ):
-            return {
-                "status": "rejected_exceeds_profit_share",
-                "reason": f"Requested refill ${amt:.2f} > 10% of realized PnL (${float(realized_trading_pnl_usd):.2f})",
-                "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
-            }
-        if not force and self.openrouter_balance_usd > self.low_watermark_usd:
-            return {
-                "status": "skipped_sufficient_balance",
-                "reason": f"Balance ${self.openrouter_balance_usd:.2f} > low watermark ${self.low_watermark_usd:.2f}",
-                "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
-            }
-        if (self.epoch_refilled_usd + amt) > self.max_epoch_refill_usd:
-            return {
-                "status": "rejected_epoch_cap",
-                "reason": f"Epoch cap reached (${self.epoch_refilled_usd:.2f} + ${amt:.2f} > ${self.max_epoch_refill_usd:.2f})",
-                "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
-            }
+            return self._reject(
+                "rejected",
+                f"Amount ${amt:.2f} outside allowed single-refill bounds (0, $25.00]",
+            )
+        if amt > pnl * 0.10 + 1e-6:
+            return self._reject(
+                "rejected_exceeds_profit_share",
+                f"Requested refill ${amt:.2f} > 10% of realized PnL "
+                f"({self._format_signed_usd(pnl)})",
+            )
 
-        before_bal = round(self.openrouter_balance_usd, 4)
-        self.openrouter_balance_usd = round(self.openrouter_balance_usd + amt, 4)
-        self.epoch_refilled_usd = round(self.epoch_refilled_usd + amt, 2)
-        event = {
-            "timestamp_ms": int(time.time() * 1000),
-            "amount_usd": amt,
-            "balance_before_usd": before_bal,
-            "balance_after_usd": self.openrouter_balance_usd,
-            "epoch_refilled_usd": self.epoch_refilled_usd,
-            "max_epoch_refill_usd": self.max_epoch_refill_usd,
-            "source": source,
-            "reason": reason,
-        }
-        self.refill_history.insert(0, event)
-        self.refill_history = self.refill_history[:25]
-        return {
-            "status": "refilled",
-            "refilled_usd": amt,
-            "event": event,
-            "openrouter_balance_usd": self.openrouter_balance_usd,
-        }
+        with self._lock:
+            if not force and self.openrouter_balance_usd > self.low_watermark_usd:
+                return {
+                    "status": "skipped_sufficient_balance",
+                    "reason": (
+                        f"Balance ${self.openrouter_balance_usd:.2f} > low watermark "
+                        f"${self.low_watermark_usd:.2f}"
+                    ),
+                    "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
+                }
+
+            now_ms = self._now_ms()
+            self._prune_epoch_window(now_ms)
+            epoch_total = sum(amount for _, amount in self._epoch_window)
+            if (epoch_total + amt) > self.max_epoch_refill_usd:
+                return self._reject(
+                    "rejected_epoch_cap",
+                    f"Epoch cap reached (${epoch_total:.2f} + ${amt:.2f} > "
+                    f"${self.max_epoch_refill_usd:.2f})",
+                )
+
+            before_bal = round(self.openrouter_balance_usd, 4)
+            self.openrouter_balance_usd = round(self.openrouter_balance_usd + amt, 4)
+            self._epoch_window.append((now_ms, amt))
+            epoch_total = round(epoch_total + amt, 6)
+            event = {
+                "timestamp_ms": now_ms,
+                "amount_usd": amt,
+                "balance_before_usd": before_bal,
+                "balance_after_usd": self.openrouter_balance_usd,
+                "epoch_refilled_usd": epoch_total,
+                "max_epoch_refill_usd": self.max_epoch_refill_usd,
+                "source": source,
+                "reason": reason,
+            }
+            self.refill_history.insert(0, event)
+            self.refill_history = self.refill_history[:25]
+            return {
+                "status": "refilled",
+                "refilled_usd": amt,
+                "event": event,
+                "openrouter_balance_usd": self.openrouter_balance_usd,
+            }
 
     def get_status(self) -> Dict[str, Any]:
+        spend_usd = self.total_cost_usd
         utilization_pct = (
-            (self.total_cost_usd / self.daily_budget_usd) * 100.0
+            (spend_usd / self.daily_budget_usd) * 100.0
             if self.daily_budget_usd > 0
             else 100.0
+        )
+        auto_refill_label = (
+            "ENABLED_PROFIT_GATED" if self.auto_refill_enabled else "DISABLED"
+        )
+        auto_refill_policy = (
+            "PROFIT_GATED_CAPPED_BY_ORCHESTRATOR"
+            if self.auto_refill_enabled
+            else "DISABLED"
         )
         profile = self.select_cognitive_profile()
         return {
             "agent": self.agent_name,
             "daily_budget_usd": round(self.daily_budget_usd, 2),
-            "total_spent_usd": round(self.total_cost_usd, 5),
+            "total_spent_usd": round(spend_usd, 5),
             "remaining_usd": round(self.remaining_budget_usd, 5),
             "remaining_ratio_pct": round(self.remaining_budget_ratio * 100.0, 1),
             "utilization_pct": round(utilization_pct, 3),
@@ -446,9 +658,11 @@ class LLMMonitorAgent(BaseWarmAgent):
                 "refill_amount_usd": round(self.refill_amount_usd, 2),
                 "epoch_refilled_usd": round(self.epoch_refilled_usd, 2),
                 "max_epoch_refill_usd": round(self.max_epoch_refill_usd, 2),
+                "measured_pnl_source_available": self.measured_pnl_source_available,
+                "last_refill_rejection": self.last_refill_rejection,
                 "auto_refill_enabled": self.auto_refill_enabled,
                 "refill_history": self.refill_history[:5],
             },
-            "auto_wallet_refill": "DISABLED_BY_SECURITY_POLICY",
-            "auto_refill_policy": "PROFIT_GATED_CAPPED_BY_ORCHESTRATOR",
+            "auto_wallet_refill": auto_refill_label,
+            "auto_refill_policy": auto_refill_policy,
         }

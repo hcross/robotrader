@@ -8,6 +8,7 @@ suite never starts the live worker or the cognitive scheduler.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -263,12 +264,21 @@ print("missing-binary contract ok")
 
 class MissingBinaryEndpointIntegrationTest(unittest.TestCase):
     def test_endpoints_return_the_uniform_503_in_an_isolated_child(self) -> None:
-        result = subprocess.run(
-            [sys.executable, "-c", CHILD_SCRIPT],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        # The child imports backend.server, so isolate the CostGuard ledger from
+        # any developer ledger at the production default.
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [sys.executable, "-c", CHILD_SCRIPT],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env={
+                    **os.environ,
+                    "COSTGUARD_LEDGER_PATH": str(
+                        Path(tmp) / "transcript_ledger.jsonl"
+                    ),
+                },
+            )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("missing-binary contract ok", result.stdout)

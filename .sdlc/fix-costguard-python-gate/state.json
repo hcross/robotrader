@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "change_id": "fix-costguard-python-gate",
+  "title": "Make the Python CostGuard refill path truthful and roll over its daily budget",
+  "issue": 5,
+  "lane": "L",
+  "lane_reason": "Capital-protection path (refill gate, daily cap); Lane L requires design.md and PLAN review per sdlc/PROTOCOL.md §2.1.",
+  "lane_change": {
+    "from": "S",
+    "to": "L",
+    "reason": "CostGuard refill gate and daily cap are a capital-protection path per sdlc/PROTOCOL.md §2.1; PLAN and design.md are required."
+  },
+  "branch": "sdlc/5-fix-costguard-python-gate",
+  "worktree": ".worktrees/5-fix-costguard-python-gate",
+  "base_branch": "master",
+  "base_sha": "f1de04193d751530652b9a70d4a0bb0e9148da10",
+  "created_at": "2026-10-25T23:14:06Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev",
+  "pr": 18,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "1ef4c638295fbc8e3fc24601d68b7c1250c2e735",
+      "updated_at": "2026-10-26T00:07:12Z"
+    },
+    "plan": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-plan-reviewer",
+      "last_sha": "ad721ce260e568f64fbc5a95002ad2148106cfe7",
+      "updated_at": "2026-10-26T06:45:19Z"
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/5-fix-costguard-python-gate",
+  "partial_issue": true,
+  "partial_reason": "Rust-authoritative gate, real OpenRouter /credits balance and out-of-band refill, and removal of the dead Rust validator remain out of scope"
+}

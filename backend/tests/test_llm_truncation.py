@@ -8,7 +8,9 @@ silently took over — the paid completion was discarded.
 
 import json
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from urllib.error import URLError
 
@@ -155,9 +157,14 @@ class TestTruncationRecovery(unittest.TestCase):
         from backend.agents.orchestrator import OrchestratorAgent
         from backend.core.state_store import HybridStateStore
 
-        with patch.dict(os.environ, {"REDIS_URL": ""}, clear=False):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ, {"REDIS_URL": ""}, clear=False
+        ):
             store = HybridStateStore()
-            orch = OrchestratorAgent(store=store)
+            orch = OrchestratorAgent(
+                store=store,
+                ledger_path=Path(tmp) / "transcript_ledger.jsonl",
+            )
 
         # Force ECO_CONSERVATION (10% budget remaining -> max_tokens=350, MECHANICAL_ENVELOPE)
         orch.cost_guard.record_usage({"agent": "test", "cost": 4.5, "tokens": 1000})
