@@ -73,10 +73,17 @@ case "$CLI" in
       --permission-mode "${SDLC_CLAUDE_PERMISSION_MODE:-auto}"
     ;;
   agy)
-    exec agy -p "$PROMPT" \
-      --agent "$ROLE" \
-      --output-format json \
-      --mode "${SDLC_AGY_MODE:-auto}"
+    AGY_ARGS=(--agent "$ROLE" --output-format json)
+    if [ -n "${SDLC_AGY_MODEL:-}" ]; then
+      AGY_ARGS+=(--model "$SDLC_AGY_MODEL")
+    fi
+    if [ -n "${SDLC_AGY_MODE:-}" ]; then
+      AGY_ARGS+=(--mode "$SDLC_AGY_MODE")
+    fi
+    if [ "${SDLC_AGY_DANGEROUSLY_SKIP_PERMISSIONS:-false}" = "true" ]; then
+      AGY_ARGS=(--dangerously-skip-permissions "${AGY_ARGS[@]}")
+    fi
+    exec agy -p "$PROMPT" "${AGY_ARGS[@]}"
     ;;
   *)
     echo "error: SDLC_CLI must be auto, claude, or agy (got '$CLI')" >&2

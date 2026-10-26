@@ -144,6 +144,20 @@ Note: `agy agents` lists user-level agents only. Project agents in
 `.agent/agents/` are still selectable with `agy --agent <name>` and appear in
 the `/agents` panel. Use `--agent`, not the listing, to confirm availability.
 
+Headless Antigravity runs need an explicit model and permission mode:
+
+```bash
+SDLC_CLI=agy \
+SDLC_AGY_MODEL=gemini-3.8-flash-medium \
+SDLC_AGY_DANGEROUSLY_SKIP_PERMISSIONS=true \
+  scripts/sdlc/run-agent.sh sdlc-dev <brief>
+```
+
+`SDLC_AGY_MODEL` accepts an id from `agy models`. `--mode auto` is not
+available on every account; leave `SDLC_AGY_MODE=` empty and use the explicit
+permission bypass in a trusted worktree. Without it, headless `read_file`
+calls are auto-denied and the agent cannot work.
+
 ```bash
 # Claude Code
 SDLC_CLI=claude scripts/sdlc/run-agent.sh sdlc-dev-reviewer <brief>

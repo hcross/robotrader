@@ -227,6 +227,8 @@ risk, and a recommendation. The agent stops; it does not choose the risky path.
 | `new finding ... must be regression/security/critical` | moving goalposts | move it to a follow-up issue |
 | `openspec validate` fails | malformed delta | fix the exact issue OpenSpec reports |
 | Antigravity: `unknown agent` | adapter missing | `scripts/sdlc/install-agents.sh` |
+| Antigravity headless: `read_file` auto-denied | no permission bypass or allow-rule | set `SDLC_AGY_DANGEROUSLY_SKIP_PERMISSIONS=true` in a trusted worktree, or add allow-rules |
+| Antigravity: `--mode auto is not available` | account plan does not expose `auto` | leave `SDLC_AGY_MODE=` empty and use the permission bypass above |
 | Claude: nested session refused | `CLAUDECODE` set | `SDLC_CLI=agy` or `SDLC_ALLOW_NESTED_CLAUDE=1` |
 | `gh pr checks` pending | CI still running | wait; do not bypass the gate |
 
