@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev",
+  "status": "dev-review",
   "pr": 21,
   "areas": [],
   "stages": {
@@ -35,12 +35,12 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "changes_requested",
+      "rounds": 1,
+      "last_verdict": "CHANGES_REQUESTED",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "692e4b7125050e75d2c3fac45396967c2f9b982f",
+      "updated_at": "2026-10-26T08:47:41Z"
     }
   },
   "escalation": null,
