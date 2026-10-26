@@ -161,6 +161,17 @@ class InjectionAndSourceTests(_CostGuardTestCase):
         self.assertEqual(cg.epoch_refilled_usd, 0.0)
         self.assertEqual(cg.refill_history, [])
 
+    def test_operator_path_uses_the_injected_measured_helper(self) -> None:
+        cg = self.guard(store=_Store(pnl=-10.0))
+
+        result = cg.operator_refill(force=True)
+
+        self.assertEqual(result["status"], "rejected_no_realized_profit")
+        self.assertIn("-$10.00", result["reason"])
+        self.assertEqual(cg.refill_history, [])
+        self.assertEqual(cg.epoch_refilled_usd, 0.0)
+        self.assertAlmostEqual(cg.openrouter_balance_usd, 8.5, places=6)
+
 
 class GateTests(_CostGuardTestCase):
     def test_missing_realized_pnl_argument_raises_before_mutation(self) -> None:

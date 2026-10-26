@@ -1059,6 +1059,15 @@ elif scenario == "leaf-endpoints":
         ).json()["leaf"]
         assert mandate["performance"]["live_testnet"]["source"] == "MEASURED"
         assert mandate["active_positions_count"] is None
+elif scenario == "refill-no-source":
+    server.orchestrator.cost_guard.store = None
+    balance_before = server.orchestrator.cost_guard.openrouter_balance_usd
+    response = client.post("/api/v1/openrouter/refill", json={"force": True})
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "rejected_no_pnl_source", payload
+    assert server.orchestrator.cost_guard.openrouter_balance_usd == balance_before
+    assert server.orchestrator.cost_guard.refill_history == []
 elif scenario == "leaf-solana-backtest":
     backtest.stop()
     with mock.patch(
@@ -1115,6 +1124,9 @@ class ServerPayloadTests(unittest.TestCase):
 
     def test_leaf_endpoints_derive_populations(self) -> None:
         self._run("leaf-endpoints")
+
+    def test_refill_endpoint_rejects_a_missing_source(self) -> None:
+        self._run("refill-no-source")
 
     def test_leaf_solana_backtest_endpoint_is_fixture(self) -> None:
         self._run("leaf-solana-backtest")
