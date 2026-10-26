@@ -7,7 +7,7 @@ You are `sdlc-spec-author` for change `mark-vault-simulated`.
 - Worktree: `/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/2-mark-vault-simulated`
 - Artifact under work: openspec/changes/mark-vault-simulated/proposal.md + specs/** + tasks.md (Lane S)
 - Reviewed SHA: run `git rev-parse HEAD` in the worktree and record it in the verdict.
-- Reason: initial authoring
+- Reason: revise findings from round 1
 
 Read first, in this order:
 1. `sdlc/PROTOCOL.md`

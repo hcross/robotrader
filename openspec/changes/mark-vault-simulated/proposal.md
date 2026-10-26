@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Outcome | The vault is named `SimulatedVault`, every manifest, receipt, and UI surface is labelled `SIMULATED`, Python holds no key and fabricates no manifest or signature, and live mode refuses to start without a secret-mounted seed. |
+| Outcome | The vault is named `SimulatedVault`, every manifest, receipt, and UI surface is labelled `SIMULATED`, Python holds no key and fabricates no manifest or signature, and live mode refuses to start without seed material (secret mount or environment). |
 | Why now | Issue #2 shows the vault claiming BIP-32/BIP-44/SLIP-0010 derivation, spendable addresses, and whitelist enforcement that it does not implement. An operator could send real funds to an address with no chain meaning. |
 | Blast radius | `engine-rs` (`common`, `risk-gate`, `node`), backend (`hierarchy.py`, `state_store.py`, `solana_tools.py`, `server.py`), the leaf UI, vault docs, ADR-0003, README, AGENTS.md, and tests. No `PolicyEnvelope`, Redis schema, or strategy-pod change. |
-| Risk | Medium. Worst failure: a legitimate paper or devnet run is refused because the Rust binary or seed is unavailable. Every refusal is explicit and fail-closed. |
+| Risk | Medium. Worst failure: a live-intended deployment that leaves `ROBOTRADER_EXECUTION_MODE` unset silently runs in `PAPER` with the devnet seed, though every surface stays `SIMULATED`; an unrecognized value fails closed, and an unavailable binary refuses vault operations. |
 | Effort | L (SPEC + PLAN + DEV). |
 | Decision needed | Approve the **BREAKING** manifest/receipt contract rename and the removal of Python-held Solana signing. |
 
@@ -24,13 +24,14 @@ flowchart LR
 
 ## What Changes
 
-- Rename the Rust vault type to `SimulatedVault`; the manifest reports `vault_mode: SIMULATED`, and wallet descriptors and receipts carry explicit simulation and non-spendability flags.
-- Add an explicit live-mode gate: `LIVE` without a non-empty secret-mounted seed fails closed; the deterministic devnet seed is permitted only outside live mode and is reported as a seed source, never as the vault mode.
-- Remove the Python fallback manifest and the Python HMAC signer; when the Rust binary is unavailable, vault endpoints and checkout fail closed with no fabricated data and no state mutation.
+- Rename the Rust vault type to `SimulatedVault`; the manifest reports `vault_mode: SIMULATED` and an enumerated `seed_source` (`SECRET_FILE`, `ENVIRONMENT`, or `DETERMINISTIC_DEVNET`), and wallet descriptors and receipts carry explicit simulation and non-spendability flags.
+- Requalify descriptor metadata: derivation paths and SLIP-44 values become `target_*` fields, and `key_isolation_mode` is removed or replaced by a `SIMULATED_*` value that claims no HD, zeroization, custody, or exchange-withdrawal guarantee.
+- Add an explicit live-mode gate: `ROBOTRADER_EXECUTION_MODE` accepts `BACKTEST`, `PAPER`, `SIMULATED`, and `LIVE`; unset means `PAPER`, an unrecognized value fails closed, and `LIVE` without seed material fails closed. The deterministic devnet seed is permitted only outside live mode and is reported through `seed_source`.
+- Remove the Python fallback manifest and the Python HMAC signer; when the Rust binary is unavailable, vault endpoints and checkout fail closed with no fabricated data and no state mutation, while the backend still starts and its existing non-vault endpoint contracts remain intact.
 - Remove Python private-key custody: no `SOLANA_PRIVATE_KEY` read, no signing `Keypair`, no `transfer_sol(..., simulate_only=False)`, no broadcast. The Solana path is explicitly simulated and labelled.
-- Derive `destination_whitelisted` and `key_zeroized_after_sign` from the actual check, or remove them; label whitelist enforcement as simulated.
-- Update documentation, README, AGENTS.md, ADR-0003, UI wording, and tests so every surface states `SIMULATED`.
-- **BREAKING (manifest/receipt contract)**: `vault_mode` becomes `SIMULATED`; new simulation/non-spendability flags are required; the unqualified `withdrawal_whitelist_enforced: true` is replaced by a simulated label.
+- Derive `destination_whitelisted` and `key_zeroized_after_sign` from the actual check, and define the simulated whitelist contract exactly: top-level and receipt `whitelist_enforcement: "SIMULATED"`, per-wallet `withdrawal_whitelist_enforced` removed or `false`.
+- Update documentation, README, AGENTS.md, ADR-0003, `docs/architecture.md`, `sdlc/checklists/dev.md`, `openspec/config.yaml`, code docstrings/comments, UI wording, and tests so every surface states `SIMULATED`.
+- **BREAKING (manifest/receipt contract)**: `vault_mode` becomes `SIMULATED`; `seed_source`, `simulated`, `address_is_spendable`, `signature_is_chain_valid`, and `whitelist_enforcement` are required; `master_derivation_path`, `leaf_derivation_path`, and `slip44_coin_type` are renamed `target_*`; `withdrawal_whitelist_enforced` is removed or becomes `false`. Consumers must read the simulation fields and must not treat any address or signature as chain-valid.
 
 ## Capabilities
 
@@ -40,7 +41,7 @@ flowchart LR
 
 ### Modified Capabilities
 
-- None. The existing `contract` spec covers `PolicyEnvelope` only; no existing requirement governs vault claims.
+- None. The existing `contract` spec covers `PolicyEnvelope` only. The existing `build-packaging` requirement that the separate vault-manifest/sign-transfer candidate list in `backend/core/hierarchy.py` remains unchanged stays satisfied: this change does not modify that candidate list.
 
 ## Non-goals
 
@@ -54,10 +55,10 @@ flowchart LR
 
 ## Impact
 
-- **Rust**: `engine-rs/crates/common/src/lib.rs` (manifest and receipt contract), `engine-rs/crates/risk-gate/src/vault.rs` (`SimulatedVault`, seed and mode handling, derived flags), `engine-rs/crates/risk-gate/src/lib.rs` (tests), `engine-rs/crates/node/src/main.rs` (CLI exit behavior).
-- **Backend**: `backend/core/hierarchy.py` (remove fallback manifest/signer, fail closed), `backend/core/state_store.py` (simulated Solana tick, no broadcast), `backend/tools/solana_tools.py` (no key custody), `backend/server.py` (manifest 503 and testnet verify), backend tests.
+- **Rust**: `engine-rs/crates/common/src/lib.rs` (manifest and receipt contract), `engine-rs/crates/risk-gate/src/vault.rs` (`SimulatedVault`, seed and mode handling, target metadata, derived flags, docstrings/comments), `engine-rs/crates/risk-gate/src/lib.rs` (tests), `engine-rs/crates/node/src/main.rs` (CLI exit behavior).
+- **Backend**: `backend/core/hierarchy.py` (remove fallback manifest/signer, fail closed without breaking startup, docstrings), `backend/core/state_store.py` (simulated Solana tick, no broadcast), `backend/tools/solana_tools.py` (no key custody), `backend/server.py` (manifest 503, testnet verify, docstring), backend tests including `backend/tests/test_missing_binary.py`.
 - **Frontend**: `frontend/src/components/LeafAgentView.jsx` renders a visible `SIMULATED` vault badge and no real-custody claim.
-- **Docs**: `docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md`, `README.md`, `AGENTS.md`, `docs/adr/0003-hierarchical-multi-ecosystem-architecture.md`, `.env.example`.
+- **Docs and process artifacts**: `docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md`, `docs/architecture.md`, `README.md`, `AGENTS.md`, `docs/adr/0003-hierarchical-multi-ecosystem-architecture.md`, `sdlc/checklists/dev.md`, `openspec/config.yaml`, `.env.example`.
 - **API contract**: `GET /api/v1/vault/manifest` returns HTTP 503 when the Rust vault is unavailable and, when available, a manifest with `vault_mode: SIMULATED` and simulation flags. `POST /api/v1/treasury/checkout` returns a fail-closed rejection when the vault is unavailable. Both are **BREAKING** for consumers that expect the old fields.
 - **Backtest / paper / live**: backtest and paper are unaffected in behavior and remain deterministic. Live mode now refuses to construct the vault without a secret-mounted seed; no live broadcast is introduced or retained.
 - **Security posture**: no key material is added anywhere; Python private-key access and the fabricated-signature path are removed.
