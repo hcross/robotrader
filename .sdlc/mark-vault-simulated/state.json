@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev",
+  "status": "merged",
   "pr": 19,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": "2026-10-26T07:26:12Z"
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "76b6d098431f74094dc68705b4cdbb505b9054cb",
+      "updated_at": "2026-10-26T07:40:25Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/2-mark-vault-simulated",
-  "partial_issue": true
+  "partial_issue": true,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-25 (run continued 2026-10-26)",
+    "at": "2026-10-26T07:41:25Z",
+    "mode": "full-auto",
+    "pr": 19,
+    "head_sha": "76b6d098431f74094dc68705b4cdbb505b9054cb"
+  }
 }
