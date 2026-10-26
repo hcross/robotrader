@@ -8,7 +8,7 @@ use robotrader_strategies::{
     ecosystem_pod_specs, strategy_pods_for_leaf, MAX_PODS_PER_BLOCKCHAIN,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Canonical machine-readable kind for the deterministic fixture.
 ///
@@ -43,7 +43,7 @@ pub struct BacktestSummary {
     pub total_trades: usize,
     pub rejected_orders: usize,
     pub total_fees_usd: f64,
-    pub pod_pnl_attribution: HashMap<String, f64>,
+    pub pod_pnl_attribution: BTreeMap<String, f64>,
     pub executions: Vec<ExecutionReport>,
 }
 
@@ -91,7 +91,9 @@ impl BacktestEngine {
 
         let mut executions = Vec::new();
         let mut rejected_orders = 0usize;
-        let mut pod_pnl_attribution: HashMap<String, f64> = HashMap::new();
+        // A BTreeMap keeps JSON key order deterministic across runs, so the
+        // repeated-run byte-equality test holds for the whole summary.
+        let mut pod_pnl_attribution: BTreeMap<String, f64> = BTreeMap::new();
         let mut trade_returns_pct: Vec<f64> = Vec::new();
         let mut max_dd_seen_pct = 0.0f64;
 
