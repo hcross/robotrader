@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev-review",
+  "status": "merged",
   "pr": 21,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "changes_requested",
-      "rounds": 1,
-      "last_verdict": "CHANGES_REQUESTED",
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
       "last_reviewer": "sdlc-dev-reviewer",
-      "last_sha": "692e4b7125050e75d2c3fac45396967c2f9b982f",
-      "updated_at": "2026-10-26T08:47:41Z"
+      "last_sha": "11babc754f47153d5c1c437b4b41db195b4526da",
+      "updated_at": "2026-10-26T08:52:29Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/3-mark-backtest-artifact-honest",
-  "partial_issue": true
+  "partial_issue": true,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-25 (run continued 2026-10-26)",
+    "at": "2026-10-26T08:56:48Z",
+    "mode": "full-auto",
+    "pr": 21,
+    "head_sha": "11babc754f47153d5c1c437b4b41db195b4526da"
+  }
 }
