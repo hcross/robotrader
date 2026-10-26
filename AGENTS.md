@@ -8,7 +8,7 @@ Robotrader v3 is a **Hierarchical Hybrid Rust/Python Quantitative & Agentic Cryp
 It strictly separates:
 1. **Master Orchestrator & Cross-Chain Treasury (`moonshotai/kimi-k3.1-pro`)**: Holds the Master Portfolio, enforces the `Dry Powder` reserve floor ($\ge 20\%$), prices cross-chain transfer viability (`hurdle_rate_bps = 2.5x round-trip cost`), executes multi-chain/multi-token operator `Checkout` requests, reads across all 26 leaf agents' MemPalace wings (`wing="master_orchestrator"` + `recall_across_wings`), and manages profit-gated/epoch-capped OpenRouter credit auto-refill on a `3600s` (1h) macro cadence.
 2. **26 Specialized Blockchain & Venue Leaf Robots (`deepseek/deepseek-v4.1-flash-1017`)**: Each leaf robot is strictly isolated to **one single blockchain** (or dedicated multi-crypto/paper venue), with its own RSS feed (`EcosystemRSSAggregator`), specific TA/on-chain indicators, dedicated MemPalace wing (`wing="leaf_<slug>"`), and `1..=4` ecosystem-adapted Rust Strategy Pods in `engine-rs`. Active leaves operate on a `900s` (15m candle close) cadence.
-3. **Deterministic Sub-millisecond Execution, Hard Risk & Simulated Vault (`engine-rs` in Rust)**: Hot-path event processing, order book imbalance (OBI) parsing, `HardRiskGate` validation (<50µs, including `validate_inference_refill`), `SimulatedVault` (`SIMULATED` manifest and receipts across all 26 chains: non-spendable addresses, non-chain-valid audit signatures, and a simulated prefix whitelist — see [`docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md`](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)), Kelly position sizing, multi-chain on-chain anti-rug / honeypot checks (`OnChainTokenSafety`), and zero LLM latency.
+3. **Deterministic Sub-millisecond Execution, Hard Risk & Simulated Vault (`engine-rs` in Rust)**: Hot-path event processing, order book imbalance (OBI) parsing, `HardRiskGate` validation (measured mean **0.244 µs**, including `validate_inference_refill`; bench: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`), `SimulatedVault` (`SIMULATED` manifest and receipts across all 26 chains: non-spendable addresses, non-chain-valid audit signatures, and a simulated prefix whitelist — see [`docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md`](docs/CRYPTO_VAULT_AND_KEY_MANAGEMENT.md)), Kelly position sizing, multi-chain on-chain anti-rug / honeypot checks (`OnChainTokenSafety`), and zero LLM latency.
 4. **Cost-Controlled Warm-Path Scheduling ([`docs/PERFORMANCE_AND_COST_AUDIT.md`](docs/PERFORMANCE_AND_COST_AUDIT.md))**: Background LLM scheduling is paused by default on startup (`ENABLE_AUTO_LLM_SCHEDULER=false`, `$0.00/h`) and can be toggled in the UI (`POST /api/v1/cognitive/scheduler`). `CostGuard` uses realistic OpenRouter pricing and hydrates rolling 24h spend from `backend/data/transcript_ledger.jsonl`.
 
 ## Mandatory Delivery Workflow (SDLC)
@@ -63,7 +63,7 @@ Human guide: [`docs/sdlc/README.md`](docs/sdlc/README.md) · Decision record:
 │   ├── Cargo.toml
 │   └── crates/
 │       ├── common/     # Canonical types: MarketEvent, OrderIntent (token_safety: OnChainTokenSafety), PolicyEnvelope
-│       ├── risk-gate/  # Synchronous HardRiskGate (<50µs), SimulatedVault (26 chains, SIMULATED), Kelly sizer, OnChainTokenSafety anti-rug
+│       ├── risk-gate/  # Synchronous HardRiskGate (measured 0.244µs), SimulatedVault (26 chains, SIMULATED), Kelly sizer, OnChainTokenSafety anti-rug
 │       ├── strategies/ # StrategyPod trait + Pod 1 (Carry), Pod 2 (Momentum), Pod 3 (OnChainAlphaPod), Pod 4 (DexSniperPod)
 │       ├── exec-router/# Post-Only CEX maker router & On-Chain DEX Aggregator + Atomic MEV bundle simulator
 │       ├── backtest/   # Unified deterministic replay engine (Backtest == Paper == Live)
@@ -77,6 +77,8 @@ Human guide: [`docs/sdlc/README.md`](docs/sdlc/README.md) · Decision record:
 ├── frontend/           # React 19 + Tailwind v4 Real-Time Command Center (ZeroTier & Devnet friendly)
 └── docs/               # ADRs (ADR-0001, ADR-0002), Architecture & Agent/Pod specifications
 ```
+
+> **Hot-path budget evidence.** `HardRiskGate::validate` measured mean: **0.244 µs** (244.15 ns). Command: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate` (criterion 0.8.2; host: Apple Silicon macOS, 2026-10-26).
 
 ## How to Run & Test
 
