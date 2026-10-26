@@ -23,10 +23,19 @@ if [ ! -f "$REPO_ROOT/sdlc/agents/$ROLE.md" ]; then
 fi
 
 if [ -f "$REPO_ROOT/sdlc/config.env" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . "$REPO_ROOT/sdlc/config.env"
-  set +a
+  # Apply config.env only for variables that are not already set in the
+  # environment, so callers can override SDLC_CLI, SDLC_AGY_MODEL, etc.
+  while IFS='=' read -r key value; do
+    key="${key#"${key%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
+    case "$key" in ''|'#'*) continue ;; esac
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    value="${value%\"}"; value="${value#\"}"
+    if [ -z "${!key+x}" ]; then
+      export "$key=$value"
+    fi
+  done < "$REPO_ROOT/sdlc/config.env"
 fi
 
 # Accept a brief path relative to the agent's working directory.
