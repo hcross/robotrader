@@ -44,6 +44,62 @@ FIXTURE_SUMMARY = {
     "executions": [{"symbol": "SOL-USDT", "realized_pnl_usd": 6.0}] * 6,
 }
 
+VALID_METRIC_SOURCES = {"MEASURED", "SIMULATED", "FIXTURE", "BOOTSTRAP"}
+VALID_DRAWER_SOURCES = {"LLM", "DETERMINISTIC_FALLBACK", "BOOTSTRAP"}
+
+PERFORMANCE_NUMERIC_KEYS = {
+    "realized_pnl_usd",
+    "paper_pnl_usd",
+    "pnl_usd",
+    "net_profit_usd",
+    "total_realized_pnl_usd",
+    "cumulative_pnl_usd",
+    "simulated_pnl_usd",
+    "sharpe_ratio",
+    "win_rate_pct",
+    "total_return_pct",
+    "max_drawdown_pct",
+    "trades",
+    "total_trades",
+    "rejected_orders",
+    "total_fees_usd",
+    "fee_usd",
+}
+
+
+def walk_payload_provenance(node, inherited_source=None, path=""):
+    """Recursively walks a JSON payload and verifies that all numeric performance
+
+    fields belong to a block declaring a valid enum source.
+    """
+    if isinstance(node, dict):
+        source = node.get("source", inherited_source)
+        if "drawer_id" in node:
+            assert node.get("source") in VALID_DRAWER_SOURCES, (
+                f"Drawer at {path} missing valid drawer source: {node.get('source')}"
+            )
+        for k, v in node.items():
+            field_path = f"{path}.{k}" if path else k
+            if k in PERFORMANCE_NUMERIC_KEYS:
+                if isinstance(v, (int, float)):
+                    assert source in VALID_METRIC_SOURCES, (
+                        f"Numeric performance key {field_path}={v} at {path} "
+                        f"lacks valid enum source: found {source!r}"
+                    )
+            elif k == "pod_pnl_attribution" and isinstance(v, dict):
+                for pod_k, pod_v in v.items():
+                    if isinstance(pod_v, (int, float)):
+                        assert source in VALID_METRIC_SOURCES, (
+                            f"Pod pnl attribution {field_path}.{pod_k}={pod_v} "
+                            f"lacks valid enum source: found {source!r}"
+                        )
+            walk_payload_provenance(v, inherited_source=source, path=field_path)
+    elif isinstance(node, list):
+        for idx, item in enumerate(node):
+            item_path = f"{path}[{idx}]"
+            walk_payload_provenance(item, inherited_source=inherited_source, path=item_path)
+
+
 LLM_RESPONSE = json.dumps(
     {
         "thesis_continuity": "CONFIRMED",
@@ -183,6 +239,37 @@ class ProvenanceVocabularyTests(unittest.TestCase):
         )
         self.assertEqual(llm["source"], "LLM")
         self.assertEqual(llm["tokens_used"], 10)
+
+    def test_rust_leaf_backtest_absent_from_production_modules(self) -> None:
+        """Scenario: Production modules exclude deprecated producer tokens."""
+        repo_root = Path(__file__).resolve().parents[2]
+        targets = [
+            repo_root / "backend" / "core",
+            repo_root / "backend" / "agents",
+            repo_root / "backend" / "server.py",
+        ]
+        forbidden = "rust_leaf_backtest"
+        matches = []
+        for target in targets:
+            files = list(target.rglob("*.py")) if target.is_dir() else [target]
+            for file_path in files:
+                content = file_path.read_text(encoding="utf-8")
+                if forbidden in content:
+                    matches.append(str(file_path.relative_to(repo_root)))
+        self.assertEqual(matches, [], f"Found {forbidden!r} in production files: {matches}")
+
+    def test_deprecated_telemetry_fields_absent_from_state_store(self) -> None:
+        """Scenario: State store excludes deprecated telemetry fields."""
+        repo_root = Path(__file__).resolve().parents[2]
+        state_store_path = repo_root / "backend" / "core" / "state_store.py"
+        content = state_store_path.read_text(encoding="utf-8")
+        for forbidden in ("solana_onchain_pnl_sol", "simulated_model_pnl_usd"):
+            self.assertNotIn(
+                forbidden,
+                content,
+                f"Deprecated field {forbidden!r} found in backend/core/state_store.py",
+            )
+
 
 
 class PopulationProvenanceTests(unittest.TestCase):
@@ -714,6 +801,65 @@ class PalaceProvenanceTests(unittest.TestCase):
         self.assertEqual(palace.fallback_continuity("leaf_test"), "CONFIRMED")
         self.assertEqual(palace.fallback_continuity("leaf_other"), "INITIAL")
 
+    def test_bootstrap_append_survives_jsonl_only_round_trip(self) -> None:
+        """Scenario: Drawer source survives persistence (JSONL only)."""
+        palace = StrategyMemoryPalace(storage_path=self.path)
+        drawer = PalaceDrawer(
+            drawer_id="drw_bootstrap_jsonl",
+            timestamp_ms=1,
+            wing="leaf_test",
+            room="active_theses",
+            model_used="",
+            thinking_depth="DEEP_THESIS",
+            thesis_continuity="INITIAL",
+            global_regime="TRENDING_BULL",
+            panorama_summary="p",
+            ta_confluence_notes="t",
+            hypothesis="h",
+            invalidation_condition="i",
+            tokens_used=0,
+            cost_usd=0.0,
+            source="BOOTSTRAP",
+        )
+        palace.add_drawer(drawer)
+        self.assertEqual(drawer.source, "BOOTSTRAP")
+
+        reloaded = StrategyMemoryPalace(storage_path=self.path)
+        self.assertEqual(len(reloaded.drawers), 1)
+        self.assertEqual(reloaded.drawers[0].drawer_id, "drw_bootstrap_jsonl")
+        self.assertEqual(reloaded.drawers[0].source, "BOOTSTRAP")
+        self.assertEqual(reloaded.drawers[0].model_used, "")
+        self.assertEqual(reloaded.drawers[0].tokens_used, 0)
+        self.assertEqual(reloaded.drawers[0].cost_usd, 0.0)
+        self.assertEqual(reloaded.drawers[0].thesis_continuity, "INITIAL")
+
+    def test_bootstrap_only_palace_reports_no_previous_thesis(self) -> None:
+        """Scenario: Bootstrap drawers are absent from the continuity prompt."""
+        palace = StrategyMemoryPalace(storage_path=self.path)
+        palace.add_drawer(
+            PalaceDrawer(
+                drawer_id="drw_bs_only",
+                timestamp_ms=1,
+                wing="leaf_solana",
+                room="active_theses",
+                model_used="",
+                thinking_depth="DEEP_THESIS",
+                thesis_continuity="INITIAL",
+                global_regime="TRENDING_BULL",
+                panorama_summary="Secret bootstrap panorama",
+                ta_confluence_notes="Secret bootstrap TA notes",
+                hypothesis="Secret bootstrap hypothesis",
+                invalidation_condition="Secret bootstrap invalidation",
+                tokens_used=0,
+                cost_usd=0.0,
+                source="BOOTSTRAP",
+            )
+        )
+        prompt = palace.format_continuity_prompt(limit=3, wing="leaf_solana")
+        self.assertNotIn("Secret bootstrap", prompt)
+        self.assertIn("Aucune thèse antérieure enregistrée", prompt)
+
+
 
 class ReflectionProvenanceTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -1013,6 +1159,57 @@ def _live_report(realized):
     }
 
 
+VALID_METRIC_SOURCES = {"MEASURED", "SIMULATED", "FIXTURE", "BOOTSTRAP"}
+VALID_DRAWER_SOURCES = {"LLM", "DETERMINISTIC_FALLBACK", "BOOTSTRAP"}
+PERFORMANCE_NUMERIC_KEYS = {
+    "realized_pnl_usd",
+    "paper_pnl_usd",
+    "pnl_usd",
+    "net_profit_usd",
+    "total_realized_pnl_usd",
+    "cumulative_pnl_usd",
+    "simulated_pnl_usd",
+    "sharpe_ratio",
+    "win_rate_pct",
+    "total_return_pct",
+    "max_drawdown_pct",
+    "trades",
+    "total_trades",
+    "rejected_orders",
+    "total_fees_usd",
+    "fee_usd",
+}
+
+
+def walk_payload_provenance(node, inherited_source=None, path=""):
+    if isinstance(node, dict):
+        source = node.get("source", inherited_source)
+        if "drawer_id" in node:
+            assert node.get("source") in VALID_DRAWER_SOURCES, (
+                f"Drawer at {path} missing valid drawer source: {node.get('source')}"
+            )
+        for k, v in node.items():
+            field_path = f"{path}.{k}" if path else k
+            if k in PERFORMANCE_NUMERIC_KEYS:
+                if isinstance(v, (int, float)):
+                    assert source in VALID_METRIC_SOURCES, (
+                        f"Numeric performance key {field_path}={v} at {path} "
+                        f"lacks valid enum source: found {source!r}"
+                    )
+            elif k == "pod_pnl_attribution" and isinstance(v, dict):
+                for pod_k, pod_v in v.items():
+                    if isinstance(pod_v, (int, float)):
+                        assert source in VALID_METRIC_SOURCES, (
+                            f"Pod pnl attribution {field_path}.{pod_k}={pod_v} "
+                            f"lacks valid enum source: found {source!r}"
+                        )
+            walk_payload_provenance(v, inherited_source=source, path=field_path)
+    elif isinstance(node, list):
+        for idx, item in enumerate(node):
+            item_path = f"{path}[{idx}]"
+            walk_payload_provenance(item, inherited_source=inherited_source, path=item_path)
+
+
 if scenario == "status":
     server.state_store.live_executions = [_live_report(10.0)]
     payload = client.get("/api/v1/status").json()
@@ -1054,6 +1251,7 @@ if scenario == "status":
     for drawers in drawer_surfaces:
         for drawer in drawers:
             assert drawer["source"] in ("LLM", "DETERMINISTIC_FALLBACK", "BOOTSTRAP")
+    walk_payload_provenance(payload)
 elif scenario == "fixture-rows":
     payload = client.get("/api/v1/status").json()
     engine = payload["engine_metrics"]
@@ -1166,6 +1364,68 @@ class ServerPayloadTests(unittest.TestCase):
 
     def test_leaf_solana_backtest_endpoint_is_fixture(self) -> None:
         self._run("leaf-solana-backtest")
+
+    def test_recursive_payload_walk_rejects_unattributed_performance(self) -> None:
+        """Scenario: Recursive payload walk rejects unattributed numeric performance."""
+        # 1. Valid payload walk passes (e.g. status scenario runs it end-to-end)
+        sample_valid = {
+            "engine_metrics": {
+                "backtest_fixture": {
+                    "source": "FIXTURE",
+                    "net_profit_usd": 25.66,
+                    "pod_pnl_attribution": {"pod_carry": 13.61},
+                },
+                "live_testnet": {
+                    "source": "MEASURED",
+                    "recent": {"pnl_usd": 10.0, "trades": 1},
+                },
+            },
+            "hierarchy": {
+                "treasury": {"source": "MEASURED", "total_realized_pnl_usd": 10.0},
+                "leaves": [
+                    {
+                        "allocated_capital_usd": 1000.0,
+                        "performance": {
+                            "live_testnet": {"source": "MEASURED", "realized_pnl_usd": None},
+                            "paper_model": {"source": "SIMULATED", "paper_pnl_usd": None},
+                        },
+                    }
+                ],
+            },
+        }
+        walk_payload_provenance(sample_valid)
+
+        # 2. Unattributed numeric performance field at arbitrary depth is rejected
+        unattributed_payload = {
+            "hierarchy": {
+                "leaves": [
+                    {
+                        "allocated_capital_usd": 1000.0,
+                        "realized_pnl_usd": 42.0,  # No source on leaf!
+                    }
+                ]
+            }
+        }
+        with self.assertRaises(AssertionError) as ctx:
+            walk_payload_provenance(unattributed_payload)
+        self.assertIn("realized_pnl_usd=42.0", str(ctx.exception))
+        self.assertIn("lacks valid enum source", str(ctx.exception))
+
+        # 3. Drawer with invalid source is rejected
+        bad_drawer_payload = {
+            "cognitive_engine": {
+                "palace_drawers": [
+                    {
+                        "drawer_id": "drw_bad",
+                        "source": "INVALID_DRAWER_SOURCE",
+                    }
+                ]
+            }
+        }
+        with self.assertRaises(AssertionError) as ctx:
+            walk_payload_provenance(bad_drawer_payload)
+        self.assertIn("missing valid drawer source", str(ctx.exception))
+
 
 
 if __name__ == "__main__":

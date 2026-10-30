@@ -26,7 +26,7 @@ ARTIFACT_KIND_POLICY_SANITY_CHECK = "policy_sanity_check"
 DRAWER_SOURCES = ("LLM", "DETERMINISTIC_FALLBACK", "BOOTSTRAP")
 
 # Population token -> provenance of every row produced by that population.
-# `rust_leaf_backtest` is deliberately absent: a per-leaf replay is the same
+# The per-leaf backtest token is deliberately absent: a per-leaf replay is the same
 # deterministic fixture population, not a fourth vocabulary.
 EXECUTIONS_SOURCE_TO_METRIC_SOURCE: Dict[str, str] = {
     "backtest_fixture": METRIC_SOURCES[2],  # FIXTURE

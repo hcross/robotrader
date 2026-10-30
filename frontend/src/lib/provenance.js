@@ -62,6 +62,7 @@ function formatValue(value, kind) {
 
 export function formatMetric(value, source, kind = 'number') {
   if (source === null || source === undefined) return EM_DASH;
+  if (!KNOWN_SOURCES.has(source)) return EM_DASH;
   if (source === 'BOOTSTRAP') return EM_DASH;
   if (value === null || value === undefined) return EM_DASH;
   return formatValue(value, kind);
