@@ -16,6 +16,8 @@ assert.equal(formatMetric(null, 'MEASURED', 'money'), '—');
 assert.equal(formatMetric(0, 'MEASURED', 'money'), '$0.00');
 assert.equal(formatMetric(0, 'BOOTSTRAP', 'money'), '—');
 assert.equal(formatMetric(undefined, null, 'number'), '—');
+assert.equal(formatMetric(10, 'BOGUS', 'money'), '—');
+assert.equal(formatMetric(10, 'UNATTRIBUTED', 'money'), '—');
 assert.equal(formatOperational(null, 'money'), '—');
 assert.equal(formatOperational(undefined, 'money'), '—');
 assert.equal(formatOperational(0, 'money'), '$0.00');
@@ -23,6 +25,7 @@ assert.equal(badgeFor(null), 'UNATTRIBUTED');
 assert.equal(badgeFor(undefined), 'UNATTRIBUTED');
 assert.equal(badgeFor('BOOTSTRAP'), 'BOOTSTRAP');
 assert.equal(badgeFor('MEASURED'), 'MEASURED');
+assert.equal(badgeFor('BOGUS'), 'UNATTRIBUTED');
 assert.notEqual(badgeFor('BOOTSTRAP'), badgeFor(null));
 
 // --- Static wiring --------------------------------------------------------

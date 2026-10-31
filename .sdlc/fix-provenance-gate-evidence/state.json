@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "fix-provenance-gate-evidence",
+  "title": "Provenance integrity: correct grep gate and tighten evidence",
+  "issue": 16,
+  "lane": "S",
+  "lane_reason": "Tests, the single-source grep gate, and evidence only per issue #16 scope; the assertions grow (design-D4 production-absence test, recursive payload walk, two spec-scenario assertions) so Lane S per the issue's own rubric",
+  "lane_change": null,
+  "branch": "sdlc/16-fix-provenance-gate-evidence",
+  "worktree": ".worktrees/16-fix-provenance-gate-evidence",
+  "base_branch": "master",
+  "base_sha": "d0b66943ae5fff60ca9bf198edfa625db41ff2e4",
+  "created_at": "2026-10-30T20:33:38Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev",
+  "pr": 22,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "c1a03f9487acf5b50ec6e624b9127ccc6b364f2e",
+      "updated_at": "2026-10-30T20:54:17Z"
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/16-fix-provenance-gate-evidence",
+  "partial_issue": false
+}
