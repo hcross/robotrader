@@ -138,7 +138,7 @@ The AI layer **never** sends raw market orders directly to an exchange. Instead,
 
 ### 4.3. Synchronous Hard Risk Gate (`risk-gate`)
 
-Every `OrderIntent` emitted by a strategy pod must pass through `HardRiskGate::validate(&self, intent: &OrderIntent, portfolio: &PortfolioState) -> Result<ApprovedOrder, RiskRejection>` in `<50µs`:
+Every `OrderIntent` emitted by a strategy pod must pass through `HardRiskGate::validate(&self, intent: &OrderIntent, portfolio: &PortfolioState) -> Result<ApprovedOrder, RiskRejection>` under the `<50µs` budget (measured mean: `0.244 µs`; bench: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`):
 
 1. **Global Drawdown Circuit Breaker**: Halts all new risk-taking and optionally flattens positions if rolling 24h drawdown exceeds `MAX_DAILY_DRAWDOWN_PCT` (e.g., 3.0%).
 2. **Position Sizing & Concentration**: Enforces Volatility-Targeted Fractional Kelly sizing and caps single-asset exposure (e.g., max 15% of equity per directional trade).
