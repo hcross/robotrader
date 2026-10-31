@@ -45,7 +45,7 @@ We need an architecture that delivers **institutional-grade execution performanc
 - **Pros**:
   - **Rust (`engine-rs`)** handles multiplexed WebSockets/gRPC, L2 orderbooks, deterministic alpha pods, synchronous pre-trade `HardRiskGate`, Jito/Jupiter transaction signing, and high-speed historical backtesting.
   - **Python (`agents-py`)** handles unstructured catalyst ingestion, LLM agentic reasoning (`strands-agents`), regime classification, dynamic capital allocation across pods, and the FastAPI/WebSocket control plane.
-  - **Redis Streams + Pub/Sub** provides a sub-millisecond, schema-validated (MessagePack/JSON) IPC boundary with TTL-enforced policy envelopes.
+  - **Single-Key State Snapshot (`robotrader:v2:state`) & In-Memory Fallback** provides the IPC persistence boundary with explicit application-level TTL checks (Redis Streams, Pub/Sub, and native per-key `EX` expiration are planned roadmap enhancements).
 - **Cons**: Two-language repository requiring clear Protobuf/JSON-Schema contracts across the Redis boundary.
 
 ---
@@ -70,7 +70,7 @@ flowchart TB
     end
 
     subgraph IPC["IPC & State Bus"]
-        Redis[("Redis Streams & TTL Policy Store")]
+        Redis[("Redis 7 State Snapshot & Policy Store")]
         TSDB[("DuckDB / Parquet & Timescale State")]
     end
 
@@ -110,7 +110,7 @@ flowchart TB
 
 ### 4.2. The Contract Between AI (Warm Path) and Execution (Hot Path)
 
-The AI layer **never** sends raw market orders directly to an exchange. Instead, `MetaAllocator` publishes a signed, TTL-bounded **`PolicyEnvelope`** to Redis:
+The AI layer **never** sends raw market orders directly to an exchange. Instead, `MetaAllocator` publishes a TTL-bounded **`PolicyEnvelope`** persisted in Redis via a single-key JSON state snapshot (`robotrader:v2:state`), with seamless in-memory fallback for offline or local test execution:
 
 ```json
 {
@@ -131,8 +131,9 @@ The AI layer **never** sends raw market orders directly to an exchange. Instead,
 }
 ```
 
-**Fail-Safe Invariant**:
-- If `now() > issued_at_ms + ttl_seconds * 1000`, the Rust engine automatically reverts to a **Safe Baseline Envelope** (`pod_sniper: disabled`, `directional_bias: NEUTRAL`, reduced position sizing, carry-only or reduce-only mode).
+**Fail-Safe & Persistence Invariants**:
+- **State Snapshot Contract**: State is persisted as a single-key JSON snapshot in Redis (`robotrader:v2:state`) with in-memory fallback when Redis is unavailable. Explicit application-level TTL evaluation runs on state restore and access (`now() > issued_at_ms + ttl_seconds * 1000`). If expired, or if `issued_at_ms` is missing, null, non-numeric, or non-positive, or if the policy envelope payload is malformed, the engine fails closed to a **Safe Baseline Envelope** (`safe_baseline_fallback`: `pod_sniper: disabled`, `directional_bias: NEUTRAL`, carry-only mode).
+- **Future Roadmap Architecture**: High-frequency streaming via Redis Streams, Pub/Sub channels for telemetry, native key-level `EX` expiration, and cryptographic policy signing are roadmap enhancements tracked for multi-process distributed clustering.
 - The Rust `HardRiskGate` clamps any AI-requested parameters against immutable compile-time/config-time ceilings (e.g., AI cannot request `max_leverage: 20.0` if the hard ceiling is `3.0`).
 
 ### 4.3. Synchronous Hard Risk Gate (`risk-gate`)
