@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hmac
 import json
-from typing import Any, Dict
+import os
+from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .agents.orchestrator import OrchestratorAgent
@@ -13,9 +16,12 @@ from .core.errors import RustBinaryNotFoundError, rust_binary_not_found_handler
 from .core.health import health_router
 from .core.hierarchy import CrossChainTreasuryRouter
 from .core.schemas import Message
+from .core.security import resolve_cors_config, verify_bearer_token
 from .core.state_store import state_store
 from .core.transcript_palace import transcript_palace
 from .tools.rss_tools import EcosystemRSSAggregator
+
+__all__ = ["app", "resolve_cors_config", "verify_bearer_token"]
 
 app = FastAPI(
     title="Robotrader v3 Hierarchical Multi-Ecosystem Control Plane",
@@ -23,13 +29,30 @@ app = FastAPI(
     description="Master Orchestrator (Kimi K3.1 Pro) + 26 Ecosystem Leaf Robots (DeepSeek v4.1 Flash 1017) & engine-rs",
 )
 
+cors_origins, cors_allow_credentials = resolve_cors_config()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def control_plane_auth_middleware(request: Request, call_next):
+    expected_token = os.getenv("ROBOTRADER_API_TOKEN", "").strip()
+    if expected_token and request.method == "POST" and (
+        request.url.path == "/api/v1" or request.url.path.startswith("/api/v1/")
+    ):
+        auth_header = request.headers.get("Authorization")
+        if not verify_bearer_token(auth_header, expected_token):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or missing API token"},
+            )
+    return await call_next(request)
 
 # One handler covers direct and transitive callers (including /api/v1/chat):
 # every endpoint that needs the Rust backtest binary returns the same 503 JSON
