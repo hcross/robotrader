@@ -18,6 +18,8 @@ from unittest import mock
 
 from backend.core.schemas import SAFE_BASELINE_TTL_SECONDS, PolicyEnvelope
 from backend.core.state_store import HybridStateStore
+import backend.tools.exchange_tools
+import backend.tools.solana_tools
 
 T0 = 1_800_000_000_000
 TTL_SECONDS = 900
@@ -386,6 +388,78 @@ class TestRestorePreservesIssueTime(PolicyTtlTestBase):
         self.assertEqual(effective.envelope_id, "safe_baseline_fallback")
         self.assertEqual(effective.global_regime, "LOW_VOL_CARRY")
         self.assertNotEqual(effective.envelope_id, raw_policy["envelope_id"])
+        self.assertEqual(store._policy.envelope_id, "safe_baseline_fallback")
+
+    def test_restore_with_explicit_null_issue_time_yields_safe_baseline(self) -> None:
+        raw_policy = PolicyEnvelope.default_active(now_ms=T0).to_dict()
+        raw_policy["issued_at_ms"] = None
+
+        store, _ = self.restore({"policy": raw_policy}, now_ms=T0 + 60_000)
+        effective = store.get_effective_policy(now_ms=T0 + 60_000)
+
+        self.assertEqual(effective.envelope_id, "safe_baseline_fallback")
+        self.assertEqual(effective.global_regime, "LOW_VOL_CARRY")
+        self.assertEqual(store._policy.envelope_id, "safe_baseline_fallback")
+
+    def test_restore_with_non_numeric_issue_time_yields_safe_baseline(self) -> None:
+        raw_policy = PolicyEnvelope.default_active(now_ms=T0).to_dict()
+        raw_policy["issued_at_ms"] = "not-a-number"
+
+        store, _ = self.restore({"policy": raw_policy}, now_ms=T0 + 60_000)
+        effective = store.get_effective_policy(now_ms=T0 + 60_000)
+
+        self.assertEqual(effective.envelope_id, "safe_baseline_fallback")
+        self.assertEqual(effective.global_regime, "LOW_VOL_CARRY")
+        self.assertEqual(store._policy.envelope_id, "safe_baseline_fallback")
+
+    def test_restore_with_boolean_issue_time_yields_safe_baseline(self) -> None:
+        for bool_val in (True, False):
+            with self.subTest(bool_val=bool_val):
+                raw_policy = PolicyEnvelope.default_active(now_ms=T0).to_dict()
+                raw_policy["issued_at_ms"] = bool_val
+
+                store, _ = self.restore({"policy": raw_policy}, now_ms=T0 + 60_000)
+                effective = store.get_effective_policy(now_ms=T0 + 60_000)
+
+                self.assertEqual(effective.envelope_id, "safe_baseline_fallback")
+                self.assertEqual(effective.global_regime, "LOW_VOL_CARRY")
+                self.assertEqual(store._policy.envelope_id, "safe_baseline_fallback")
+
+    def test_restore_with_non_positive_issue_time_yields_safe_baseline(self) -> None:
+        for bad_val in (0, -1, -T0):
+            with self.subTest(bad_val=bad_val):
+                raw_policy = PolicyEnvelope.default_active(now_ms=T0).to_dict()
+                raw_policy["issued_at_ms"] = bad_val
+
+                store, _ = self.restore({"policy": raw_policy}, now_ms=T0 + 60_000)
+                effective = store.get_effective_policy(now_ms=T0 + 60_000)
+
+                self.assertEqual(effective.envelope_id, "safe_baseline_fallback")
+                self.assertEqual(effective.global_regime, "LOW_VOL_CARRY")
+                self.assertEqual(store._policy.envelope_id, "safe_baseline_fallback")
+
+    def test_restore_with_unparseable_policy_dict_yields_safe_baseline(self) -> None:
+        for bad_dict in (
+            {"envelope_id": "corrupt", "issued_at_ms": T0, "pod_allocations": "invalid_type"},
+            {"envelope_id": "corrupt", "issued_at_ms": T0, "ttl_seconds": "not_an_int"},
+        ):
+            with self.subTest(bad_dict=bad_dict):
+                store, _ = self.restore({"policy": bad_dict}, now_ms=T0 + 60_000)
+                effective = store.get_effective_policy(now_ms=T0 + 60_000)
+
+                self.assertEqual(effective.envelope_id, "safe_baseline_fallback")
+                self.assertEqual(effective.global_regime, "LOW_VOL_CARRY")
+                self.assertEqual(store._policy.envelope_id, "safe_baseline_fallback")
+
+    def test_restore_with_non_dict_policy_yields_safe_baseline(self) -> None:
+        for bad_payload in ("not-a-dict", 12345, [1, 2, 3]):
+            with self.subTest(bad_payload=bad_payload):
+                store, _ = self.restore({"policy": bad_payload}, now_ms=T0 + 60_000)
+                effective = store.get_effective_policy(now_ms=T0 + 60_000)
+
+                self.assertEqual(effective.envelope_id, "safe_baseline_fallback")
+                self.assertEqual(effective.global_regime, "LOW_VOL_CARRY")
+                self.assertEqual(store._policy.envelope_id, "safe_baseline_fallback")
 
 
 class TestRestorePastTtl(PolicyTtlTestBase):

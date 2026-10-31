@@ -232,29 +232,40 @@ class HybridStateStore:
             return
         try:
             data = json.loads(raw)
-            if "policy" in data and isinstance(data["policy"], dict):
-                raw_policy = data["policy"]
+            if "policy" in data:
                 restore_now_ms = int(time.time() * 1000)
-                if raw_policy.get("issued_at_ms") is None:
-                    # No provable issue time: the restore clock is not policy
-                    # authority, so fail closed to the deterministic baseline.
+                raw_policy = data["policy"]
+                if not isinstance(raw_policy, dict):
                     self._policy = PolicyEnvelope.safe_baseline(restore_now_ms)
                 else:
-                    pol = PolicyEnvelope.from_dict(raw_policy)
-                    # Ensure non-Solana asset overrides are stripped from leaf-solana policy
-                    pol.asset_overrides = {
-                        k: v
-                        for k, v in pol.asset_overrides.items()
-                        if self._is_solana_ecosystem_symbol(k)
-                    }
-                    for default_k, default_v in PolicyEnvelope.default_active().asset_overrides.items():
-                        pol.asset_overrides.setdefault(default_k, default_v)
-                    # An envelope past its own TTL is never restamped as fresh.
-                    self._policy = (
-                        PolicyEnvelope.safe_baseline(restore_now_ms)
-                        if pol.is_expired(restore_now_ms)
-                        else pol
-                    )
+                    raw_issued_at = raw_policy.get("issued_at_ms")
+                    if (
+                        raw_issued_at is None
+                        or isinstance(raw_issued_at, bool)
+                        or not isinstance(raw_issued_at, int)
+                        or raw_issued_at <= 0
+                    ):
+                        self._policy = PolicyEnvelope.safe_baseline(restore_now_ms)
+                    else:
+                        try:
+                            pol = PolicyEnvelope.from_dict(raw_policy)
+                            # Ensure non-Solana asset overrides are stripped from leaf-solana policy
+                            pol.asset_overrides = {
+                                k: v
+                                for k, v in pol.asset_overrides.items()
+                                if self._is_solana_ecosystem_symbol(k)
+                            }
+                            for default_k, default_v in PolicyEnvelope.default_active().asset_overrides.items():
+                                pol.asset_overrides.setdefault(default_k, default_v)
+                            # An envelope past its own TTL is never restamped as fresh.
+                            self._policy = (
+                                PolicyEnvelope.safe_baseline(restore_now_ms)
+                                if pol.is_expired(restore_now_ms)
+                                else pol
+                            )
+                        except Exception as parse_exc:
+                            print(f"[HybridStateStore] Malformed policy payload, failing closed to safe baseline: {parse_exc}")
+                            self._policy = PolicyEnvelope.safe_baseline(restore_now_ms)
             self.kill_switch_active = bool(data.get("kill_switch_active", False))
             self.kill_switch_reason = data.get("kill_switch_reason")
             raw_execs = list(data.get("live_executions", []))[:200]
