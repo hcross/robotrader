@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev",
+  "status": "merged",
   "pr": 22,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "682af1a12a01ab873973585c81b4a2e352728269",
+      "updated_at": "2026-10-30T23:06:17Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/16-fix-provenance-gate-evidence",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "human operator via Plannotator gate approval, 2026-10-31",
+    "at": "2026-10-31T08:05:41Z",
+    "mode": "full-auto",
+    "pr": 22,
+    "head_sha": "682af1a12a01ab873973585c81b4a2e352728269"
+  }
 }

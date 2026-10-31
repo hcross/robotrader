@@ -101,7 +101,7 @@ Every performance payload listed below MUST carry a `source` whose value is exac
 | `testnet_telemetry` | `MEASURED` |
 | QuantAuditor `audit_latest_backtest` output | `FIXTURE` |
 
-`engine_metrics.executions_source` MUST remain one of `backtest_fixture`, `paper_model`, or `live_testnet`, and every row in `engine_metrics.executions` MUST come from that one population, with a row `source` equal to the mapped enum (`FIXTURE`, `SIMULATED`, or `MEASURED`). Fixture and live rows MUST NOT be interleaved. The free-text description currently held in `engine_metrics.*.source` MUST move to `source_detail`; replacing it with an enum is a **BREAKING** type change. A performance number outside the table MUST either declare a source or be `null`; an unattributed numeric performance value MUST NOT be served.
+`engine_metrics.executions_source` MUST remain one of `backtest_fixture`, `paper_model`, or `live_testnet`, and every row in `engine_metrics.executions` MUST come from that one population, with a row `source` equal to the mapped enum (`FIXTURE`, `SIMULATED`, or `MEASURED`). Fixture and live rows MUST NOT be interleaved. The free-text description currently held in `engine_metrics.*.source` MUST move to `source_detail`; replacing it with an enum is a **BREAKING** type change. A performance number outside the table MUST either declare a source or be `null`; an unattributed numeric performance value MUST NOT be served. The deprecated producer token `rust_leaf_backtest` MUST NOT appear in production backend modules (`backend/core`, `backend/agents`, `backend/server.py`), and the deprecated telemetry fields `simulated_model_pnl_usd` and `solana_onchain_pnl_sol` MUST NOT appear in `backend/core/state_store.py`.
 
 #### Scenario: Engine populations and executions map to enum sources
 
@@ -140,6 +140,22 @@ Every performance payload listed below MUST carry a `source` whose value is exac
 - **WHEN** a performance payload has no recognizable source
 - **THEN** its performance values are served as `null`
 - **THEN** its `source` is `null` and it is not readable as `MEASURED`, `SIMULATED`, or `FIXTURE`
+
+#### Scenario: Production modules exclude deprecated producer tokens
+
+- **WHEN** production backend modules (`backend/core`, `backend/agents`, `backend/server.py`) are scanned
+- **THEN** the token `rust_leaf_backtest` is absent from all code and comments
+
+#### Scenario: State store excludes deprecated telemetry fields
+
+- **WHEN** `backend/core/state_store.py` and the telemetry payload are inspected
+- **THEN** neither `simulated_model_pnl_usd` nor `solana_onchain_pnl_sol` is present
+
+#### Scenario: Recursive payload walk rejects unattributed numeric performance
+
+- **WHEN** the entire `/api/v1/status` JSON response is traversed recursively
+- **THEN** every numeric performance field belongs to a block declaring a valid enum source
+- **THEN** no unattributed numeric performance value exists anywhere in the payload hierarchy
 
 ### Requirement: Master aggregate derives only from declared evidence
 
@@ -198,7 +214,7 @@ Every Palace drawer served through `GET /api/v1/status` — at `hierarchy.master
 
 #### Scenario: Drawer source survives persistence
 
-- **WHEN** a `BOOTSTRAP` drawer is appended and the Palace is reloaded from its JSONL log and its Redis mirror
+- **WHEN** a `BOOTSTRAP` drawer is appended and the Palace is reloaded from its JSONL log independently and from its Redis mirror
 - **THEN** the reloaded drawer still has `source` equal to `BOOTSTRAP`
 
 #### Scenario: Legacy untyped drawer is read as bootstrap
@@ -296,7 +312,7 @@ Each component below MUST render a `null`, `undefined`, or absent performance va
 - `MasterOverview`: the total-capital, deployed/active-leaf, dry-powder, and OpenRouter-credit tiles; the leaf-table PnL/Sharpe column; the drawer list.
 - `Dashboard`: the `backtest_fixture`, `paper_model`, and `live_testnet` tiles; the testnet CEX PnL tile; the execution-table PnL columns.
 
-A block with `source` equal to `null` MUST render `—` and an `UNATTRIBUTED` badge. A block with `source` equal to `BOOTSTRAP` MUST render all-null values as `—` with a `BOOTSTRAP` badge, which MUST be distinguishable from the `UNATTRIBUTED` badge.
+A block with `source` equal to `null`, `undefined`, or any token outside the known provenance vocabulary MUST render `—` and an `UNATTRIBUTED` badge. A block with `source` equal to `BOOTSTRAP` MUST render all-null values as `—` with a `BOOTSTRAP` badge, which MUST be distinguishable from the `UNATTRIBUTED` badge.
 
 #### Scenario: Leaf view renders an em dash for null metrics
 
@@ -335,7 +351,7 @@ A block with `source` equal to `null` MUST render `—` and an `UNATTRIBUTED` ba
 
 #### Scenario: Unattributed block renders an em dash with an unattributed badge
 
-- **WHEN** a metric block is rendered with `source` equal to `null`
+- **WHEN** a metric block is rendered with `source` equal to `null` or an unknown token outside the provenance vocabulary
 - **THEN** every value renders as `—`
 - **THEN** the `UNATTRIBUTED` badge is visible
 
