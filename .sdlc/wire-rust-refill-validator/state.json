@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev",
+  "status": "merged",
   "pr": 25,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": "2026-10-31T21:51:23Z"
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "52659aaa3fe46b1e48ad94f2db8d6eb3e908a493",
+      "updated_at": "2026-10-31T22:16:16Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/5-wire-rust-refill-validator",
-  "partial_issue": true
+  "partial_issue": true,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-10-31T22:23:27Z",
+    "mode": "full-auto",
+    "pr": 25,
+    "head_sha": "52659aaa3fe46b1e48ad94f2db8d6eb3e908a493"
+  }
 }
