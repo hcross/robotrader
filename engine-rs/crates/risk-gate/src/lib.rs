@@ -10,6 +10,24 @@ pub use vault::{
     SeedInput, SimulatedVault, VaultBootstrap, VaultInitError, VaultModeInput, ZeroizingBytes,
 };
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InferenceRefillVerdict {
+    pub approved: bool,
+    pub status: String,
+    pub reason: String,
+    pub approved_usd: f64,
+}
+
+fn format_signed_usd(value: f64) -> String {
+    if value.is_nan() {
+        "NaN".to_string()
+    } else if value < 0.0 {
+        format!("-${:.2}", value.abs())
+    } else {
+        format!("${:.2}", value)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Error)]
 pub enum RiskRejection {
     #[error("Kill-switch is active: {reason}")]
@@ -104,44 +122,99 @@ impl HardRiskGate {
         self.kill_switch_reason = None;
     }
 
-    /// Validates a bounded OpenRouter credit auto-refill initiated by the Master Orchestrator.
+    /// Validates an OpenRouter inference credit refill against the 6-step canonical risk gate.
     pub fn validate_inference_refill(
         &self,
         requested_usd: f64,
+        realized_trading_pnl_usd: f64,
         current_balance_usd: f64,
         low_watermark_usd: f64,
         epoch_refilled_usd: f64,
         max_epoch_refill_usd: f64,
-    ) -> Result<f64, RiskRejection> {
+        force: bool,
+    ) -> InferenceRefillVerdict {
+        // Step 1: Kill switch
         if self.kill_switch_active {
-            return Err(RiskRejection::KillSwitchActive {
+            return InferenceRefillVerdict {
+                approved: false,
+                status: "rejected_kill_switch".to_string(),
                 reason: self
                     .kill_switch_reason
                     .clone()
-                    .unwrap_or_else(|| "Kill-switch active".to_string()),
-            });
+                    .unwrap_or_else(|| "Kill switch active; inference credit refills are suspended".to_string()),
+                approved_usd: 0.0,
+            };
         }
-        if requested_usd <= 0.0 || requested_usd > 25.0 {
-            return Err(RiskRejection::InferenceRefillRejected {
-                reason: format!("Single refill ${requested_usd:.2} outside (0, $25.00] bounds"),
-            });
-        }
-        if current_balance_usd > low_watermark_usd {
-            return Err(RiskRejection::InferenceRefillRejected {
+
+        // Step 2: Realized trading PnL > 0 and finite
+        if !realized_trading_pnl_usd.is_finite() || realized_trading_pnl_usd <= 0.0 {
+            return InferenceRefillVerdict {
+                approved: false,
+                status: "rejected_no_realized_profit".to_string(),
                 reason: format!(
-                    "Current balance ${current_balance_usd:.2} is above low watermark ${low_watermark_usd:.2}"
+                    "Realized trading PnL ({}) <= 0; principal treasury protected",
+                    format_signed_usd(realized_trading_pnl_usd)
                 ),
-            });
+                approved_usd: 0.0,
+            };
         }
+
+        // Step 3: Single refill bounds (0, $25.00] and finite
+        if !requested_usd.is_finite() || requested_usd <= 0.0 || requested_usd > 25.0 {
+            return InferenceRefillVerdict {
+                approved: false,
+                status: "rejected".to_string(),
+                reason: format!(
+                    "Amount ${requested_usd:.2} outside allowed single-refill bounds (0, $25.00]"
+                ),
+                approved_usd: 0.0,
+            };
+        }
+
+        // Step 4: 10% profit-share cap
+        if requested_usd > (realized_trading_pnl_usd * 0.10) + 1e-6 {
+            return InferenceRefillVerdict {
+                approved: false,
+                status: "rejected_exceeds_profit_share".to_string(),
+                reason: format!(
+                    "Requested refill ${requested_usd:.2} > 10% of realized PnL ({})",
+                    format_signed_usd(realized_trading_pnl_usd)
+                ),
+                approved_usd: 0.0,
+            };
+        }
+
+        // Step 5: Low-watermark threshold (honoring force)
+        if !force && current_balance_usd > low_watermark_usd {
+            return InferenceRefillVerdict {
+                approved: false,
+                status: "skipped_sufficient_balance".to_string(),
+                reason: format!(
+                    "Balance ${current_balance_usd:.2} > low watermark ${low_watermark_usd:.2}"
+                ),
+                approved_usd: 0.0,
+            };
+        }
+
+        // Step 6: Rolling 24-hour epoch cap
         if epoch_refilled_usd + requested_usd > max_epoch_refill_usd {
-            return Err(RiskRejection::InferenceRefillRejected {
+            return InferenceRefillVerdict {
+                approved: false,
+                status: "rejected_epoch_cap".to_string(),
                 reason: format!(
-                    "Epoch refill cap exceeded: ${:.2} + ${:.2} > ${:.2}",
-                    epoch_refilled_usd, requested_usd, max_epoch_refill_usd
+                    "Epoch cap reached (${epoch_refilled_usd:.2} + ${requested_usd:.2} > ${max_epoch_refill_usd:.2})"
                 ),
-            });
+                approved_usd: 0.0,
+            };
         }
-        Ok(requested_usd)
+
+        // Approved
+        InferenceRefillVerdict {
+            approved: true,
+            status: "refilled".to_string(),
+            reason: format!("Approved refill of ${requested_usd:.2}"),
+            approved_usd: requested_usd,
+        }
     }
 
     pub fn validate_token_safety(&self, safety: &OnChainTokenSafety) -> Result<(), RiskRejection> {
@@ -457,23 +530,93 @@ mod tests {
     #[test]
     fn test_profit_gated_inference_refill_validation() {
         let gate = HardRiskGate::new(RiskLimits::default());
-        // Valid refill below low watermark and within epoch cap
-        let ok = gate.validate_inference_refill(10.0, 1.20, 2.00, 5.0, 25.0);
-        assert_eq!(ok, Ok(10.0));
+        // Valid refill: requested $4.00, realized PnL $100.00, balance $1.20 <= watermark $2.00, epoch spent $5.00
+        let ok = gate.validate_inference_refill(4.0, 100.0, 1.20, 2.00, 5.0, 25.0, false);
+        assert_eq!(
+            ok,
+            InferenceRefillVerdict {
+                approved: true,
+                status: "refilled".to_string(),
+                reason: "Approved refill of $4.00".to_string(),
+                approved_usd: 4.0,
+            }
+        );
+    }
 
-        // Rejected when balance is still above low watermark
-        let above = gate.validate_inference_refill(10.0, 4.50, 2.00, 5.0, 25.0);
-        assert!(matches!(
-            above,
-            Err(RiskRejection::InferenceRefillRejected { .. })
-        ));
+    #[test]
+    fn test_refill_kill_switch_active_rejects() {
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        gate.trigger_kill_switch("emergency halt");
+        let verdict = gate.validate_inference_refill(4.0, 100.0, 1.00, 2.00, 0.0, 25.0, false);
+        assert!(!verdict.approved);
+        assert_eq!(verdict.status, "rejected_kill_switch");
+        assert_eq!(verdict.approved_usd, 0.0);
+        assert_eq!(verdict.reason, "emergency halt");
+    }
 
-        // Rejected when epoch cap would be exceeded
-        let cap_hit = gate.validate_inference_refill(10.0, 1.20, 2.00, 20.0, 25.0);
-        assert!(matches!(
-            cap_hit,
-            Err(RiskRejection::InferenceRefillRejected { .. })
-        ));
+    #[test]
+    fn test_refill_non_positive_and_non_finite_pnl_rejects() {
+        let gate = HardRiskGate::new(RiskLimits::default());
+        for pnl in [-5.0, 0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let verdict = gate.validate_inference_refill(4.0, pnl, 1.00, 2.00, 0.0, 25.0, false);
+            assert!(!verdict.approved, "pnl={pnl} must not be approved");
+            assert_eq!(
+                verdict.status, "rejected_no_realized_profit",
+                "pnl={pnl} must reject with rejected_no_realized_profit"
+            );
+            assert_eq!(verdict.approved_usd, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_refill_out_of_bounds_amount_rejects() {
+        let gate = HardRiskGate::new(RiskLimits::default());
+        for req in [0.0, -1.0, 25.01, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let verdict = gate.validate_inference_refill(req, 1000.0, 1.00, 2.00, 0.0, 25.0, false);
+            assert!(!verdict.approved, "req={req} must not be approved");
+            assert_eq!(
+                verdict.status, "rejected",
+                "req={req} must reject with status 'rejected'"
+            );
+            assert_eq!(verdict.approved_usd, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_refill_exceeds_profit_share_rejects() {
+        let gate = HardRiskGate::new(RiskLimits::default());
+        // requested $10.00 > 10% of $50.00 ($5.00)
+        let verdict = gate.validate_inference_refill(10.0, 50.0, 1.00, 2.00, 0.0, 25.0, false);
+        assert!(!verdict.approved);
+        assert_eq!(verdict.status, "rejected_exceeds_profit_share");
+        assert_eq!(verdict.approved_usd, 0.0);
+        assert!(verdict.reason.contains("$50.00"));
+    }
+
+    #[test]
+    fn test_refill_watermark_and_force_override() {
+        let gate = HardRiskGate::new(RiskLimits::default());
+        // balance $3.00 > watermark $2.00 with force = false -> skip
+        let skipped = gate.validate_inference_refill(4.0, 100.0, 3.00, 2.00, 0.0, 25.0, false);
+        assert!(!skipped.approved);
+        assert_eq!(skipped.status, "skipped_sufficient_balance");
+        assert_eq!(skipped.approved_usd, 0.0);
+
+        // balance $3.00 > watermark $2.00 with force = true -> approved
+        let forced = gate.validate_inference_refill(4.0, 100.0, 3.00, 2.00, 0.0, 25.0, true);
+        assert!(forced.approved);
+        assert_eq!(forced.status, "refilled");
+        assert_eq!(forced.approved_usd, 4.0);
+    }
+
+    #[test]
+    fn test_refill_epoch_cap_violation_rejects() {
+        let gate = HardRiskGate::new(RiskLimits::default());
+        // epoch $23.00 + requested $4.00 > max $25.00
+        let verdict = gate.validate_inference_refill(4.0, 100.0, 1.00, 2.00, 23.0, 25.0, false);
+        assert!(!verdict.approved);
+        assert_eq!(verdict.status, "rejected_epoch_cap");
+        assert_eq!(verdict.approved_usd, 0.0);
     }
 
     fn enable_pod(envelope: &mut PolicyEnvelope, pod: PodId, weight: f64, cap_bps: u32) {
@@ -877,13 +1020,17 @@ mod tests {
 
         let gate = HardRiskGate::new(RiskLimits::default());
         assert_eq!(
-            gate.validate_inference_refill(10.0, 1.20, 2.00, 5.0, 25.0),
-            Ok(10.0)
+            gate.validate_inference_refill(4.0, 100.0, 1.20, 2.00, 5.0, 25.0, false),
+            InferenceRefillVerdict {
+                approved: true,
+                status: "refilled".to_string(),
+                reason: "Approved refill of $4.00".to_string(),
+                approved_usd: 4.0,
+            }
         );
-        assert!(matches!(
-            gate.validate_inference_refill(10.0, 4.50, 2.00, 5.0, 25.0),
-            Err(RiskRejection::InferenceRefillRejected { .. })
-        ));
+        let above = gate.validate_inference_refill(4.0, 100.0, 4.50, 2.00, 5.0, 25.0, false);
+        assert_eq!(above.status, "skipped_sufficient_balance");
+        assert!(!above.approved);
     }
 
     #[test]
