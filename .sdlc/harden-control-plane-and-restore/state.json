@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev",
+  "status": "merged",
   "pr": 24,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "fd2b4d087b76e995cc535b39bffbb68df189dd53",
+      "updated_at": "2026-10-31T22:07:08Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/8-harden-control-plane-and-restore",
-  "partial_issue": true
+  "partial_issue": true,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-10-31T22:12:04Z",
+    "mode": "full-auto",
+    "pr": 24,
+    "head_sha": "fd2b4d087b76e995cc535b39bffbb68df189dd53"
+  }
 }
