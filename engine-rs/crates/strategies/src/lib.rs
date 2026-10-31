@@ -494,6 +494,39 @@ fn spec(
     }
 }
 
+pub const CANONICAL_LEAF_IDS: &[&str] = &[
+    "leaf-solana",
+    "leaf-bitcoin",
+    "leaf-ethereum",
+    "leaf-bnb",
+    "leaf-xrp",
+    "leaf-ton",
+    "leaf-tron",
+    "leaf-cardano",
+    "leaf-avalanche",
+    "leaf-polkadot",
+    "leaf-chainlink",
+    "leaf-sui",
+    "leaf-near",
+    "leaf-aptos",
+    "leaf-cosmos",
+    "leaf-stacks",
+    "leaf-dogecoin",
+    "leaf-icp",
+    "leaf-canton",
+    "leaf-celo",
+    "leaf-tezos",
+    "leaf-flow",
+    "leaf-eos",
+    "leaf-hyperliquid",
+    "leaf-binance-cex",
+    "leaf-paper-sandbox",
+];
+
+pub fn is_canonical_leaf_id(leaf_id: &str) -> bool {
+    CANONICAL_LEAF_IDS.contains(&leaf_id)
+}
+
 /// Returns the catalog of ecosystem-specific Rust Strategy Pods for a given blockchain leaf
 /// (guaranteed `1 <= len <= MAX_PODS_PER_BLOCKCHAIN (4)`).
 pub fn ecosystem_pod_specs(leaf_id: &str) -> Vec<EcosystemPodSpec> {
@@ -1015,3 +1048,99 @@ pub fn strategy_pods_for_leaf(leaf_id: &str) -> Vec<Box<dyn StrategyPod>> {
 
     pods
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_canonical_leaf_ids_count_and_uniqueness() {
+        assert_eq!(CANONICAL_LEAF_IDS.len(), 26);
+        let mut set = std::collections::HashSet::new();
+        for id in CANONICAL_LEAF_IDS {
+            assert!(set.insert(id), "Duplicate leaf ID: {id}");
+            assert!(is_canonical_leaf_id(id));
+        }
+        assert!(!is_canonical_leaf_id("leaf-unknown"));
+    }
+
+    #[test]
+    fn test_all_26_leaves_have_valid_pod_catalog_and_weights() {
+        for &leaf_id in CANONICAL_LEAF_IDS {
+            let specs = ecosystem_pod_specs(leaf_id);
+            assert!(
+                !specs.is_empty() && specs.len() <= MAX_PODS_PER_BLOCKCHAIN,
+                "Leaf {leaf_id} must have between 1 and 4 pods, got {}",
+                specs.len()
+            );
+
+            let mut weight_sum = 0.0;
+            for pod in &specs {
+                assert!(pod.default_weight > 0.0, "Pod {} default_weight <= 0", pod.pod_code);
+                assert!(!pod.pod_code.is_empty());
+                assert!(!pod.name.is_empty());
+                assert!(!pod.archetype.is_empty());
+                assert!(!pod.native_venue.is_empty());
+                assert!(!pod.description.is_empty());
+                weight_sum += pod.default_weight;
+            }
+            assert!(
+                weight_sum <= 1.0001,
+                "Leaf {leaf_id} default_weight sum {weight_sum} exceeds 1.0"
+            );
+        }
+    }
+
+    #[test]
+    fn test_divergent_audit_leaves_match_canonical_specs() {
+        let bnb = ecosystem_pod_specs("leaf-bnb");
+        let bnb_codes: Vec<&str> = bnb.iter().map(|p| p.pod_code.as_str()).collect();
+        assert_eq!(
+            bnb_codes,
+            vec!["bnb_venus_carry", "bnb_pancake_v3_momentum", "bnb_launchpool_whale_flow"]
+        );
+
+        let xrp = ecosystem_pod_specs("leaf-xrp");
+        let xrp_codes: Vec<&str> = xrp.iter().map(|p| p.pod_code.as_str()).collect();
+        assert_eq!(
+            xrp_codes,
+            vec!["xrp_rlusd_mm_carry", "xrp_clob_obi_momentum", "xrp_xls30_amm_arb"]
+        );
+
+        let ton = ecosystem_pod_specs("leaf-ton");
+        let ton_codes: Vec<&str> = ton.iter().map(|p| p.pod_code.as_str()).collect();
+        assert_eq!(
+            ton_codes,
+            vec!["ton_usdt_vault_carry", "ton_jetton_momentum", "ton_whale_accumulator"]
+        );
+
+        let tron = ecosystem_pod_specs("leaf-tron");
+        let tron_codes: Vec<&str> = tron.iter().map(|p| p.pod_code.as_str()).collect();
+        assert_eq!(
+            tron_codes,
+            vec!["trx_justlend_usdt_carry", "trx_sunswap_momentum", "trx_usdt_mint_tracker"]
+        );
+
+        let avax = ecosystem_pod_specs("leaf-avalanche");
+        let avax_codes: Vec<&str> = avax.iter().map(|p| p.pod_code.as_str()).collect();
+        assert_eq!(
+            avax_codes,
+            vec!["avax_benqi_savax_carry", "avax_lfj_bin_momentum", "avax_subnet_icm_flow"]
+        );
+
+        let cosmos = ecosystem_pod_specs("leaf-cosmos");
+        let cosmos_codes: Vec<&str> = cosmos.iter().map(|p| p.pod_code.as_str()).collect();
+        assert_eq!(
+            cosmos_codes,
+            vec!["atom_stride_ibc_carry", "atom_osmosis_clmm_momentum", "atom_ibc_relayer_arb"]
+        );
+
+        let cex = ecosystem_pod_specs("leaf-binance-cex");
+        let cex_codes: Vec<&str> = cex.iter().map(|p| p.pod_code.as_str()).collect();
+        assert_eq!(
+            cex_codes,
+            vec!["cex_perp_funding_harvester", "cex_l2_obi_breakout", "cex_cross_pair_stat_arb"]
+        );
+    }
+}
+

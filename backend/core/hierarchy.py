@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 import time
@@ -1015,6 +1016,7 @@ class HierarchicalFleetManager:
         self.master_model = "moonshotai/kimi-k3.1-pro"
         self.leaf_default_model = "deepseek/deepseek-v4.1-flash-1017"
         self.master_interval_sec = 3600  # 1-hour macro reflection cadence (longer than 15m leaf agents)
+        self.auto_scheduler_enabled: bool = os.getenv("ENABLE_AUTO_LLM_SCHEDULER", "false").lower() in ("true", "1")
         now_ms = int(time.time() * 1000)
         self.last_master_reflection_ms = now_ms
         self.next_master_reflection_ms = now_ms + self.master_interval_sec * 1000
@@ -1223,13 +1225,24 @@ class HierarchicalFleetManager:
             "error": "Simulated Rust vault unavailable or returned an invalid receipt",
         }
 
-    def _build_rust_pods_for_leaf(self, spec: Dict[str, Any]) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _build_rust_pods_for_leaf(spec_or_leaf_id: str | Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Returns the 1 to 4 (strictly <= 4) ecosystem-adapted Rust Strategy Pods (`engine-rs`)
         for a given blockchain leaf, matching `ecosystem_pod_specs` in `engine-rs/crates/strategies`.
         """
-        lid = str(spec["leaf_id"])
-        chain = str(spec["chain"])
+        if isinstance(spec_or_leaf_id, str):
+            lid = spec_or_leaf_id
+            found = next((item for item in LEAF_ECOSYSTEM_CATALOG if item["leaf_id"] == lid), None)
+            spec: Dict[str, Any] = (
+                found
+                if found is not None
+                else {"leaf_id": lid, "chain": lid.replace("leaf-", "").title(), "venues": []}
+            )
+        else:
+            spec = spec_or_leaf_id
+            lid = str(spec["leaf_id"])
+        chain = str(spec.get("chain", lid.replace("leaf-", "").title()))
         venues = list(spec.get("venues", []))
         v1 = venues[0] if venues else f"{chain} Native DEX"
         v2 = venues[1] if len(venues) > 1 else v1
@@ -1416,6 +1429,209 @@ class HierarchicalFleetManager:
                     "description": "Entrée atomique sur nouvelles poches de liquidité Move vérifiées.",
                 },
             ],
+            "leaf-bnb": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "bnb_venus_carry",
+                    "name": "Venus Protocol & BNB Basis Carry",
+                    "archetype": "LENDING_BASIS_CARRY",
+                    "native_venue": "Venus Protocol",
+                    "default_weight": 0.40,
+                    "description": "Capture des écarts de taux USDT/BNB sur Venus et du funding BNB.",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "bnb_pancake_v3_momentum",
+                    "name": "PancakeSwap v3 CLMM OBI Breakout",
+                    "archetype": "DEX_CLMM_MOMENTUM",
+                    "native_venue": "PancakeSwap v3",
+                    "default_weight": 0.40,
+                    "description": "Momentum intraday sur BNB-USDT et CAKE-BNB dans les ticks concentrés PancakeSwap v3.",
+                },
+                {
+                    "slot_id": "pod_onchain_alpha",
+                    "pod_code": "bnb_launchpool_whale_flow",
+                    "name": "BNB Launchpool & Smart-Money Catalyst",
+                    "archetype": "CATALYST_WHALE_FLOW",
+                    "native_venue": "PancakeSwap v3 / opBNB",
+                    "default_weight": 0.20,
+                    "description": "Détection des accumulations on-chain liées aux Launchpools et rotations BSC.",
+                },
+            ],
+            "leaf-xrp": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "xrp_rlusd_mm_carry",
+                    "name": "XRPL Native CLOB & RLUSD Spread Carry",
+                    "archetype": "CLOB_SPREAD_CARRY",
+                    "native_venue": "XRPL Native CLOB",
+                    "default_weight": 0.45,
+                    "description": "Market-making passif et capture de spread sur XRP-RLUSD et XRP-USDT.",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "xrp_clob_obi_momentum",
+                    "name": "XRPL Built-In DEX Orderflow Breakout",
+                    "archetype": "NATIVE_DEX_MOMENTUM",
+                    "native_venue": "XRPL Native CLOB",
+                    "default_weight": 0.35,
+                    "description": "Suivi des déséquilibres d'ordres sur le carnet natif XRPL (finalité 4s).",
+                },
+                {
+                    "slot_id": "pod_onchain_alpha",
+                    "pod_code": "xrp_xls30_amm_arb",
+                    "name": "XRPL XLS-30 AMM vs CLOB Arbitrage",
+                    "archetype": "AMM_CLOB_ARBITRAGE",
+                    "native_venue": "XRPL XLS-30 AMM",
+                    "default_weight": 0.20,
+                    "description": "Arbitrage mécanique d'enchère continue entre les pools XLS-30 et le CLOB XRPL.",
+                },
+            ],
+            "leaf-ton": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "ton_usdt_vault_carry",
+                    "name": "TON Native USDT & STON.fi Yield Carry",
+                    "archetype": "STABLE_LP_CARRY",
+                    "native_venue": "STON.fi / DeDust",
+                    "default_weight": 0.40,
+                    "description": "Portage de liquidité sur l'USDT natif TON et capture de frais de swap.",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "ton_jetton_momentum",
+                    "name": "TON & Jetton Volatility Breakout",
+                    "archetype": "JETTON_MOMENTUM",
+                    "native_venue": "STON.fi",
+                    "default_weight": 0.40,
+                    "description": "Momentum sur TON-USDT et NOT-TON lors des vagues de volume Telegram Mini-Apps.",
+                },
+                {
+                    "slot_id": "pod_onchain_alpha",
+                    "pod_code": "ton_whale_accumulator",
+                    "name": "TON Workchain Whale & TVL Flow",
+                    "archetype": "ONCHAIN_WHALE_FLOW",
+                    "native_venue": "DeDust",
+                    "default_weight": 0.20,
+                    "description": "Suivi des flux de baleines TON sur les pools DeDust et STON.fi.",
+                },
+            ],
+            "leaf-tron": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "trx_justlend_usdt_carry",
+                    "name": "JustLend TRC-20 USDT & Energy Carry",
+                    "archetype": "STABLECOIN_ENERGY_CARRY",
+                    "native_venue": "JustLend DAO",
+                    "default_weight": 0.55,
+                    "description": "Capture du rendement d'alimentation TRC-20 USDT et location d'Energy TRON.",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "trx_sunswap_momentum",
+                    "name": "SunSwap v3 TRX/USDT Orderflow Pod",
+                    "archetype": "DEX_ORDERFLOW_MOMENTUM",
+                    "native_venue": "SunSwap v3",
+                    "default_weight": 0.30,
+                    "description": "Exécution directionnelle sur TRX-USDT lors des pics de règlement stablecoin.",
+                },
+                {
+                    "slot_id": "pod_onchain_alpha",
+                    "pod_code": "trx_usdt_mint_tracker",
+                    "name": "Tether Treasury Mint & Peg Arbitrage",
+                    "archetype": "TREASURY_FLOW_ARB",
+                    "native_venue": "SunSwap v3",
+                    "default_weight": 0.15,
+                    "description": "Réaction mécanique aux émissions/destructions de TRC-20 USDT par Tether Treasury.",
+                },
+            ],
+            "leaf-avalanche": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "avax_benqi_savax_carry",
+                    "name": "Benqi sAVAX Liquid Staking Carry",
+                    "archetype": "LST_BASIS_CARRY",
+                    "native_venue": "Benqi / GMX v2",
+                    "default_weight": 0.40,
+                    "description": "Portage sAVAX/AVAX combiné au funding perpétuel GMX v2 sur C-Chain.",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "avax_lfj_bin_momentum",
+                    "name": "LFJ (TraderJoe) Discrete Bin Breakout",
+                    "archetype": "LIQUIDITY_BOOK_MOMENTUM",
+                    "native_venue": "LFJ Liquidity Book",
+                    "default_weight": 0.40,
+                    "description": "Momentum directionnel à travers les bins de liquidité discrète LFJ v2.2.",
+                },
+                {
+                    "slot_id": "pod_onchain_alpha",
+                    "pod_code": "avax_subnet_icm_flow",
+                    "name": "Avalanche9000 Teleporter & Whale Flow",
+                    "archetype": "SUBNET_FLOW_ALPHA",
+                    "native_venue": "GMX v2 Avalanche",
+                    "default_weight": 0.20,
+                    "description": "Suivi des flux inter-subnets (ICM/Teleporter) et des positions GMX v2.",
+                },
+            ],
+            "leaf-cosmos": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "atom_stride_ibc_carry",
+                    "name": "Stride stATOM & Osmosis Yield Carry",
+                    "archetype": "IBC_LST_CARRY",
+                    "native_venue": "Stride / Osmosis",
+                    "default_weight": 0.45,
+                    "description": "Portage du rendement de staking liquide stATOM et des bassins stables IBC.",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "atom_osmosis_clmm_momentum",
+                    "name": "Osmosis Supercharged Liquidity Breakout",
+                    "archetype": "IBC_DEX_MOMENTUM",
+                    "native_venue": "Osmosis DEX",
+                    "default_weight": 0.35,
+                    "description": "Capture des mouvements d'expansion sur ATOM-USDC et TIA-USDC.",
+                },
+                {
+                    "slot_id": "pod_onchain_alpha",
+                    "pod_code": "atom_ibc_relayer_arb",
+                    "name": "Cross-Zone IBC Packet Dislocation Arb",
+                    "archetype": "IBC_CROSS_ZONE_ARB",
+                    "native_venue": "Osmosis / Astroport",
+                    "default_weight": 0.20,
+                    "description": "Arbitrage des écarts de prix entre zones Cosmos lors des vagues de trafic IBC.",
+                },
+            ],
+            "leaf-binance-cex": [
+                {
+                    "slot_id": "pod_carry",
+                    "pod_code": "cex_perp_funding_harvester",
+                    "name": "Binance Multi-Asset Spot-Perp Funding Carry",
+                    "archetype": "CEX_DELTA_NEUTRAL_CARRY",
+                    "native_venue": "Binance Perp / Spot",
+                    "default_weight": 0.40,
+                    "description": "Moissonnage delta-neutre des taux de funding perpétuels CEX en Post-Only Maker.",
+                },
+                {
+                    "slot_id": "pod_momentum",
+                    "pod_code": "cex_l2_obi_breakout",
+                    "name": "Binance L2 Orderbook Imbalance & CVD Pod",
+                    "archetype": "CEX_ORDERFLOW_MOMENTUM",
+                    "native_venue": "Binance Spot / Perp",
+                    "default_weight": 0.35,
+                    "description": "Exécution Post-Only Maker (1.8 bps) sur déséquilibre du carnet L2 et cassure ATR.",
+                },
+                {
+                    "slot_id": "pod_onchain_alpha",
+                    "pod_code": "cex_cross_pair_stat_arb",
+                    "name": "CEX Cross-Margin Basis & Liquidation Reversion",
+                    "archetype": "STAT_ARB_REVERSION",
+                    "native_venue": "Binance Cross-Margin",
+                    "default_weight": 0.25,
+                    "description": "Capture des mèches de liquidation et retour à la moyenne sur le carnet central.",
+                },
+            ],
             "leaf-paper-sandbox": [
                 {
                     "slot_id": "pod_carry",
@@ -1460,33 +1676,34 @@ class HierarchicalFleetManager:
             return catalog[lid][:4]
 
         slug = lid.replace("leaf-", "")
+        slug_upper = slug.upper()
         return [
             {
                 "slot_id": "pod_carry",
                 "pod_code": f"{slug}_staking_yield_carry",
-                "name": f"{chain} Native Yield & Basis Carry",
+                "name": f"{slug_upper} Native Staking & Basis Carry",
                 "archetype": "ECOSYSTEM_YIELD_CARRY",
-                "native_venue": v1,
+                "native_venue": f"{slug_upper} Native DeFi",
                 "default_weight": 0.45,
-                "description": f"Capture du rendement natif et du basis sur l'écosystème {chain} ({v1}).",
+                "description": f"Capture du rendement natif et du basis sur l'écosystème {slug_upper}.",
             },
             {
                 "slot_id": "pod_momentum",
                 "pod_code": f"{slug}_dex_obi_momentum",
-                "name": f"{chain} Native DEX Orderflow Momentum",
+                "name": f"{slug_upper} Native DEX Orderflow Momentum",
                 "archetype": "ECOSYSTEM_ORDERFLOW_MOMENTUM",
-                "native_venue": v1,
+                "native_venue": f"{slug_upper} Primary DEX",
                 "default_weight": 0.35,
-                "description": f"Breakout de volatilité et déséquilibre de carnet sur {chain} ({', '.join(spec.get('exclusive_assets', [])[:2])}).",
+                "description": f"Breakout de volatilité et déséquilibre de carnet sur {slug_upper}.",
             },
             {
                 "slot_id": "pod_onchain_alpha",
                 "pod_code": f"{slug}_onchain_catalyst_alpha",
-                "name": f"{chain} On-Chain Whale & Catalyst Pod",
+                "name": f"{slug_upper} On-Chain Whale & Catalyst Pod",
                 "archetype": "ECOSYSTEM_ONCHAIN_ALPHA",
-                "native_venue": v2,
+                "native_venue": f"{slug_upper} L1 RPC / Pools",
                 "default_weight": 0.20,
-                "description": f"Détection de flux on-chain et catalyseurs propres à la blockchain {chain}.",
+                "description": f"Détection de flux on-chain et catalyseurs propres à la blockchain {slug_upper}.",
             },
         ][:4]
 
@@ -1513,10 +1730,16 @@ class HierarchicalFleetManager:
             )
             rust_pods = self._build_rust_pods_for_leaf(spec)
             wallet_vault = vault_by_leaf.get(lid, {})
+            is_solana = (lid == "leaf-solana")
             self.leaves[lid] = {
                 **spec,
                 "id": lid,
                 "leaf_id": lid,
+                "execution_mode": "ACTIVE_SOLANA" if is_solana else "PASSIVE_CATALOG",
+                "scheduler_active": (
+                    getattr(self, "auto_scheduler_enabled", False) if is_solana else False
+                ),
+                "ta_metrics_source": "CATALOG_FIXTURE",
                 "allocated_capital_usd": alloc_usd,
                 "capital_weight": weight,
                 "weight_pct": round(weight * 100.0, 2),
@@ -1999,6 +2222,16 @@ class HierarchicalFleetManager:
         populations: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         leaf = dict(self.leaves.get(leaf_id, self.leaves["leaf-solana"]))
+        is_solana = (leaf_id == "leaf-solana")
+        leaf["execution_mode"] = "ACTIVE_SOLANA" if is_solana else "PASSIVE_CATALOG"
+        leaf["scheduler_active"] = (
+            getattr(self, "auto_scheduler_enabled", False) if is_solana else False
+        )
+        if is_solana and (solana_live_metrics or populations):
+            leaf["ta_metrics_source"] = "LIVE_COMPUTED"
+        else:
+            leaf["ta_metrics_source"] = "CATALOG_FIXTURE"
+
         wing = str(leaf["mempalace_wing"])
         rss_feed = EcosystemRSSAggregator.get_feed_for_agent(leaf_id)
         drawers = self.palace.recall_recent(limit=6, wing=wing)
@@ -2027,6 +2260,8 @@ class HierarchicalFleetManager:
         solana_live_metrics: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         eff_cost = cost_status or cost_guard_status or {}
+        if "auto_scheduler_enabled" in eff_cost:
+            self.auto_scheduler_enabled = bool(eff_cost["auto_scheduler_enabled"])
         eff_sol = solana_populations or solana_live_metrics
         leaves_list = [
             self.get_leaf_detail(spec["leaf_id"], solana_live_metrics=eff_sol)

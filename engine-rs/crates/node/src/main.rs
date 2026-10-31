@@ -1,6 +1,7 @@
 use robotrader_backtest::{benchmark_market_stream_for_leaf, BacktestEngine};
 use robotrader_common::PolicyEnvelope;
 use robotrader_risk_gate::SimulatedVault;
+use robotrader_strategies::{ecosystem_pod_specs, is_canonical_leaf_id, CANONICAL_LEAF_IDS};
 use std::env;
 use std::io::Read;
 use std::path::PathBuf;
@@ -8,9 +9,11 @@ use std::path::PathBuf;
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut leaf_id = "leaf-solana".to_string();
+    let mut custom_leaf_id: Option<String> = None;
     let mut custom_policy_json: Option<String> = None;
     let mut contract_roundtrip = false;
     let mut dump_vault_manifest = false;
+    let mut dump_pod_catalog = false;
     let mut sign_transfer = false;
     let mut dest_address = "FK286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN".to_string();
     let mut amount_usd: f64 = 100.0;
@@ -21,8 +24,11 @@ fn main() {
     for i in 0..args.len() {
         if (args[i] == "--leaf-id" || args[i] == "--leaf") && i + 1 < args.len() {
             leaf_id = args[i + 1].clone();
+            custom_leaf_id = Some(args[i + 1].clone());
         } else if args[i] == "--policy-json" && i + 1 < args.len() {
             custom_policy_json = Some(args[i + 1].clone());
+        } else if args[i] == "--dump-pod-catalog" || args[i] == "--export-pod-catalog" {
+            dump_pod_catalog = true;
         } else if args[i] == "--contract-roundtrip" {
             contract_roundtrip = true;
         } else if args[i] == "--vault-manifest" {
@@ -41,6 +47,38 @@ fn main() {
             // Test-only override; production uses the default secret mount path.
             vault_secret_file = Some(PathBuf::from(args[i + 1].clone()));
         }
+    }
+
+    if dump_pod_catalog {
+        match custom_leaf_id {
+            Some(ref id) => {
+                if !is_canonical_leaf_id(id) {
+                    eprintln!("unrecognized leaf identifier: {id}");
+                    std::process::exit(1);
+                }
+                let specs = ecosystem_pod_specs(id);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&specs)
+                        .expect("Failed to serialize leaf pod catalog")
+                );
+            }
+            None => {
+                let mut map = serde_json::Map::new();
+                for &id in CANONICAL_LEAF_IDS {
+                    let specs = ecosystem_pod_specs(id);
+                    let val = serde_json::to_value(&specs)
+                        .expect("Failed to serialize leaf pod catalog");
+                    map.insert(id.to_string(), val);
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::Value::Object(map))
+                        .expect("Failed to serialize full pod catalog")
+                );
+            }
+        }
+        return;
     }
 
     if contract_roundtrip {

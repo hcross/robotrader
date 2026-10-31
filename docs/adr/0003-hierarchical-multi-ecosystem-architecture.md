@@ -58,6 +58,15 @@ The auto-refill bullet above is corrected to match the gate that actually runs. 
 - **Measured source**: realized PnL is injected from the orchestrator's own state store; there is no module-global fallback and no fabricated profit floor.
 - **Epoch cap**: a rolling 24 h window of refill events (`(timestamp_ms, amount_usd)`), so headroom returns within the process without a restart. The window is in memory: a restart starts a new window, and persistence across restarts is a follow-up on issue #5.
 
+## Amendment — 2026-10-31 (fix-leaf-fleet-parity-honesty)
+
+The execution status of the 26-leaf fleet is clarified to honestly reflect the current implementation phase:
+
+- **Single Active Warm-Path Driver**: `leaf-solana` is currently the sole autonomously scheduled leaf robot (`execution_mode: "ACTIVE_SOLANA"`), compiling policy overrides for hot-path execution in `engine-rs`.
+- **Passive Catalog Fleet**: The remaining 25 non-Solana leaves operate as catalog specifications (`execution_mode: "PASSIVE_CATALOG"`, `scheduler_active: false`), with baseline indicators tagged with `ta_metrics_source: "CATALOG_FIXTURE"`. They support on-demand manual reflection triggers and deterministic policy sanity check fixtures, but do not autonomously compile hot-path policies or execute live trades until live ingestion pipelines are connected.
+- **Pod Catalog Parity**: Strategy Pod definitions across all 26 leaves are strictly aligned between Python `HierarchicalFleetManager` and Rust `engine-rs/crates/strategies` with 100% attribute equality, verifiable via `robotrader-node --dump-pod-catalog`.
+- **Provenance Stamping**: Ecosystem RSS feeds declare machine-readable item and feed provenance (`LIVE_RSS` vs `CURATED_FIXTURE`, `feed_mode`), and static macro narratives declare `SYNTHETIC_FIXTURE`.
+
 ## Consequences
 
 - **Positive**: Complete elimination of cross-ecosystem contamination inside `leaf-solana`; crystal-clear separation between macro capital allocation (`Kimi K3.1 Pro`) and high-frequency ecosystem execution (`DeepSeek v4.1 Flash 1017` + Rust `<50µs` pods); deterministic protection against unprofitable cross-chain bridging and unbounded inference refills.

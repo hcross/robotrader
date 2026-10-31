@@ -680,6 +680,15 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-300 font-mono">
                           {lf.symbol}
                         </span>
+                        {lf.execution_mode === 'ACTIVE_SOLANA' || lf.id === 'leaf-solana' ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono font-semibold">
+                            ACTIVE_SOLANA
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-semibold">
+                            PASSIVE_CATALOG
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-gray-400">
                         {lf.tier} • MemPalace: <code>{lf.mempalace_wing}</code>

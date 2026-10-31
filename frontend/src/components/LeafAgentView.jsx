@@ -193,6 +193,15 @@ const LeafAgentView = ({
               >
                 <ArrowLeft className="w-3.5 h-3.5" /> Retour Orchestrateur Maître
               </button>
+              {leaf.execution_mode === 'ACTIVE_SOLANA' || leafId === 'leaf-solana' ? (
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono font-semibold">
+                  ACTIVE_SOLANA
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-semibold">
+                  PASSIVE_CATALOG
+                </span>
+              )}
               <span className="px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-semibold">
                 {leaf.tier || 'LEAF_AGENT'} • {leaf.category}
               </span>
@@ -211,6 +220,11 @@ const LeafAgentView = ({
               Moteur d&apos;exécution : <strong className="text-gray-200">{leaf.execution_engine}</strong> • Actifs
               strictement autorisés :{' '}
               <code className="text-emerald-400">{(leaf.exclusive_assets || []).join(', ')}</code>
+              {leaf.execution_mode !== 'ACTIVE_SOLANA' && leafId !== 'leaf-solana' ? (
+                <> • <span className="text-amber-300 font-medium">Ordonnancement en arrière-plan inactif (réflexion manuelle sur demande uniquement)</span></>
+              ) : (
+                <> • <span className="text-emerald-400 font-medium">Ordonnancement autonome actif (compilation de politiques hot-path)</span></>
+              )}
             </p>
             <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] text-gray-400">
               <span className="px-2 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-500/30 font-mono font-semibold">
@@ -506,10 +520,20 @@ const LeafAgentView = ({
       {/* Ecosystem-Specific Technical / On-Chain Tools & Dedicated RSS Feeds */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-gray-900 p-5 rounded-xl border border-gray-800 space-y-3">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <Activity className="w-4 h-4 text-blue-400" />
-            Outils d&apos;Analyse Technique &amp; Métriques On-Chain Spécifiques ({leaf.chain})
-          </h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Activity className="w-4 h-4 text-blue-400" />
+              Outils d&apos;Analyse Technique &amp; Métriques On-Chain Spécifiques ({leaf.chain})
+            </h3>
+            <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-mono font-semibold">
+              {leaf.ta_metrics_source || (leafId === 'leaf-solana' ? 'LIVE_COMPUTED' : 'CATALOG_FIXTURE')}
+            </span>
+          </div>
+          {(leaf.ta_metrics_source === 'CATALOG_FIXTURE' || (!leaf.ta_metrics_source && leafId !== 'leaf-solana')) && (
+            <p className="text-[11px] text-amber-300/80">
+              Ces métriques sont des données de référence du catalogue (fixtures) et non une télémétrie en temps réel.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-2.5 text-xs">
             {Object.entries(taMetrics).map(([k, v]) => (
               <div key={k} className="p-3 rounded-lg bg-gray-950/70 border border-gray-800">
@@ -523,10 +547,17 @@ const LeafAgentView = ({
         </div>
 
         <div className="bg-gray-900 p-5 rounded-xl border border-gray-800 space-y-3">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <Rss className="w-4 h-4 text-amber-400" />
-            Flux RSS Exclusifs à la Blockchain {leaf.chain}
-          </h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Rss className="w-4 h-4 text-amber-400" />
+              Flux RSS Exclusifs à la Blockchain {leaf.chain}
+            </h3>
+            {leaf.rss_feed?.feed_mode && (
+              <span className="px-2 py-0.5 rounded bg-gray-800 text-gray-300 border border-gray-700 text-[10px] font-mono">
+                {leaf.rss_feed.feed_mode} ({leaf.rss_feed.live_count ?? 0} live, {leaf.rss_feed.curated_count ?? 0} fixture)
+              </span>
+            )}
+          </div>
           <div className="space-y-2">
             {rssItems.map((item, idx) => (
               <div
@@ -534,9 +565,22 @@ const LeafAgentView = ({
                 className="p-3 rounded-lg bg-gray-950/70 border border-gray-800 text-xs space-y-1"
               >
                 <div className="flex items-center justify-between">
-                  <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-semibold text-[10px]">
-                    {item.source}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-semibold text-[10px]">
+                      {item.source}
+                    </span>
+                    {item.source_kind && (
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[9px] font-mono ${
+                          item.source_kind === 'LIVE_RSS'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        }`}
+                      >
+                        {item.source_kind}
+                      </span>
+                    )}
+                  </div>
                   <span className="font-mono text-[10px] text-emerald-400">
                     Sentiment {(Number(item.sentiment || 0.5) * 100).toFixed(0)}% • {item.impact}
                   </span>
