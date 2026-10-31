@@ -8,6 +8,10 @@ robotrader-common = { path = "../common" }
 serde.workspace = true
 thiserror.workspace = true
 
+# Dev-dependencies and benchmark toolchain MSRV note (DEV-R1-F01):
+# `criterion = "0.8.2"` requires Rust 1.86+ (MSRV 1.86).
+# Running the hot-path benchmark requires Rust 1.86+:
+# `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`
 [dev-dependencies]
 # Test-only parity edge (PLAN-R1-F06): these tests compare the gate's cost
 # terms with the execution router. This is a dev-dependency, so it does not
@@ -17,6 +21,7 @@ robotrader-exec-router = { path = "../exec-router" }
 # Criterion is dev-only and never linked into release binaries. Default
 # features pull in `plotters` and `rayon`; neither is needed for the CI/CLI
 # benchmark output, so only the cargo-bench harness support is enabled.
+# MSRV requirement: 1.86 (criterion 0.8.2).
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 [[bench]]

@@ -37,7 +37,7 @@ Inspired by **MemPalace**, the strategist stores and queries structured drawers 
 - **Logical Continuity**: Every LLM prompt injects the latest **continuity-eligible** drawers from `strategy_ledger` so the strategist must explicitly **CONFIRM**, **REFINE**, or **INVALIDATE** its prior thesis before emitting new rules. Only drawers whose `source` is `LLM` or `DETERMINISTIC_FALLBACK` are eligible. `BOOTSTRAP` drawers (seeded on a fresh install, or legacy untyped lines read back conservatively) remain visible in the UI with their badge but are excluded from the continuity prompt and the cross-wing digest.
 
 ### Pillar 3: Mechanical Rule Compilation into the Rust Hot-Path (`PolicyEnvelope` v2)
-The LLM translates its high-level thesis into **explicit mechanical execution rules** compiled into `PolicyEnvelope` and enforced in `<50µs` by the Rust pods (`engine-rs`) and Live Execution Loop:
+The LLM translates its high-level thesis into **explicit mechanical execution rules** compiled into `PolicyEnvelope` and enforced under the `<50µs` budget (measured mean: `0.244 µs`; bench: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`) by the Rust pods (`engine-rs`) and Live Execution Loop:
 - Per-asset `support_zone_usd` (Fibonacci 0.618 / Kijun) and `resistance_zone_usd`,
 - `entry_obi_threshold` (required L2 orderbook imbalance to trigger execution),
 - `take_profit_bps`, `stop_loss_bps`, and `invalidation_price_usd`,

@@ -541,7 +541,7 @@ mod tests {
     use super::*;
     use robotrader_common::{fee_bps_for, spread_bps_for};
     use robotrader_risk_gate::RiskRejection;
-    use robotrader_strategies::{OnChainAlphaPod, StrategyPod};
+    use robotrader_strategies::{DexSniperPod, OnChainAlphaPod, StrategyPod};
 
     const FLOAT_TOLERANCE: f64 = 1e-9;
 
@@ -663,6 +663,105 @@ mod tests {
             Err(RiskRejection::OnChainRugCheckFailed { .. }) => {}
             other => panic!("expected OnChainRugCheckFailed, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_solana_smart_money_jup_hurdle_rejection() {
+        let (events, envelope) = benchmark_market_stream();
+        let jup_event = events
+            .iter()
+            .find(|event| event.symbol() == "JUP-SOL")
+            .expect("the benchmark stream contains the JUP-SOL smart-money event");
+
+        let mut pod = OnChainAlphaPod::default();
+        let intents = pod.on_market_event(jup_event, &envelope);
+        assert_eq!(intents.len(), 1, "JUP-SOL must emit one intent");
+        let intent = &intents[0];
+
+        assert_close(intent.expected_edge_bps, 70.2, "JUP smart-money edge_bps");
+
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        let portfolio = PortfolioState::new(10_000.0);
+        match gate.validate(intent, &portfolio, &envelope, jup_event.timestamp_ms()) {
+            Err(RiskRejection::InsufficientEdge { edge_bps, min_bps }) => {
+                assert_close(edge_bps, 70.2, "reported edge_bps");
+                assert_close(min_bps, 87.2, "reported min_bps");
+            }
+            other => panic!("expected InsufficientEdge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_solana_sniper_aix_hurdle_rejection() {
+        let (events, envelope) = benchmark_market_stream();
+        let aix_event = events
+            .iter()
+            .find(|event| event.symbol() == "AIX-SOL")
+            .expect("the benchmark stream contains the AIX-SOL pool launch event");
+
+        let mut pod = DexSniperPod::default();
+        let intents = pod.on_market_event(aix_event, &envelope);
+        assert_eq!(intents.len(), 1, "AIX-SOL must emit one intent");
+        let intent = &intents[0];
+
+        assert_close(intent.expected_edge_bps, 95.0, "AIX-SOL sniper edge_bps");
+
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        let portfolio = PortfolioState::new(10_000.0);
+        match gate.validate(intent, &portfolio, &envelope, aix_event.timestamp_ms()) {
+            Err(RiskRejection::InsufficientEdge { edge_bps, min_bps }) => {
+                assert_close(edge_bps, 95.0, "reported edge_bps");
+                assert_close(min_bps, 151.4, "reported min_bps");
+            }
+            other => panic!("expected InsufficientEdge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_leaf_bitcoin_fixture_hurdle_rejection_breakdown() {
+        let (events, envelope) = benchmark_market_stream_for_leaf("leaf-bitcoin");
+        let mut pods = strategy_pods_for_leaf("leaf-bitcoin");
+        pods.truncate(MAX_PODS_PER_BLOCKCHAIN);
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        let portfolio = PortfolioState::new(10_000.0);
+
+        let mut approved_count = 0usize;
+        let mut insufficient_edge_rejections = Vec::new();
+        let mut other_rejections = Vec::new();
+
+        for event in &events {
+            let ts = event.timestamp_ms();
+            for pod in pods.iter_mut() {
+                let intents = pod.on_market_event(event, &envelope);
+                for intent in intents {
+                    match gate.validate(&intent, &portfolio, &envelope, ts) {
+                        Ok(_) => {
+                            approved_count += 1;
+                        }
+                        Err(RiskRejection::InsufficientEdge { edge_bps, min_bps }) => {
+                            insufficient_edge_rejections.push((intent, edge_bps, min_bps));
+                        }
+                        Err(other) => {
+                            other_rejections.push((intent, other));
+                        }
+                    }
+                }
+            }
+        }
+
+        assert_eq!(approved_count, 3, "leaf-bitcoin must have exactly 3 approved trades");
+        assert_eq!(
+            insufficient_edge_rejections.len(),
+            1,
+            "leaf-bitcoin must have exactly 1 hurdle rejection"
+        );
+        assert!(other_rejections.is_empty(), "leaf-bitcoin has no non-hurdle rejections");
+
+        let (ref rejected_intent, edge_bps, min_bps) = insufficient_edge_rejections[0];
+        assert_eq!(rejected_intent.symbol, "wBTC-BTC");
+        assert_eq!(rejected_intent.pod_id, PodId::PodOnchainAlpha);
+        assert_close(edge_bps, 68.4, "leaf-bitcoin rejected edge_bps");
+        assert_close(min_bps, 86.6, "leaf-bitcoin rejected min_bps");
     }
 
     #[test]

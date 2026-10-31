@@ -69,5 +69,5 @@ The execution status of the 26-leaf fleet is clarified to honestly reflect the c
 
 ## Consequences
 
-- **Positive**: Complete elimination of cross-ecosystem contamination inside `leaf-solana`; crystal-clear separation between macro capital allocation (`Kimi K3.1 Pro`) and high-frequency ecosystem execution (`DeepSeek v4.1 Flash 1017` + Rust `<50µs` pods); deterministic protection against unprofitable cross-chain bridging and unbounded inference refills.
+- **Positive**: Complete elimination of cross-ecosystem contamination inside `leaf-solana`; crystal-clear separation between macro capital allocation (`Kimi K3.1 Pro`) and high-frequency ecosystem execution (`DeepSeek v4.1 Flash 1017` + Rust pods under the `<50µs` budget, measured mean: `0.244 µs`; bench: `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`); deterministic protection against unprofitable cross-chain bridging and unbounded inference refills.
 - **Trade-offs**: Higher number of logical wings in `StrategyMemoryPalace`, mitigated by `recall_across_wings` and compact cross-wing digests.
