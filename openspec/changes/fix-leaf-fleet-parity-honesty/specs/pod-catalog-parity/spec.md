@@ -2,7 +2,7 @@
 
 ### Requirement: Full 26-leaf pod catalog parity across Rust and Python
 
-`HierarchicalFleetManager._build_rust_pods_for_leaf` (`backend/core/hierarchy.py`) and `ecosystem_pod_specs(leaf_id)` (`engine-rs/crates/strategies/src/lib.rs`) MUST produce an identical Strategy Pod catalog for every leaf identifier among all 26 supported ecosystems (`leaf-solana`, `leaf-bitcoin`, `leaf-ethereum`, `leaf-bnb`, `leaf-xrp`, `leaf-ton`, `leaf-tron`, `leaf-cardano`, `leaf-avalanche`, `leaf-polkadot`, `leaf-near`, `leaf-aptos`, `leaf-sui`, `leaf-cosmos`, `leaf-algorand`, `leaf-arbitrum`, `leaf-optimism`, `leaf-base`, `leaf-polygon`, `leaf-zksync`, `leaf-starknet`, `leaf-linea`, `leaf-scroll`, `leaf-hyperliquid`, `leaf-binance-cex`, `leaf-paper-sandbox`).
+`HierarchicalFleetManager._build_rust_pods_for_leaf` (`backend/core/hierarchy.py`) and `ecosystem_pod_specs(leaf_id)` (`engine-rs/crates/strategies/src/lib.rs`) MUST produce an identical Strategy Pod catalog for every leaf identifier among all 26 supported ecosystems (`leaf-solana`, `leaf-bitcoin`, `leaf-ethereum`, `leaf-bnb`, `leaf-xrp`, `leaf-ton`, `leaf-tron`, `leaf-cardano`, `leaf-avalanche`, `leaf-polkadot`, `leaf-chainlink`, `leaf-sui`, `leaf-near`, `leaf-aptos`, `leaf-cosmos`, `leaf-stacks`, `leaf-dogecoin`, `leaf-icp`, `leaf-canton`, `leaf-celo`, `leaf-tezos`, `leaf-flow`, `leaf-eos`, `leaf-hyperliquid`, `leaf-binance-cex`, `leaf-paper-sandbox`).
 Each pod entry in the catalog MUST contain identical values across the following fields:
 - `slot_id`: a valid canonical slot identifier matching `pod_carry`, `pod_momentum`, `pod_onchain_alpha`, or `pod_sniper`.
 - `pod_code`: a unique snake_case strategy code string.
@@ -31,7 +31,7 @@ The number of strategy pods per leaf MUST satisfy `1 <= count <= 4`. The 7 diver
 
 ### Requirement: Node CLI exports deterministic pod catalog
 
-`robotrader-node` CLI MUST provide a command-line flag `--dump-pod-catalog` (with alias `--export-pod-catalog`) that serializes and prints the Rust Strategy Pod catalog to standard output as deterministic JSON. When invoked without `--leaf-id`, the output MUST be a JSON object mapping each of the 26 leaf identifiers to its list of `EcosystemPodSpec` objects. When invoked with `--leaf-id <id>`, the output MUST be a JSON array of the pod catalog for that specific leaf. The CLI MUST exit with code 0 on successful export and write no non-JSON text to standard output.
+`robotrader-node` CLI MUST provide a command-line flag `--dump-pod-catalog` (with alias `--export-pod-catalog`) that serializes and prints the Rust Strategy Pod catalog to standard output as deterministic JSON. When invoked without `--leaf-id`, the output MUST be a JSON object mapping each of the 26 leaf identifiers to its list of `EcosystemPodSpec` objects. When invoked with `--leaf-id <id>`, the output MUST be a JSON array of the pod catalog for that specific leaf. The CLI MUST exit with code 0 on successful export and write no non-JSON text to standard output. When `--leaf-id` is provided with an unrecognized leaf identifier (not belonging to the 26 supported leaf identifiers), `robotrader-node` MUST exit with a non-zero exit code and emit an error message on stderr, and MUST NOT emit a catalog array on stdout.
 
 #### Scenario: CLI exports full fleet pod catalog as valid JSON
 - **WHEN** `robotrader-node --dump-pod-catalog` is executed
@@ -43,6 +43,12 @@ The number of strategy pods per leaf MUST satisfy `1 <= count <= 4`. The 7 diver
 - **WHEN** `robotrader-node --dump-pod-catalog --leaf-id leaf-solana` is executed
 - **THEN** the process exits with status code 0
 - **THEN** standard output parses as a JSON list containing the 4 Solana strategy pod specifications
+
+#### Scenario: CLI rejects unrecognized leaf identifier
+- **WHEN** `robotrader-node --dump-pod-catalog --leaf-id leaf-unknown` is executed with an unrecognized leaf identifier
+- **THEN** the process exits with a non-zero status code
+- **THEN** an error message is printed to stderr stating that the leaf identifier is unrecognized
+- **THEN** stdout does not emit a successful catalog payload
 
 ### Requirement: Automated parity verification gate
 

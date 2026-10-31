@@ -58,7 +58,7 @@ In `SocialMacroPanoramaTool.build_panorama`, all static narrative fields and sig
 - When an item is served from `CURATED_ECOSYSTEM_ITEMS` or fallback catalog entries, it MUST carry `source_kind: "CURATED_FIXTURE"` and `curated: true`.
 Static curated items MUST NOT be stamped with synthetic fresh timestamps that mimic real-time breaking news; their timestamp MUST be a fixed fixture timestamp or clearly identified as a fixture reference.
 The returned feed dictionary MUST include a feed-level provenance summary containing:
-- `feed_mode`: `"LIVE"` if all items are live, `"CURATED_FALLBACK"` if all items are curated, or `"MIXED"` if both exist.
+- `feed_mode`: `"LIVE"` if all items are live (`live_count > 0` and `curated_count == 0`), `"MIXED"` if both exist (`live_count > 0` and `curated_count > 0`), or `"CURATED_FALLBACK"` if all items are curated or if `items` is empty (`live_count == 0`).
 - `live_count`: integer count of live items.
 - `curated_count`: integer count of curated items.
 
@@ -76,3 +76,8 @@ The returned feed dictionary MUST include a feed-level provenance summary contai
 - **WHEN** `get_feed_for_agent` returns curated items on successive invocations
 - **THEN** the items carry consistent fixture timestamps or fixture reference markers
 - **THEN** timestamps are not artificially recalculated as `now_ms - idx * 420_000` to simulate recent publication
+
+#### Scenario: Empty feed items collection defaults to curated fallback mode
+- **WHEN** `get_feed_for_agent` produces an empty item collection where both `live_count` and `curated_count` equal 0
+- **THEN** `feed_mode` equals `"CURATED_FALLBACK"`
+- **THEN** `live_count` is 0 and `curated_count` is 0
