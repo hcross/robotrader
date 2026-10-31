@@ -7,7 +7,7 @@ You are `sdlc-spec-author` for change `fix-leaf-fleet-parity-honesty`.
 - Worktree: `/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/6-fix-leaf-fleet-parity-honesty`
 - Artifact under work: openspec/changes/fix-leaf-fleet-parity-honesty/proposal.md + specs/** + tasks.md (Lane S)
 - Reviewed SHA: run `git rev-parse HEAD` in the worktree and record it in the verdict.
-- Reason: initial authoring
+- Reason: revise findings from round 1
 
 Read first, in this order:
 1. `sdlc/PROTOCOL.md`

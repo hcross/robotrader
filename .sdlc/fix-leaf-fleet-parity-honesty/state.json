@@ -14,36 +14,43 @@
   "human_gates": [
     "merge"
   ],
-  "status": "triage",
-  "pr": null,
+  "status": "merged",
+  "pr": 23,
   "areas": [],
   "stages": {
     "spec": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "5385cc30ad05073bead3673899677bd258fb4a77",
+      "updated_at": "2026-10-31T20:38:40Z"
     },
     "plan": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-plan-reviewer",
+      "last_sha": "03a22fbd52d1353a80134533d95b94e3f074ee03",
+      "updated_at": "2026-10-31T20:50:36Z"
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "abdf1431ca5504cf8dcc736f9e5a5b6b9a90f8f8",
+      "updated_at": "2026-10-31T21:26:27Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/6-fix-leaf-fleet-parity-honesty",
-  "partial_issue": true
+  "partial_issue": true,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-10-31T21:29:51Z",
+    "mode": "full-auto",
+    "pr": 23,
+    "head_sha": "abdf1431ca5504cf8dcc736f9e5a5b6b9a90f8f8"
+  }
 }
