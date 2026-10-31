@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "harden-control-plane-and-restore",
+  "title": "Harden malformed policy restore fallback, CORS config, and optional control-plane auth",
+  "issue": 8,
+  "lane": "S",
+  "lane_reason": "Additive hardening in backend/core/state_store.py and backend/server.py for #8 DEV-R1-F01/F02 and #8.4/#8.5 without changing wire schemas",
+  "lane_change": null,
+  "branch": "sdlc/8-harden-control-plane-and-restore",
+  "worktree": ".worktrees/8-harden-control-plane-and-restore",
+  "base_branch": "master",
+  "base_sha": "a11735b369119d444a08003875c580f68b9dad8d",
+  "created_at": "2026-10-31T21:33:16Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "triage",
+  "pr": null,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/8-harden-control-plane-and-restore",
+  "partial_issue": true
+}
