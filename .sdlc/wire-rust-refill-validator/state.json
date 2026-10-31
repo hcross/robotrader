@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "wire-rust-refill-validator",
+  "title": "Route CostGuard refill through Rust HardRiskGate and harden ledger scan",
+  "issue": 5,
+  "lane": "L",
+  "lane_reason": "Touches engine-rs/crates/risk-gate, engine-rs/crates/node, and backend/agents/monitor.py on the CostGuard refill and ledger hydration risk path",
+  "lane_change": null,
+  "branch": "sdlc/5-wire-rust-refill-validator",
+  "worktree": ".worktrees/5-wire-rust-refill-validator",
+  "base_branch": "master",
+  "base_sha": "a11735b369119d444a08003875c580f68b9dad8d",
+  "created_at": "2026-10-31T21:32:07Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev",
+  "pr": 25,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "b367ae64125c40658913de9c9cf406ab3fa69ce9",
+      "updated_at": "2026-10-31T21:42:39Z"
+    },
+    "plan": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-plan-reviewer",
+      "last_sha": "e14fc090db5dce83de7aab73a9685b804b7aa3f9",
+      "updated_at": "2026-10-31T21:51:23Z"
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/5-wire-rust-refill-validator",
+  "partial_issue": true
+}

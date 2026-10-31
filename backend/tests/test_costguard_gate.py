@@ -242,6 +242,7 @@ class GateTests(_CostGuardTestCase):
         self.assertEqual(result["status"], "refilled")
         self.assertAlmostEqual(cg.openrouter_balance_usd, 6.0, places=6)
         self.assertAlmostEqual(cg.epoch_refilled_usd, 4.0, places=6)
+        self.assertEqual(result["event"]["validator"], "RUST_HARD_RISK_GATE")
 
     def test_single_refill_bound_is_fixed(self) -> None:
         cg = self.guard(store=_Store(pnl=10_000.0))
@@ -623,6 +624,7 @@ class StatusTests(_CostGuardTestCase):
         self.assertEqual(credit["low_watermark_usd"], 2.0)
         self.assertTrue(credit["measured_pnl_source_available"])
         self.assertIsNone(credit["last_refill_rejection"])
+        self.assertEqual(credit["balance_source"], "SIMULATED_INTERNAL_LEDGER")
 
     def test_configured_watermark_governs_the_trigger_boundary(self) -> None:
         env = {"OPENROUTER_LOW_WATERMARK_USD": "3.50"}

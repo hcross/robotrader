@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import subprocess
 import threading
 import time
 from collections import deque
@@ -10,6 +12,9 @@ from typing import Any, Callable, Deque, Dict, Iterator, List, Optional, Tuple
 
 from ..core.agent import BaseWarmAgent
 from ..core.schemas import Message
+from ..core.state_store import resolve_robotrader_binary
+
+_subprocess_run = subprocess.run
 
 # Rolling accounting window. An entry contributes while its age is strictly
 # below the bound; a day is a half-open interval [now - 86_400_000, now].
@@ -245,21 +250,32 @@ class LLMMonitorAgent(BaseWarmAgent):
                     entry = json.loads(line.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError):
                     continue
+                if not isinstance(entry, dict):
+                    continue
                 try:
                     ts = int(entry.get("timestamp_ms", 0))
                 except (TypeError, ValueError):
                     continue
                 if ts <= cutoff_ms:
                     break
-                p_tok = int(entry.get("prompt_tokens", 0) or 0)
-                c_tok = int(entry.get("completion_tokens", 0) or 0)
+                try:
+                    p_tok_raw = entry.get("prompt_tokens", 0)
+                    p_tok = int(0 if p_tok_raw is None else p_tok_raw)
+                    c_tok_raw = entry.get("completion_tokens", 0)
+                    c_tok = int(0 if c_tok_raw is None else c_tok_raw)
+                    cost_raw = entry.get("cost_usd", 0.0)
+                    cost_val = float(0.0 if cost_raw is None else cost_raw)
+                    if not (math.isfinite(cost_val) and p_tok >= 0 and c_tok >= 0 and cost_val >= 0.0):
+                        continue
+                except (TypeError, ValueError, OverflowError):
+                    continue
                 model_used = str(
                     entry.get("model_used")
                     or entry.get("model_requested")
                     or self.preferred_model
                 )
                 real_cost = max(
-                    float(entry.get("cost_usd", 0.0) or 0.0),
+                    cost_val,
                     self.compute_call_cost(model_used, p_tok, c_tok),
                 )
                 cost_sum += real_cost
@@ -539,83 +555,131 @@ class LLMMonitorAgent(BaseWarmAgent):
         """
         Executes a bounded OpenRouter credit refill from the Master Orchestrator's OpEx reserve.
 
-        Every path runs the same gate in this order: kill switch -> strictly
-        positive measured PnL -> fixed `(0, $25.00]` bound -> 10 % profit share ->
-        watermark (unless `force`) -> rolling 24 h epoch cap. Rejections never
-        mutate the balance, either window, or the refill history.
+        Validation delegates to authoritative Rust HardRiskGate via `robotrader-node --validate-refill`.
+        If the validator binary is missing, exits non-zero, raises an error, or returns malformed output,
+        the monitor fails closed with `rejected_validator_unavailable` and preserves all state without mutation.
         """
-        pnl = float(realized_trading_pnl_usd)
-
-        if self._kill_switch_active():
-            return self._reject(
-                "rejected_kill_switch",
-                "Kill switch active; inference credit refills are suspended",
-            )
-
-        if pnl <= 0.0:
-            return self._reject(
-                "rejected_no_realized_profit",
-                f"Realized trading PnL ({self._format_signed_usd(pnl)}) <= 0; "
-                "principal treasury protected",
-            )
-
         eff_req = requested_amount_usd if requested_amount_usd is not None else amount_usd
-        amt = round(float(eff_req if eff_req is not None else self.refill_amount_usd), 2)
-        if amt <= 0 or amt > 25.0:
-            return self._reject(
-                "rejected",
-                f"Amount ${amt:.2f} outside allowed single-refill bounds (0, $25.00]",
-            )
-        if amt > pnl * 0.10 + 1e-6:
-            return self._reject(
-                "rejected_exceeds_profit_share",
-                f"Requested refill ${amt:.2f} > 10% of realized PnL "
-                f"({self._format_signed_usd(pnl)})",
-            )
+        if eff_req is None:
+            requested_usd = self.refill_amount_usd
+        else:
+            try:
+                requested_usd = float(eff_req)
+            except (TypeError, ValueError):
+                requested_usd = float("nan")
+
+        try:
+            pnl = float(realized_trading_pnl_usd)
+        except (TypeError, ValueError):
+            pnl = float("nan")
 
         with self._lock:
-            if not force and self.openrouter_balance_usd > self.low_watermark_usd:
+            now_ms = self._now_ms()
+            self._prune_epoch_window(now_ms)
+            epoch_refilled_usd = round(sum(amount for _, amount in self._epoch_window), 6)
+
+            try:
+                engine_dir = Path(__file__).resolve().parents[2] / "engine-rs"
+                binary_path = resolve_robotrader_binary(engine_dir)
+                if str(binary_path) == "robotrader-node" and not binary_path.exists():
+                    debug_bin = engine_dir / "target" / "debug" / "robotrader-node"
+                    release_bin = engine_dir / "target" / "release" / "robotrader-node"
+                    if debug_bin.exists():
+                        binary_path = debug_bin
+                    elif release_bin.exists():
+                        binary_path = release_bin
+            except Exception as e:
+                return self._reject(
+                    "rejected_validator_unavailable",
+                    f"Rust HardRiskGate validator binary unavailable: {e}",
+                )
+
+            def _format_cli_float(v: float) -> Any:
+                if math.isnan(v):
+                    return "NaN"
+                if math.isinf(v):
+                    return "Infinity" if v > 0 else "-Infinity"
+                return float(v)
+
+            cli_payload = {
+                "requested_usd": _format_cli_float(requested_usd),
+                "realized_trading_pnl_usd": _format_cli_float(pnl),
+                "current_balance_usd": _format_cli_float(self.openrouter_balance_usd),
+                "low_watermark_usd": _format_cli_float(self.low_watermark_usd),
+                "epoch_refilled_usd": _format_cli_float(epoch_refilled_usd),
+                "max_epoch_refill_usd": _format_cli_float(self.max_epoch_refill_usd),
+                "force": bool(force),
+                "kill_switch_active": bool(self._kill_switch_active()),
+            }
+
+            try:
+                proc = _subprocess_run(
+                    [str(binary_path), "--validate-refill", json.dumps(cli_payload)],
+                    capture_output=True,
+                    text=True,
+                    timeout=5.0,
+                )
+                if proc.returncode != 0:
+                    return self._reject(
+                        "rejected_validator_unavailable",
+                        f"Rust validator exited with code {proc.returncode}: {proc.stderr.strip()}",
+                    )
+                verdict = json.loads(proc.stdout)
+                if (
+                    not isinstance(verdict, dict)
+                    or "approved" not in verdict
+                    or "status" not in verdict
+                ):
+                    return self._reject(
+                        "rejected_validator_unavailable",
+                        "Rust validator returned invalid verdict shape",
+                    )
+            except (subprocess.SubprocessError, OSError, json.JSONDecodeError) as e:
+                return self._reject(
+                    "rejected_validator_unavailable",
+                    f"Rust validator execution failed: {e}",
+                )
+
+            if verdict.get("approved") is True and verdict.get("status") == "refilled":
+                approved_usd = float(verdict.get("approved_usd", requested_usd))
+                before_bal = round(self.openrouter_balance_usd, 4)
+                self.openrouter_balance_usd = round(self.openrouter_balance_usd + approved_usd, 4)
+                self._epoch_window.append((now_ms, approved_usd))
+                epoch_total = round(epoch_refilled_usd + approved_usd, 6)
+                event = {
+                    "timestamp_ms": now_ms,
+                    "amount_usd": approved_usd,
+                    "balance_before_usd": before_bal,
+                    "balance_after_usd": self.openrouter_balance_usd,
+                    "epoch_refilled_usd": epoch_total,
+                    "max_epoch_refill_usd": self.max_epoch_refill_usd,
+                    "source": source,
+                    "reason": reason,
+                    "validator": "RUST_HARD_RISK_GATE",
+                }
+                self.refill_history.insert(0, event)
+                self.refill_history = self.refill_history[:25]
+                return {
+                    "status": "refilled",
+                    "refilled_usd": approved_usd,
+                    "event": event,
+                    "openrouter_balance_usd": self.openrouter_balance_usd,
+                }
+
+            if verdict.get("status") == "skipped_sufficient_balance":
                 return {
                     "status": "skipped_sufficient_balance",
-                    "reason": (
-                        f"Balance ${self.openrouter_balance_usd:.2f} > low watermark "
-                        f"${self.low_watermark_usd:.2f}"
+                    "reason": verdict.get(
+                        "reason",
+                        f"Balance ${self.openrouter_balance_usd:.2f} > low watermark ${self.low_watermark_usd:.2f}",
                     ),
                     "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
                 }
 
-            now_ms = self._now_ms()
-            self._prune_epoch_window(now_ms)
-            epoch_total = sum(amount for _, amount in self._epoch_window)
-            if (epoch_total + amt) > self.max_epoch_refill_usd:
-                return self._reject(
-                    "rejected_epoch_cap",
-                    f"Epoch cap reached (${epoch_total:.2f} + ${amt:.2f} > "
-                    f"${self.max_epoch_refill_usd:.2f})",
-                )
-
-            before_bal = round(self.openrouter_balance_usd, 4)
-            self.openrouter_balance_usd = round(self.openrouter_balance_usd + amt, 4)
-            self._epoch_window.append((now_ms, amt))
-            epoch_total = round(epoch_total + amt, 6)
-            event = {
-                "timestamp_ms": now_ms,
-                "amount_usd": amt,
-                "balance_before_usd": before_bal,
-                "balance_after_usd": self.openrouter_balance_usd,
-                "epoch_refilled_usd": epoch_total,
-                "max_epoch_refill_usd": self.max_epoch_refill_usd,
-                "source": source,
-                "reason": reason,
-            }
-            self.refill_history.insert(0, event)
-            self.refill_history = self.refill_history[:25]
-            return {
-                "status": "refilled",
-                "refilled_usd": amt,
-                "event": event,
-                "openrouter_balance_usd": self.openrouter_balance_usd,
-            }
+            return self._reject(
+                str(verdict.get("status", "rejected")),
+                str(verdict.get("reason", "Rejected by Rust HardRiskGate")),
+            )
 
     def get_status(self) -> Dict[str, Any]:
         spend_usd = self.total_cost_usd
@@ -662,6 +726,7 @@ class LLMMonitorAgent(BaseWarmAgent):
                 "last_refill_rejection": self.last_refill_rejection,
                 "auto_refill_enabled": self.auto_refill_enabled,
                 "refill_history": self.refill_history[:5],
+                "balance_source": "SIMULATED_INTERNAL_LEDGER",
             },
             "auto_wallet_refill": auto_refill_label,
             "auto_refill_policy": auto_refill_policy,

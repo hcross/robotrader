@@ -383,7 +383,12 @@ const MasterOverview = ({ statusData, apiBase, onRefresh, onSelectLeaf }) => {
 
           <div className="bg-gray-950/70 p-3.5 rounded-lg border border-purple-500/30">
             <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-purple-300">
-              <span>Crédits Cognitifs OpenRouter</span>
+              <span className="flex items-center gap-1.5">
+                <span>Crédits Cognitifs OpenRouter</span>
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                  {openrouterCredit.balance_source || 'SIMULATED_INTERNAL_LEDGER'}
+                </span>
+              </span>
               <button
                 type="button"
                 onClick={handleOpenRouterRefill}

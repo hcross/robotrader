@@ -1,10 +1,50 @@
 use robotrader_backtest::{benchmark_market_stream_for_leaf, BacktestEngine};
 use robotrader_common::PolicyEnvelope;
-use robotrader_risk_gate::SimulatedVault;
+use robotrader_risk_gate::{HardRiskGate, RiskLimits, SimulatedVault};
 use robotrader_strategies::{ecosystem_pod_specs, is_canonical_leaf_id, CANONICAL_LEAF_IDS};
+use serde::Deserialize;
 use std::env;
 use std::io::Read;
 use std::path::PathBuf;
+
+#[derive(Debug, Deserialize)]
+struct ValidateRefillArgs {
+    #[serde(deserialize_with = "deserialize_f64_lenient")]
+    requested_usd: f64,
+    #[serde(deserialize_with = "deserialize_f64_lenient")]
+    realized_trading_pnl_usd: f64,
+    #[serde(deserialize_with = "deserialize_f64_lenient")]
+    current_balance_usd: f64,
+    #[serde(deserialize_with = "deserialize_f64_lenient")]
+    low_watermark_usd: f64,
+    #[serde(deserialize_with = "deserialize_f64_lenient")]
+    epoch_refilled_usd: f64,
+    #[serde(deserialize_with = "deserialize_f64_lenient")]
+    max_epoch_refill_usd: f64,
+    force: bool,
+    #[serde(default)]
+    kill_switch_active: bool,
+}
+
+fn deserialize_f64_lenient<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Number(n) => {
+            n.as_f64().ok_or_else(|| D::Error::custom("invalid number"))
+        }
+        serde_json::Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "nan" => Ok(f64::NAN),
+            "inf" | "+inf" | "infinity" | "+infinity" => Ok(f64::INFINITY),
+            "-inf" | "-infinity" => Ok(f64::NEG_INFINITY),
+            _ => s.parse::<f64>().map_err(D::Error::custom),
+        },
+        _ => Err(D::Error::custom("expected a number or numeric string")),
+    }
+}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -20,6 +60,8 @@ fn main() {
     let mut token = "USDC".to_string();
     let mut kill_switch = false;
     let mut vault_secret_file: Option<PathBuf> = None;
+    let mut validate_refill = false;
+    let mut validate_refill_json: Option<String> = None;
 
     for i in 0..args.len() {
         if (args[i] == "--leaf-id" || args[i] == "--leaf") && i + 1 < args.len() {
@@ -46,7 +88,50 @@ fn main() {
         } else if args[i] == "--vault-secret-file" && i + 1 < args.len() {
             // Test-only override; production uses the default secret mount path.
             vault_secret_file = Some(PathBuf::from(args[i + 1].clone()));
+        } else if args[i] == "--validate-refill" {
+            validate_refill = true;
+            if i + 1 < args.len() && !args[i + 1].starts_with("--") {
+                validate_refill_json = Some(args[i + 1].clone());
+            }
         }
+    }
+
+    if validate_refill {
+        let raw_json = match validate_refill_json {
+            Some(j) => j,
+            None => {
+                eprintln!("missing argument for --validate-refill");
+                std::process::exit(2);
+            }
+        };
+
+        let parsed: ValidateRefillArgs = match serde_json::from_str(&raw_json) {
+            Ok(args) => args,
+            Err(err) => {
+                eprintln!("failed to parse --validate-refill JSON: {err}");
+                std::process::exit(2);
+            }
+        };
+
+        let mut gate = HardRiskGate::new(RiskLimits::default());
+        if parsed.kill_switch_active {
+            gate.trigger_kill_switch("Kill-switch active in refill request");
+        }
+        let verdict = gate.validate_inference_refill(
+            parsed.requested_usd,
+            parsed.realized_trading_pnl_usd,
+            parsed.current_balance_usd,
+            parsed.low_watermark_usd,
+            parsed.epoch_refilled_usd,
+            parsed.max_epoch_refill_usd,
+            parsed.force,
+        );
+
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&verdict).expect("Failed to serialize verdict")
+        );
+        std::process::exit(0);
     }
 
     if dump_pod_catalog {
