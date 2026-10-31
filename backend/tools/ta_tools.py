@@ -253,18 +253,26 @@ class SocialMacroPanoramaTool:
     @staticmethod
     def build_panorama(ta_snapshots: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         now_ms = int(time.time() * 1000)
-        sol_ta = ta_snapshots.get("SOL/USDT", {})
-        btc_ta = ta_snapshots.get("BTC/USDT", {})
-        eth_ta = ta_snapshots.get("ETH/USDT", {})
 
-        sol_score = float(sol_ta.get("confluence_score", 0.0))
-        btc_score = float(btc_ta.get("confluence_score", 0.0))
-        avg_score = (sol_score + btc_score + float(eth_ta.get("confluence_score", 0.0))) / 3.0
+        # Dynamic confluence computation across only present snapshots
+        scores: List[float] = []
+        for symbol, snap in (ta_snapshots or {}).items():
+            if isinstance(snap, dict) and "confluence_score" in snap:
+                try:
+                    scores.append(float(snap["confluence_score"]))
+                except (ValueError, TypeError):
+                    pass
+        avg_score = (sum(scores) / len(scores)) if scores else 0.0
+
+        sol_ta = (ta_snapshots or {}).get("SOL/USDT", {})
+        sol_score = float(sol_ta.get("confluence_score", 0.0)) if isinstance(sol_ta, dict) else 0.0
+        btc_ta = (ta_snapshots or {}).get("BTC/USDT", {})
+        btc_score = float(btc_ta.get("confluence_score", 0.0)) if isinstance(btc_ta, dict) else 0.0
 
         sol_fib_dist = abs(
             float(sol_ta.get("fibonacci", {}).get("distance_to_nearest_bps", 100.0))
-        )
-        sol_squeeze = bool(sol_ta.get("volatility", {}).get("squeeze_active", False))
+        ) if isinstance(sol_ta, dict) else 100.0
+        sol_squeeze = bool(sol_ta.get("volatility", {}).get("squeeze_active", False)) if isinstance(sol_ta, dict) else False
 
         signals: List[Dict[str, Any]] = [
             {
@@ -275,6 +283,7 @@ class SocialMacroPanoramaTool:
                     "Hausse de +34% des volumes Jupiter v6 et accumulation de wallets smart-money "
                     "autour de la Kijun-sen SOL ; attention aux faux départs de memecoins non vérifiés."
                 ),
+                "source_kind": "SYNTHETIC_FIXTURE",
             },
             {
                 "source": "On-Chain Whale & Perp Funding Radar",
@@ -284,6 +293,7 @@ class SocialMacroPanoramaTool:
                     "Funding annualisé positif (+24% APR sur SOL-PERP) favorisant le Pod 1 Carry ; "
                     "carnet Spot absorbant les ventes proches du retracement Fibonacci 0.618."
                 ),
+                "source_kind": "SYNTHETIC_FIXTURE",
             },
             {
                 "source": "Macro & Cross-Asset Volatility",
@@ -295,13 +305,17 @@ class SocialMacroPanoramaTool:
                     if sol_squeeze
                     else "Flux directionnel actif sur les paires majeures avec rotation vers le bêta Solana."
                 ),
+                "source_kind": "SYNTHETIC_FIXTURE",
             },
         ]
 
         urgency_level = "HIGH_INFLECTION" if (sol_fib_dist < 30.0 or sol_squeeze) else "NORMAL_FLOW"
+        composite_sentiment = round(0.55 + 0.25 * avg_score, 2)
         return {
             "timestamp_ms": now_ms,
-            "Composite_sentiment": round(0.55 + 0.25 * avg_score, 2),
+            "composite_sentiment": composite_sentiment,
+            "Composite_sentiment": composite_sentiment,
             "urgency_level": urgency_level,
+            "source_kind": "SYNTHETIC_FIXTURE",
             "social_signals": signals,
         }

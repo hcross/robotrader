@@ -255,6 +255,8 @@ class EcosystemRSSAggregator:
         ],
     }
 
+    CURATED_FIXTURE_TIMESTAMP_MS: int = 1730000000000
+
     @classmethod
     def get_feed_for_agent(
         cls, agent_id: str, try_network: bool = False, max_items: int = 5
@@ -289,6 +291,8 @@ class EcosystemRSSAggregator:
                                 "sentiment": 0.58,
                                 "impact": "MEDIUM",
                                 "category": "LIVE_RSS",
+                                "source_kind": "LIVE_RSS",
+                                "curated": False,
                                 "timestamp_ms": now_ms,
                             }
                         )
@@ -310,7 +314,9 @@ class EcosystemRSSAggregator:
                 ]
             for idx, item in enumerate(curated[:max_items]):
                 entry = dict(item)
-                entry["timestamp_ms"] = now_ms - idx * 420_000
+                entry["source_kind"] = "CURATED_FIXTURE"
+                entry["curated"] = True
+                entry["timestamp_ms"] = item.get("timestamp_ms", cls.CURATED_FIXTURE_TIMESTAMP_MS)
                 items.append(entry)
 
         avg_sentiment = (
@@ -318,10 +324,26 @@ class EcosystemRSSAggregator:
             if items
             else 0.5
         )
+        live_count = sum(1 for i in items if i.get("source_kind") == "LIVE_RSS")
+        curated_count = sum(1 for i in items if i.get("source_kind") == "CURATED_FIXTURE")
+        if live_count > 0 and curated_count == 0:
+            feed_mode = "LIVE"
+        elif live_count > 0 and curated_count > 0:
+            feed_mode = "MIXED"
+        else:
+            feed_mode = "CURATED_FALLBACK"
+
         return {
             "agent_id": agent_id,
             "sources": sources,
             "composite_sentiment": avg_sentiment,
             "items": items,
+            "feed_mode": feed_mode,
+            "live_count": live_count,
+            "curated_count": curated_count,
             "updated_at_ms": now_ms,
         }
+
+
+CURATED_FIXTURE_TIMESTAMP_MS = EcosystemRSSAggregator.CURATED_FIXTURE_TIMESTAMP_MS
+

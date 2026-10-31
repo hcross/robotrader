@@ -191,7 +191,11 @@ class OrchestratorAgent(BaseWarmAgent):
             digest = self._compact_ta_digest(ta_snapshots)
             pano_compact = {
                 "urgency_level": panorama.get("urgency_level"),
-                "composite_sentiment": panorama.get("composite_sentiment"),
+                "composite_sentiment": (
+                    panorama.get("composite_sentiment")
+                    if panorama.get("composite_sentiment") is not None
+                    else panorama.get("Composite_sentiment")
+                ),
                 "solana_rss": rss_headlines,
             }
             sys_prompt = (
@@ -224,7 +228,11 @@ class OrchestratorAgent(BaseWarmAgent):
         digest = self._compact_ta_digest(ta_snapshots)
         pano_compact = {
             "urgency_level": panorama.get("urgency_level"),
-            "composite_sentiment": panorama.get("composite_sentiment"),
+            "composite_sentiment": (
+                panorama.get("composite_sentiment")
+                if panorama.get("composite_sentiment") is not None
+                else panorama.get("Composite_sentiment")
+            ),
             "solana_rss": rss_headlines,
         }
 

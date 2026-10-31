@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,9 +13,10 @@ from backend.core.hierarchy import (
     HierarchicalFleetManager,
 )
 from backend.core.memory_palace import StrategyMemoryPalace
-from backend.core.state_store import HybridStateStore
+from backend.core.state_store import HybridStateStore, resolve_robotrader_binary
 from backend.core.transcript_palace import transcript_palace
-from backend.tools.rss_tools import EcosystemRSSAggregator
+from backend.tools.rss_tools import CURATED_FIXTURE_TIMESTAMP_MS, EcosystemRSSAggregator
+from backend.tools.ta_tools import SocialMacroPanoramaTool
 
 
 class TestHierarchicalArchitectureV3(unittest.TestCase):
@@ -389,6 +392,210 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertEqual(rejected["status"], "rejected_by_rust_enclave")
         self.assertEqual(self.store.hierarchy.total_capital_usd, capital_before)
         self.assertEqual(self.store.hierarchy.checkout_history, history_before)
+
+    def test_26_leaf_pod_catalog_parity_with_rust_node(self) -> None:
+        """
+        Task 5.1: Assert 100% attribute equality between Python `_build_rust_pods_for_leaf`
+        and Rust `ecosystem_pod_specs` exported via `robotrader-node --dump-pod-catalog`
+        across all 26 canonical leaves.
+        """
+        repo_root = Path(__file__).resolve().parents[2]
+        engine_dir = repo_root / "engine-rs"
+        binary_path = resolve_robotrader_binary(engine_dir)
+
+        # 1. Full fleet dump
+        proc = subprocess.run(
+            [str(binary_path), "--dump-pod-catalog"],
+            cwd=str(engine_dir),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+        rust_catalog = json.loads(proc.stdout)
+        self.assertEqual(len(rust_catalog), 26)
+
+        for leaf_meta in LEAF_ECOSYSTEM_CATALOG:
+            leaf_id = leaf_meta["id"]
+            self.assertIn(leaf_id, rust_catalog)
+            rust_pods = rust_catalog[leaf_id]
+            py_pods = HierarchicalFleetManager._build_rust_pods_for_leaf(leaf_id)
+
+            self.assertGreaterEqual(len(rust_pods), 1)
+            self.assertLessEqual(len(rust_pods), 4)
+            self.assertEqual(
+                len(py_pods),
+                len(rust_pods),
+                f"Pod count mismatch for leaf {leaf_id}: Python {len(py_pods)} vs Rust {len(rust_pods)}",
+            )
+
+            for idx, (py_pod, rust_pod) in enumerate(zip(py_pods, rust_pods)):
+                self.assertEqual(py_pod["slot_id"], rust_pod["slot_id"], f"Slot mismatch in {leaf_id}[{idx}]")
+                self.assertEqual(py_pod["pod_code"], rust_pod["pod_code"], f"Code mismatch in {leaf_id}[{idx}]")
+                self.assertEqual(py_pod["name"], rust_pod["name"], f"Name mismatch in {leaf_id}[{idx}]")
+                self.assertEqual(py_pod["archetype"], rust_pod["archetype"], f"Archetype mismatch in {leaf_id}[{idx}]")
+                self.assertEqual(py_pod["native_venue"], rust_pod["native_venue"], f"Venue mismatch in {leaf_id}[{idx}]")
+                self.assertAlmostEqual(
+                    float(py_pod["default_weight"]),
+                    float(rust_pod["default_weight"]),
+                    places=4,
+                    msg=f"Weight mismatch in {leaf_id}[{idx}]",
+                )
+                self.assertEqual(py_pod["description"], rust_pod["description"], f"Description mismatch in {leaf_id}[{idx}]")
+
+        # 2. Single-leaf export (--leaf-id leaf-solana)
+        single_proc = subprocess.run(
+            [str(binary_path), "--dump-pod-catalog", "--leaf-id", "leaf-solana"],
+            cwd=str(engine_dir),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+        single_pods = json.loads(single_proc.stdout)
+        self.assertIsInstance(single_pods, list)
+        self.assertEqual(len(single_pods), 4)
+
+        # 3. Unrecognized leaf-id rejection (--leaf-id leaf-unknown)
+        bad_proc = subprocess.run(
+            [str(binary_path), "--dump-pod-catalog", "--leaf-id", "leaf-unknown"],
+            cwd=str(engine_dir),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertNotEqual(bad_proc.returncode, 0)
+        self.assertIn("unrecognized leaf identifier", bad_proc.stderr.lower())
+
+    def test_pod_catalog_parity_negative_assertion_detects_mismatch(self) -> None:
+        """
+        Task 5.2: Negative assertion test verifying that any pod attribute mismatch
+        (name, weight, slot, description) triggers an explicit test failure.
+        """
+        base_pods = HierarchicalFleetManager._build_rust_pods_for_leaf("leaf-bnb")
+
+        def verify_parity(py_pods, rust_pods, leaf_id="leaf-bnb"):
+            if len(py_pods) != len(rust_pods):
+                raise AssertionError(f"Count mismatch in {leaf_id}")
+            for idx, (p, r) in enumerate(zip(py_pods, rust_pods)):
+                for attr in ("slot_id", "pod_code", "name", "archetype", "native_venue", "description"):
+                    if p.get(attr) != r.get(attr):
+                        raise AssertionError(
+                            f"Mismatch in {leaf_id}[{idx}] attribute '{attr}': {p.get(attr)!r} != {r.get(attr)!r}"
+                        )
+                if abs(float(p.get("default_weight", 0.0)) - float(r.get("default_weight", 0.0))) > 1e-4:
+                    raise AssertionError(f"Mismatch in {leaf_id}[{idx}] attribute 'default_weight'")
+
+        # 1. Baseline parity passes
+        verify_parity(base_pods, base_pods)
+
+        # 2. Mutate name
+        mutated_name = [dict(p) for p in base_pods]
+        mutated_name[0]["name"] = "Mismatched Name"
+        with self.assertRaises(AssertionError) as ctx:
+            verify_parity(mutated_name, base_pods)
+        self.assertIn("attribute 'name'", str(ctx.exception))
+
+        # 3. Mutate default_weight
+        mutated_weight = [dict(p) for p in base_pods]
+        mutated_weight[0]["default_weight"] = 0.99
+        with self.assertRaises(AssertionError) as ctx:
+            verify_parity(mutated_weight, base_pods)
+        self.assertIn("attribute 'default_weight'", str(ctx.exception))
+
+        # 4. Mutate slot_id
+        mutated_slot = [dict(p) for p in base_pods]
+        mutated_slot[0]["slot_id"] = "pod_sniper"
+        with self.assertRaises(AssertionError) as ctx:
+            verify_parity(mutated_slot, base_pods)
+        self.assertIn("attribute 'slot_id'", str(ctx.exception))
+
+        # 5. Mutate description
+        mutated_desc = [dict(p) for p in base_pods]
+        mutated_desc[0]["description"] = "Altered strategy logic"
+        with self.assertRaises(AssertionError) as ctx:
+            verify_parity(mutated_desc, base_pods)
+        self.assertIn("attribute 'description'", str(ctx.exception))
+
+    def test_execution_mode_and_telemetry_source_classification(self) -> None:
+        """
+        Task 5.3: Verify execution_mode, scheduler_active, and ta_metrics_source
+        across all 26 leaves in hierarchy manager, overview, and detail endpoints.
+        """
+        palace = StrategyMemoryPalace(redis_cmd_fn=None, redis_url=None)
+        mgr = HierarchicalFleetManager(palace=palace)
+
+        # Verify leaf-solana active
+        sol_leaf = mgr.get_leaf_detail("leaf-solana")
+        self.assertEqual(sol_leaf["execution_mode"], "ACTIVE_SOLANA")
+        self.assertEqual(sol_leaf["scheduler_active"], mgr.auto_scheduler_enabled)
+        self.assertIn(sol_leaf["ta_metrics_source"], ("CATALOG_FIXTURE", "LIVE_COMPUTED"))
+
+        # Verify the other 25 leaves are PASSIVE_CATALOG
+        snapshot = mgr.get_hierarchy_snapshot()
+        active_count = 0
+        passive_count = 0
+        for leaf in snapshot["leaves"]:
+            lid = leaf.get("leaf_id") or leaf.get("id")
+            if lid == "leaf-solana":
+                self.assertEqual(leaf["execution_mode"], "ACTIVE_SOLANA")
+                active_count += 1
+            else:
+                self.assertEqual(leaf["execution_mode"], "PASSIVE_CATALOG")
+                self.assertFalse(leaf["scheduler_active"])
+                self.assertEqual(leaf["ta_metrics_source"], "CATALOG_FIXTURE")
+                passive_count += 1
+
+        self.assertEqual(active_count, 1)
+        self.assertEqual(passive_count, 25)
+
+    def test_social_macro_panorama_sentiment_confluence_and_provenance(self) -> None:
+        """
+        Task 5.3: Verify composite_sentiment casing, dynamic confluence averaging,
+        neutral 0.0 fallback on empty snapshots, and SYNTHETIC_FIXTURE provenance.
+        """
+        # 1. Non-empty Solana symbols only (no BTC/ETH)
+        sol_snapshots = {
+            "SOL/USDT": {"confluence_score": 0.60, "rsi": {"rsi_14": 55.0}, "ichimoku": {"kumo_regime": "ABOVE_KUMO_BULLISH"}},
+            "JUP/USDT": {"confluence_score": 0.80, "rsi": {"rsi_14": 60.0}, "ichimoku": {"kumo_regime": "ABOVE_KUMO_BULLISH"}},
+            "RAY/USDT": {"confluence_score": 0.40, "rsi": {"rsi_14": 50.0}, "ichimoku": {"kumo_regime": "INSIDE_KUMO_NEUTRAL"}},
+        }
+        pano = SocialMacroPanoramaTool.build_panorama(ta_snapshots=sol_snapshots)
+        self.assertIn("composite_sentiment", pano)
+        self.assertIn("Composite_sentiment", pano)
+        self.assertEqual(pano["composite_sentiment"], pano["Composite_sentiment"])
+        self.assertIsInstance(pano["composite_sentiment"], (int, float))
+        self.assertEqual(pano["source_kind"], "SYNTHETIC_FIXTURE")
+        for sig in pano["social_signals"]:
+            self.assertEqual(sig.get("source_kind"), "SYNTHETIC_FIXTURE", f"Missing source_kind in {sig}")
+
+        # 2. Single-symbol snapshot -> exact single score (0.60, not 0.20)
+        single_snap = {"SOL/USDT": {"confluence_score": 0.60}}
+        single_pano = SocialMacroPanoramaTool.build_panorama(ta_snapshots=single_snap)
+        # avg_score is 0.60, composite_sentiment = round(0.55 + 0.25 * 0.60, 2) = 0.70
+        self.assertAlmostEqual(single_pano["composite_sentiment"], 0.70, places=2)
+
+        # 3. Empty snapshots -> 0.0 fallback without ZeroDivisionError
+        empty_pano = SocialMacroPanoramaTool.build_panorama(ta_snapshots={})
+        self.assertIn("composite_sentiment", empty_pano)
+        # avg_score is 0.0, composite_sentiment = round(0.55 + 0.25 * 0.0, 2) = 0.55
+        self.assertAlmostEqual(empty_pano["composite_sentiment"], 0.55, places=2)
+
+    def test_rss_feed_provenance_stamping_and_feed_mode(self) -> None:
+        """
+        Task 5.3: Verify EcosystemRSSAggregator provenance stamping (CURATED_FIXTURE,
+        fixed timestamp, feed_mode, live_count, curated_count).
+        """
+        feed = EcosystemRSSAggregator.get_feed_for_agent("leaf-solana", try_network=False)
+        self.assertEqual(feed["feed_mode"], "CURATED_FALLBACK")
+        self.assertEqual(feed["live_count"], 0)
+        self.assertGreater(feed["curated_count"], 0)
+        self.assertEqual(len(feed["items"]), feed["curated_count"])
+
+        for item in feed["items"]:
+            self.assertEqual(item["source_kind"], "CURATED_FIXTURE")
+            self.assertTrue(item["curated"])
+            self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
 
 
 if __name__ == "__main__":

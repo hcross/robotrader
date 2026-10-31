@@ -169,6 +169,7 @@ def get_system_status() -> Dict[str, Any]:
 
 
 @app.get("/api/v1/hierarchy")
+@app.get("/api/v1/hierarchy/overview")
 def get_hierarchy_status() -> Dict[str, Any]:
     """
     Master/leaf hierarchy snapshot. Any `leaf.last_rust_backtest` block is the
@@ -178,6 +179,7 @@ def get_hierarchy_status() -> Dict[str, Any]:
     bt = state_store.run_rust_backtest()
     populations = state_store.get_population_metrics(bt)
     cost_status = orchestrator.cost_guard.get_status()
+    state_store.hierarchy.auto_scheduler_enabled = orchestrator.cost_guard.auto_scheduler_enabled
     return state_store.hierarchy.get_hierarchy_snapshot(
         cost_status=cost_status,
         solana_populations=populations,
@@ -251,6 +253,7 @@ def trigger_master_reflection() -> Dict[str, Any]:
 
 @app.get("/api/v1/leaf/{leaf_id}")
 def get_leaf_detail(leaf_id: str) -> Dict[str, Any]:
+    state_store.hierarchy.auto_scheduler_enabled = orchestrator.cost_guard.auto_scheduler_enabled
     return state_store.hierarchy.get_leaf_detail(
         leaf_id, populations=state_store.get_population_metrics()
     )
