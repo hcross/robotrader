@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "leaf-avalanche-rss-catalysts",
+  "title": "feat(leaf-avalanche/rss-catalysts): live RSS/Atom feed verification & catalyst scoring for Avalanche",
+  "issue": 77,
+  "lane": "M",
+  "lane_reason": "Scoped ecosystem RSS verification and catalyst scoring for leaf-avalanche in backend/tools/rss_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/77-leaf-avalanche-rss-catalysts",
+  "worktree": ".worktrees/77-leaf-avalanche-rss-catalysts",
+  "base_branch": "master",
+  "base_sha": "fa44f9722647340491bc27b33e31386b8a96beff",
+  "created_at": "2026-11-01T21:43:17Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "triage",
+  "pr": 219,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/77-leaf-avalanche-rss-catalysts",
+  "partial_issue": false
+}
