@@ -10,7 +10,17 @@ from typing import Any, Dict, List, Optional
 from ..core import provenance
 from ..core.agent import BaseWarmAgent, CallResult
 from ..core.memory_palace import PalaceDrawer
-from ..core.schemas import AssetOverride, CatalystSignal, Message
+from ..core.schemas import (
+    AssetOverride,
+    CatalystSignal,
+    Message,
+    PolicyEnvelope,
+    PodAllocation,
+    SignedPolicyBundle,
+    compute_policy_hmac,
+    
+    
+)
 from ..core.state_store import HybridStateStore, state_store
 from ..core.transcript_palace import record_llm_call, transcript_palace
 from ..tools.rss_tools import EcosystemRSSAggregator
@@ -270,6 +280,106 @@ class OrchestratorAgent(BaseWarmAgent):
             "}"
         )
         return sys_prompt, user_prompt
+
+    def compile_leaf_policy_envelope(
+        self,
+        leaf_id: str,
+        parsed_reflection: Optional[Dict[str, Any]] = None,
+        now_ms: Optional[int] = None,
+    ) -> PolicyEnvelope:
+        """
+        Compiles a valid `PolicyEnvelope` strictly scoped to `leaf["exclusive_assets"]`
+        (for `leaf-bitcoin`: `["BTC-USD", "wBTC-BTC", "sBTC-BTC"]`):
+        - Maps `leaf["risk_posture"]` to `GlobalRegime`.
+        - Sets `ttl_seconds=900` and `capital_allocated_usd=float(leaf.get("allocated_capital_usd", 0.0))`.
+        - Populates `asset_overrides` for every symbol in `leaf["exclusive_assets"]` with all 11 `AssetOverride` fields.
+        """
+        ts = now_ms if now_ms is not None else int(time.time() * 1000)
+        leaf_state = self.store.hierarchy.leaves.get(leaf_id) or self.store.hierarchy.get_leaf_state(leaf_id)
+        if not leaf_state:
+            leaf_state = {
+                "leaf_id": leaf_id,
+                "chain": "Bitcoin" if leaf_id == "leaf-bitcoin" else "Solana",
+                "risk_posture": "BALANCED",
+                "allocated_capital_usd": 5000.0,
+                "exclusive_assets": ["BTC-USD", "wBTC-BTC", "sBTC-BTC"] if leaf_id == "leaf-bitcoin" else ["SOL-USDT", "JUP-USDT", "RAY-USDT"],
+                "rust_pods": ["pod_carry", "pod_momentum", "pod_onchain_alpha"],
+                "ta_specific_metrics": {},
+            }
+
+        posture = str(leaf_state.get("risk_posture", "BALANCED")).upper()
+        if posture == "AGGRESSIVE":
+            global_regime = "RISK_ON_HIGH_VOL"
+        elif posture == "DEFENSIVE":
+            global_regime = "DEFENSIVE_WINTER"
+        elif posture == "HIBERNATION":
+            global_regime = "KILL_SWITCH"
+        else:
+            global_regime = "RANGING_CHOP"
+
+        rust_pods_list = leaf_state.get("rust_pods", ["pod_carry", "pod_momentum", "pod_onchain_alpha"])
+        pod_allocations: Dict[str, PodAllocation] = {}
+        weight_per_pod = round(1.0 / max(1, len(rust_pods_list)), 2)
+        all_possible_pods = ["pod_carry", "pod_momentum", "pod_onchain_alpha", "pod_sniper"]
+        for p_name in all_possible_pods:
+            enabled = p_name in rust_pods_list
+            pod_allocations[p_name] = PodAllocation(
+                enabled=enabled,
+                capital_weight=weight_per_pod if enabled else 0.0,
+                directional_bias="LONG_BIAS" if global_regime in ("RISK_ON_HIGH_VOL", "RANGING_CHOP") else "NEUTRAL",
+                min_funding_apr=0.10 if p_name == "pod_carry" else None,
+                max_slippage_bps=30 if enabled else 150,
+            )
+
+        exclusive_assets = leaf_state.get("exclusive_assets", [])
+        ta_metrics = leaf_state.get("ta_specific_metrics", {})
+        parsed_ref = parsed_reflection or {}
+        asset_rules_in = parsed_ref.get("asset_rules", {}) if isinstance(parsed_ref, dict) else {}
+
+        asset_overrides: Dict[str, AssetOverride] = {}
+        for sym in exclusive_assets:
+            llm_r = asset_rules_in.get(sym, {}) if isinstance(asset_rules_in, dict) else {}
+            bias_str = str(llm_r.get("bias", "LONG_BIAS"))
+            if bias_str not in ("LONG_BIAS", "SHORT_BIAS", "NEUTRAL"):
+                bias_str = "LONG_BIAS"
+            
+            cat_score = float(leaf_state.get("catalyst_score", 0.85))
+            max_lev = float(leaf_state.get("max_leverage", 2.0))
+            
+            last_p = float(ta_metrics.get("last_price", 80000.0 if "BTC" in sym else 150.0))
+            fib_618 = float(ta_metrics.get("golden_pocket_fib_618", round(last_p * 0.992, 2)))
+            support_z = float(ta_metrics.get("support_usd", round(fib_618 * 0.98, 2)))
+            resistance_z = float(ta_metrics.get("resistance_usd", round(last_p * 1.05, 2)))
+            invalidation_p = float(ta_metrics.get("invalidation_price_usd", round(fib_618 * 0.97, 2)))
+
+            obi_thresh = max(0.02, min(0.50, float(llm_r.get("entry_obi_threshold", 0.08))))
+            max_rsi = max(55.0, min(85.0, float(llm_r.get("max_rsi_long", 70.0))))
+            min_rsi = max(15.0, min(45.0, float(llm_r.get("min_rsi_short", 30.0))))
+            tp_bps = max(15.0, min(200.0, float(llm_r.get("take_profit_bps", 45.0))))
+            sl_bps = max(10.0, min(150.0, float(llm_r.get("stop_loss_bps", 28.0))))
+
+            asset_overrides[sym] = AssetOverride(
+                catalyst_score=cat_score,
+                bias=bias_str,
+                max_leverage=max_lev,
+                support_zone_usd=support_z,
+                resistance_zone_usd=resistance_z,
+                invalidation_price_usd=invalidation_p,
+                entry_obi_threshold=obi_thresh,
+                max_rsi_long=max_rsi,
+                min_rsi_short=min_rsi,
+                take_profit_bps=tp_bps,
+                stop_loss_bps=sl_bps,
+            )
+
+        return PolicyEnvelope(
+            envelope_id=f"env_{leaf_id}_{ts}",
+            issued_at_ms=ts,
+            ttl_seconds=900,
+            global_regime=global_regime.value if hasattr(global_regime, "value") else str(global_regime),
+            pod_allocations=pod_allocations,
+            asset_overrides=asset_overrides,
+        )
 
     def run_strategic_reflection(
         self, force: bool = False, trigger_source: str = "MANUAL_OPERATOR"
@@ -944,7 +1054,10 @@ class OrchestratorAgent(BaseWarmAgent):
                     "wakeup_reason": f"Surveillance dédiée {leaf['chain']} ({leaf.get('base_interval_sec', 180)}s)",
                 }
 
-            next_sec = max(60, min(1800, int(parsed.get("next_wakeup_sec", leaf.get("base_interval_sec", 180)))))
+            base_interval_sec = leaf.get("base_interval_sec", 180)
+            default_interval = 900 if leaf_id == "leaf-bitcoin" else int(base_interval_sec)
+            raw_wakeup = int(parsed.get("next_wakeup_sec", default_interval))
+            next_sec = max(60, min(1800, raw_wakeup))
             call_cost = self.cost_guard.compute_call_cost(used_model, p_tok, c_tok)
             billed_tokens = p_tok + c_tok
             drawer_source = (
@@ -953,6 +1066,9 @@ class OrchestratorAgent(BaseWarmAgent):
                 else provenance.DRAWER_SOURCES[1]  # DETERMINISTIC_FALLBACK
             )
             telemetry_model = used_model if billed_tokens > 0 else ""
+            
+            continuity = str(parsed.get("thesis_continuity", "INITIAL"))
+
             drawer = PalaceDrawer(
                 drawer_id=f"drw_{wing}_{now_ms}",
                 timestamp_ms=now_ms,
@@ -960,7 +1076,7 @@ class OrchestratorAgent(BaseWarmAgent):
                 room="active_theses",
                 model_used=telemetry_model,
                 thinking_depth=str(profile["thinking_depth"]),
-                thesis_continuity=str(parsed.get("thesis_continuity", "INITIAL")),
+                thesis_continuity=continuity,
                 global_regime=str(leaf["risk_posture"]),
                 panorama_summary=str(parsed.get("panorama_summary", "")),
                 ta_confluence_notes=str(parsed.get("ta_confluence_notes", "")),
@@ -973,12 +1089,17 @@ class OrchestratorAgent(BaseWarmAgent):
                     }
                 },
                 next_wakeup_sec=next_sec,
-                wakeup_reason=str(parsed.get("wakeup_reason", "")),
+                wakeup_reason=str(parsed.get("wakeup_reason", f"Cycle programmé à {next_sec}s")),
                 tokens_used=billed_tokens,
                 cost_usd=call_cost,
                 source=drawer_source,
             )
             self.store.palace.add_drawer(drawer)
+
+            policy_envelope = self.compile_leaf_policy_envelope(leaf_id, parsed_reflection=parsed, now_ms=now_ms)
+            sig = compute_policy_hmac(policy_envelope, "robotrader-dev-hmac-key"); signed_bundle = SignedPolicyBundle(policy=policy_envelope, signature=sig, key_id="default")
+            leaf["last_compiled_policy"] = policy_envelope.to_dict()
+            leaf["last_signed_policy_bundle"] = signed_bundle.to_dict()
 
             with self.store.hierarchy._lock:
                 leaf["last_hypothesis"] = drawer.hypothesis
@@ -991,6 +1112,8 @@ class OrchestratorAgent(BaseWarmAgent):
                 "wing": wing,
                 "model_used": used_model,
                 "drawer": drawer.to_dict(),
+                "policy_envelope": policy_envelope.to_dict(),
+                "signed_policy_bundle": signed_bundle.to_dict(),
             }
 
     def get_cognitive_state(self) -> Dict[str, Any]:
