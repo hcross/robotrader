@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "enforce-risk-exposure-caps-and-ratelimit",
+  "title": "feat(risk-gate): enforce asset/pod/gross exposure caps, order rate-limiting, and MEV tip slippage cap",
+  "issue": 4,
+  "lane": "L",
+  "lane_reason": "Modifies HardRiskGate::validate exposure arithmetic, order rate limiting, and MEV tip bounds (Issue #4 complete closure)",
+  "lane_change": null,
+  "branch": "sdlc/4-enforce-risk-exposure-caps-and-ratelimit",
+  "worktree": ".worktrees/4-enforce-risk-exposure-caps-and-ratelimit",
+  "base_branch": "master",
+  "base_sha": "0e1caef28e15f5978180c26a58050bfbcbb9f581",
+  "created_at": "2026-11-01T11:47:44Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev-review",
+  "pr": 180,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "4ff66d6d9a16723e8d64d63059a9246f09653996",
+      "updated_at": "2026-11-01T12:14:12Z"
+    },
+    "plan": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-plan-reviewer",
+      "last_sha": "cd3c84a3ae37c3f24224cee2d3f50bb886964f08",
+      "updated_at": "2026-11-01T12:26:12Z"
+    },
+    "dev": {
+      "status": "in_review",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": "2026-11-01T12:54:18Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/4-enforce-risk-exposure-caps-and-ratelimit",
+  "partial_issue": false
+}

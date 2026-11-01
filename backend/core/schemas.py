@@ -213,3 +213,32 @@ class Message:
     msg_type: str
     content: Any
     timestamp: float = field(default_factory=time.time)
+
+
+@dataclass
+class PortfolioState:
+    initial_equity_usd: float
+    current_equity_usd: float
+    high_water_mark_usd: float
+    daily_start_equity_usd: float
+    asset_exposures_usd: Dict[str, float] = field(default_factory=dict)
+    pod_exposures_usd: Dict[str, float] = field(default_factory=dict)
+    gross_exposure_usd: float = 0.0
+    last_order_ts_ms: Dict[str, int] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> PortfolioState:
+        return cls(
+            initial_equity_usd=float(data["initial_equity_usd"]),
+            current_equity_usd=float(data["current_equity_usd"]),
+            high_water_mark_usd=float(data["high_water_mark_usd"]),
+            daily_start_equity_usd=float(data["daily_start_equity_usd"]),
+            asset_exposures_usd=dict(data.get("asset_exposures_usd", {})),
+            pod_exposures_usd=dict(data.get("pod_exposures_usd", {})),
+            gross_exposure_usd=float(data.get("gross_exposure_usd", 0.0)),
+            last_order_ts_ms=dict(data.get("last_order_ts_ms", {})),
+        )
+
