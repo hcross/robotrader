@@ -654,6 +654,9 @@ mod tests {
             decoded.last_order_ts_ms.get("pod_carry:SOL-USDT"),
             Some(&1792180000123)
         );
+    }
+
+    #[test]
     fn test_rfc4231_hmac_sha256_vector() {
         let key = b"Jefe";
         let data = b"what do ya want for nothing?";
