@@ -102,6 +102,80 @@ impl BitcoinVenueAdapter {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EthereumBridgeQuote {
+    pub venues: Vec<String>,
+    pub supported_tokens: Vec<String>,
+    pub bridge_protocol: String,
+    pub base_fee_usd: f64,
+    pub variable_bps: f64,
+    pub one_way_fee_usd: f64,
+    pub round_trip_cost_bps: f64,
+    pub hurdle_rate_bps: f64,
+    pub finality_sec: u64,
+}
+
+pub struct EthereumVenueAdapter;
+
+impl EthereumVenueAdapter {
+    pub const VENUES: [&'static str; 4] = [
+        "Uniswap v4",
+        "Aave v3",
+        "Curve",
+        "Lido / EigenLayer",
+    ];
+    pub const SUPPORTED_TOKENS: [&'static str; 3] = ["ETH", "USDC", "USDT"];
+    pub const BRIDGE_PROTOCOL: &'static str = "Circle CCTP / LayerZero Stargate";
+    pub const BASE_FEE_USD: f64 = 1.80;
+    pub const VARIABLE_BPS: f64 = 6.0;
+    pub const FINALITY_SEC: u64 = 15;
+
+    pub fn quote_bridge(notional_usd: f64) -> EthereumBridgeQuote {
+        let one_way_fee_usd = Self::BASE_FEE_USD + notional_usd * (Self::VARIABLE_BPS / 10_000.0);
+        let one_way_bps = if notional_usd > 0.0 {
+            (one_way_fee_usd / notional_usd) * 10_000.0
+        } else {
+            Self::VARIABLE_BPS
+        };
+        let round_trip_cost_bps = one_way_bps * 2.0;
+        let hurdle_rate_bps = round_trip_cost_bps * 2.5;
+
+        EthereumBridgeQuote {
+            venues: Self::VENUES.iter().map(|s| s.to_string()).collect(),
+            supported_tokens: Self::SUPPORTED_TOKENS.iter().map(|s| s.to_string()).collect(),
+            bridge_protocol: Self::BRIDGE_PROTOCOL.to_string(),
+            base_fee_usd: Self::BASE_FEE_USD,
+            variable_bps: Self::VARIABLE_BPS,
+            one_way_fee_usd,
+            round_trip_cost_bps,
+            hurdle_rate_bps,
+            finality_sec: Self::FINALITY_SEC,
+        }
+    }
+
+    pub fn validate_settlement_destination(dest: &str) -> bool {
+        if dest.starts_with("bridge:cctp:") || dest.starts_with("bridge:layerzero:") {
+            let prefix_len = if dest.starts_with("bridge:cctp:") {
+                "bridge:cctp:".len()
+            } else {
+                "bridge:layerzero:".len()
+            };
+            return dest.len() > prefix_len;
+        }
+
+        // EVM 20-byte hex address: "0x" followed by exactly 40 hex characters
+        if dest.starts_with("0x") || dest.starts_with("0X") {
+            let hex_part = &dest[2..];
+            if hex_part.len() != 40 {
+                return false;
+            }
+            return hex_part.chars().all(|c| c.is_ascii_hexdigit());
+        }
+
+        false
+    }
+}
+
 pub struct SmartExecutionRouter {
     pub mode: ExecutionMode,
 }
@@ -167,6 +241,13 @@ impl SmartExecutionRouter {
             if sym != "BTC-USD" && sym != "wBTC-BTC" && sym != "sBTC-BTC" {
                 return Err(format!(
                     "Leaf leaf-bitcoin violates symbol isolation: symbol {sym} not allowed"
+                ));
+            }
+        } else if leaf_id == "leaf-ethereum" {
+            let sym = &order.intent.symbol;
+            if sym != "ETH-USDC" && sym != "stETH-ETH" && sym != "UNI-ETH" && sym != "AAVE-ETH" {
+                return Err(format!(
+                    "Leaf leaf-ethereum violates symbol isolation: symbol {sym} not allowed"
                 ));
             }
         }
@@ -333,6 +414,28 @@ mod tests {
     }
 
     #[test]
+    fn test_ethereum_venue_adapter_bridge_quote_and_custody_destination() {
+        let quote = EthereumVenueAdapter::quote_bridge(10_000.0);
+        assert_eq!(quote.venues.len(), 4);
+        assert!(quote.venues.contains(&"Uniswap v4".to_string()));
+        assert!(quote.venues.contains(&"Aave v3".to_string()));
+        assert_eq!(quote.bridge_protocol, "Circle CCTP / LayerZero Stargate");
+        assert_eq!(quote.base_fee_usd, 1.80);
+        assert_eq!(quote.variable_bps, 6.0);
+        assert!((quote.one_way_fee_usd - (1.80 + 10_000.0 * 6.0 / 10_000.0)).abs() < 1e-9);
+        assert!(quote.hurdle_rate_bps > quote.round_trip_cost_bps);
+        assert_eq!(quote.finality_sec, 15);
+
+        // Test destination validation
+        assert!(EthereumVenueAdapter::validate_settlement_destination("0xd8da6bf26964af9d7eed9e03e53415d37aa96045"));
+        assert!(EthereumVenueAdapter::validate_settlement_destination("0xD8DA6BF26964AF9D7EED9E03E53415D37AA96045"));
+        assert!(EthereumVenueAdapter::validate_settlement_destination("bridge:cctp:0x1234..."));
+        assert!(EthereumVenueAdapter::validate_settlement_destination("bridge:layerzero:dest_chain_id"));
+        assert!(!EthereumVenueAdapter::validate_settlement_destination("0xShort"));
+        assert!(!EthereumVenueAdapter::validate_settlement_destination("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"));
+    }
+
+    #[test]
     fn test_smart_execution_router_execute_for_leaf_bitcoin_isolation() {
         let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
         let mut order = approved_order(Venue::BinanceSpot, OrderType::Limit, 0);
@@ -343,6 +446,32 @@ mod tests {
 
         order.intent.symbol = "ETH-USDT".to_string();
         let res_err = router.execute_for_leaf("leaf-bitcoin", &order, 1000);
+        assert!(res_err.is_err());
+    }
+
+    #[test]
+    fn test_smart_execution_router_execute_for_leaf_ethereum_isolation() {
+        let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
+        let mut order = approved_order(Venue::BinanceSpot, OrderType::Limit, 0);
+        order.intent.symbol = "ETH-USDC".to_string();
+
+        let res = router.execute_for_leaf("leaf-ethereum", &order, 1000);
+        assert!(res.is_ok());
+
+        order.intent.symbol = "stETH-ETH".to_string();
+        let res2 = router.execute_for_leaf("leaf-ethereum", &order, 1000);
+        assert!(res2.is_ok());
+
+        order.intent.symbol = "UNI-ETH".to_string();
+        let res3 = router.execute_for_leaf("leaf-ethereum", &order, 1000);
+        assert!(res3.is_ok());
+
+        order.intent.symbol = "AAVE-ETH".to_string();
+        let res4 = router.execute_for_leaf("leaf-ethereum", &order, 1000);
+        assert!(res4.is_ok());
+
+        order.intent.symbol = "BTC-USD".to_string();
+        let res_err = router.execute_for_leaf("leaf-ethereum", &order, 1000);
         assert!(res_err.is_err());
     }
 }
