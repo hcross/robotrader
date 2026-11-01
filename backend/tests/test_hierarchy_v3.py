@@ -969,6 +969,77 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
             self.assertTrue(item["curated"])
             self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
 
+    def test_sui_leaf_ta_metrics_computation_and_fallback(self) -> None:
+        """
+        Verifies TechnicalAnalysisTool.compute_sui_ta_metrics and ingest_sui_market_snapshot
+        across all 3 exclusive Sui assets (`SUI-USDC`, `DEEP-SUI`, `CETUS-SUI`),
+        verifying `LIVE_COMPUTED` vs `CATALOG_FIXTURE` fallback and `ValueError` on non-Sui symbols/venues.
+        """
+        from backend.tools.ta_tools import TechnicalAnalysisTool
+
+        sample_candles = [
+            [1700000000000 + i * 900000, 3.0 + i * 0.05, 3.05 + i * 0.05, 2.95 + i * 0.05, 3.02 + i * 0.05, 1000.0]
+            for i in range(25)
+        ]
+        sample_bids = [[3.01, 100.0], [3.00, 150.0]]
+        sample_asks = [[3.03, 80.0], [3.04, 120.0]]
+        sample_telemetry = {
+            "mysticeti_finality_ms": 350,
+            "deepbook_v3_vol_usd_m": 510.0,
+        }
+
+        for sym in TechnicalAnalysisTool.SUI_EXCLUSIVE_ASSETS:
+            for venue in TechnicalAnalysisTool.SUI_VENUES:
+                res = TechnicalAnalysisTool.compute_sui_ta_metrics(
+                    candles=sample_candles,
+                    bids=sample_bids,
+                    asks=sample_asks,
+                    onchain_telemetry=sample_telemetry,
+                    symbol=sym,
+                    venue=venue,
+                )
+                self.assertEqual(res["symbol"], sym)
+                self.assertEqual(res["venue"], venue)
+                self.assertEqual(res["ta_metrics_source"], "LIVE_COMPUTED")
+                self.assertEqual(res["mysticeti_finality_ms"], 350)
+                self.assertEqual(res["deepbook_v3_vol_usd_m"], 510.0)
+                self.assertIn("kumo_regime", res)
+                self.assertIn("golden_pocket_fib_618", res)
+                self.assertIn("rsi_14", res)
+                self.assertIn("obi_l2", res)
+
+        market_feeds = {
+            "SUI-USDC": {
+                "candles": sample_candles,
+                "bids": sample_bids,
+                "asks": sample_asks,
+            }
+        }
+        ingest_res = TechnicalAnalysisTool.ingest_sui_market_snapshot(
+            market_feeds=market_feeds,
+            onchain_telemetry=sample_telemetry,
+            venue="DeepBook v3 CLOB",
+        )
+        self.assertEqual(ingest_res["ta_metrics_source"], "LIVE_COMPUTED")
+        self.assertEqual(ingest_res["symbol"], "SUI-USDC")
+
+        fallback_res = TechnicalAnalysisTool.compute_sui_ta_metrics(
+            candles=[],
+            bids=None,
+            asks=None,
+            onchain_telemetry=None,
+            symbol="SUI-USDC",
+            venue="DeepBook v3 CLOB",
+        )
+        self.assertEqual(fallback_res["ta_metrics_source"], "CATALOG_FIXTURE")
+        self.assertIn("mysticeti_finality_ms", fallback_res)
+        self.assertIn("deepbook_v3_vol_usd_m", fallback_res)
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_sui_ta_metrics(symbol="BTC-USD", venue="DeepBook v3 CLOB")
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_sui_ta_metrics(symbol="SUI-USDC", venue="InvalidVenue")
 
 
 if __name__ == "__main__":
