@@ -322,6 +322,90 @@ impl HyperliquidVenueAdapter {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BnbBridgeQuote {
+    pub venues: Vec<String>,
+    pub supported_tokens: Vec<String>,
+    pub bridge_protocol: String,
+    pub base_fee_usd: f64,
+    pub variable_bps: f64,
+    pub one_way_fee_usd: f64,
+    pub round_trip_cost_bps: f64,
+    pub hurdle_rate_bps: f64,
+    pub finality_sec: u64,
+}
+
+pub struct BnbVenueAdapter;
+
+impl BnbVenueAdapter {
+    pub const VENUES: [&'static str; 3] = [
+        "PancakeSwap v3",
+        "Venus Protocol",
+        "opBNB",
+    ];
+    pub const SUPPORTED_TOKENS: [&'static str; 3] = ["BNB", "USDT", "CAKE"];
+    pub const BRIDGE_PROTOCOL: &'static str = "Binance Bridge / PancakeSwap";
+    pub const BASE_FEE_USD: f64 = 0.20;
+    pub const VARIABLE_BPS: f64 = 4.0;
+    pub const FINALITY_SEC: u64 = 3;
+
+    pub fn quote_bridge(notional_usd: f64) -> BnbBridgeQuote {
+        let one_way_fee_usd = Self::BASE_FEE_USD + notional_usd * (Self::VARIABLE_BPS / 10_000.0);
+        let one_way_bps = if notional_usd > 0.0 {
+            (one_way_fee_usd / notional_usd) * 10_000.0
+        } else {
+            Self::VARIABLE_BPS
+        };
+        let round_trip_cost_bps = one_way_bps * 2.0;
+        let hurdle_rate_bps = round_trip_cost_bps * 2.5;
+
+        BnbBridgeQuote {
+            venues: Self::VENUES.iter().map(|s| s.to_string()).collect(),
+            supported_tokens: Self::SUPPORTED_TOKENS.iter().map(|s| s.to_string()).collect(),
+            bridge_protocol: Self::BRIDGE_PROTOCOL.to_string(),
+            base_fee_usd: Self::BASE_FEE_USD,
+            variable_bps: Self::VARIABLE_BPS,
+            one_way_fee_usd,
+            round_trip_cost_bps,
+            hurdle_rate_bps,
+            finality_sec: Self::FINALITY_SEC,
+        }
+    }
+
+    pub fn validate_settlement_destination(dest: &str) -> bool {
+        let bridge_prefixes = [
+            "bridge:binance:",
+            "bridge:bnb:",
+            "bridge:pancakeswap:",
+            "bridge:layerzero:",
+            "bridge:wormhole:",
+            "bridge:stargate:",
+            "bridge:cctp:",
+        ];
+        for prefix in &bridge_prefixes {
+            if dest.starts_with(prefix) {
+                return dest.len() > prefix.len();
+            }
+        }
+
+        // BNB Chain uses EVM addresses: "0x" followed by exactly 40 hex characters
+        if dest.starts_with("0x") || dest.starts_with("0X") {
+            let hex_part = &dest[2..];
+            if hex_part.len() != 40 {
+                return false;
+            }
+            return hex_part.chars().all(|c| c.is_ascii_hexdigit());
+        }
+
+        false
+    }
+}
+
+pub type BnbChainBridgeQuote = BnbBridgeQuote;
+pub type BnbChainVenueAdapter = BnbVenueAdapter;
+pub type PancakeSwapBridgeQuote = BnbBridgeQuote;
+pub type PancakeSwapVenueAdapter = BnbVenueAdapter;
+
 pub struct SmartExecutionRouter {
     pub mode: ExecutionMode,
 }
@@ -408,6 +492,13 @@ impl SmartExecutionRouter {
             if sym != "HYPE-USDC" && sym != "PURR-USDC" {
                 return Err(format!(
                     "Leaf leaf-hyperliquid violates symbol isolation: symbol {sym} not allowed"
+                ));
+            }
+        } else if leaf_id == "leaf-bnb" {
+            let sym = &order.intent.symbol;
+            if sym != "BNB-USDT" && sym != "CAKE-BNB" {
+                return Err(format!(
+                    "Leaf leaf-bnb violates symbol isolation: symbol {sym} not allowed"
                 ));
             }
         }
@@ -708,8 +799,49 @@ mod tests {
             assert!(res.is_ok(), "expected ok for {sym}");
         }
 
+
         order.intent.symbol = "ETH-USDC".to_string();
         let res_err = router.execute_for_leaf("leaf-hyperliquid", &order, 1000);
+        assert!(res_err.is_err());
+    }
+
+    #[test]
+    fn test_bnb_venue_adapter_bridge_quote_and_custody_destination() {
+        let quote = BnbVenueAdapter::quote_bridge(10_000.0);
+        assert_eq!(quote.venues.len(), 3);
+        assert!(quote.venues.contains(&"PancakeSwap v3".to_string()));
+        assert!(quote.venues.contains(&"Venus Protocol".to_string()));
+        assert!(quote.venues.contains(&"opBNB".to_string()));
+        assert_eq!(quote.bridge_protocol, "Binance Bridge / PancakeSwap");
+        assert_eq!(quote.base_fee_usd, 0.20);
+        assert_eq!(quote.variable_bps, 4.0);
+        assert!((quote.one_way_fee_usd - (0.20 + 10_000.0 * 4.0 / 10_000.0)).abs() < 1e-9);
+        assert!(quote.hurdle_rate_bps > quote.round_trip_cost_bps);
+        assert_eq!(quote.finality_sec, 3);
+
+        // Test destination validation
+        assert!(BnbVenueAdapter::validate_settlement_destination("0xd8da6bf26964af9d7eed9e03e53415d37aa96045"));
+        assert!(BnbVenueAdapter::validate_settlement_destination("0xD8DA6BF26964AF9D7EED9E03E53415D37AA96045"));
+        assert!(BnbVenueAdapter::validate_settlement_destination("bridge:binance:0x1234..."));
+        assert!(BnbVenueAdapter::validate_settlement_destination("bridge:bnb:destination"));
+        assert!(BnbVenueAdapter::validate_settlement_destination("bridge:pancakeswap:destination"));
+        assert!(!BnbVenueAdapter::validate_settlement_destination("0xShort"));
+        assert!(!BnbVenueAdapter::validate_settlement_destination("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"));
+    }
+
+    #[test]
+    fn test_smart_execution_router_execute_for_leaf_bnb_isolation() {
+        let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
+        let mut order = approved_order(Venue::BinanceSpot, OrderType::Limit, 0);
+
+        for sym in ["BNB-USDT", "CAKE-BNB"] {
+            order.intent.symbol = sym.to_string();
+            let res = router.execute_for_leaf("leaf-bnb", &order, 1000);
+            assert!(res.is_ok(), "expected ok for {sym}");
+        }
+
+        order.intent.symbol = "ETH-USDC".to_string();
+        let res_err = router.execute_for_leaf("leaf-bnb", &order, 1000);
         assert!(res_err.is_err());
     }
 }
