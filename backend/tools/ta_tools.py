@@ -678,6 +678,121 @@ class TechnicalAnalysisTool:
             venue=venue,
         )
 
+    TON_EXCLUSIVE_ASSETS = ("TON-USDT", "NOT-TON")
+    TON_VENUES = ("STON.fi", "DeDust.io")
+    TON_FALLBACK_TA_METRICS = {
+        "usdt_ton_supply_usd_b": 1.25,
+        "stonfi_tvl_usd_m": 210.0,
+        "kumo_regime": "ABOVE_KUMO_BULLISH",
+        "golden_pocket_fib_618": 5.28,
+        "rsi_14": 52.0,
+        "obi_l2": 0.09,
+    }
+
+    @classmethod
+    def compute_ton_ta_metrics(
+        cls,
+        candles: Optional[List[List[float]]] = None,
+        bids: Optional[List[Tuple[float, float]]] = None,
+        asks: Optional[List[Tuple[float, float]]] = None,
+        onchain_telemetry: Optional[Dict[str, Any]] = None,
+        symbol: str = "TON-USDT",
+        timeframe: str = "15m",
+        venue: str = "STON.fi",
+    ) -> Dict[str, Any]:
+        """
+        Dedicated TON telemetry & TA computation helper supporting leaf-ton exclusive assets
+        (TON-USDT, NOT-TON) across STON.fi and DeDust.io.
+        Enforces symbol in TON_EXCLUSIVE_ASSETS and venue in TON_VENUES (raising ValueError on mismatch).
+        Computes real TA indicators from OHLCV + L2 orderbook and integrates TON on-chain telemetry metrics
+        (usdt_ton_supply_usd_b, stonfi_tvl_usd_m) with explicit provenance.
+        """
+        if symbol not in cls.TON_EXCLUSIVE_ASSETS:
+            raise ValueError(f"Invalid TON symbol: {symbol}. Expected one of {cls.TON_EXCLUSIVE_ASSETS}")
+        if venue not in cls.TON_VENUES:
+            raise ValueError(f"Invalid TON venue: {venue}. Expected one of {cls.TON_VENUES}")
+
+        obi = 0.0
+        if bids and asks:
+            b_vol = sum(float(b[1]) for b in bids[:5])
+            a_vol = sum(float(a[1]) for a in asks[:5])
+            tot = b_vol + a_vol
+            if tot > 0:
+                obi = (b_vol - a_vol) / tot
+
+        has_candles = bool(candles and isinstance(candles, list) and len(candles) >= 5)
+
+        if not has_candles:
+            return {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "venue": venue,
+                "ta_metrics_source": "CATALOG_FIXTURE",
+                **cls.TON_FALLBACK_TA_METRICS,
+                "obi_l2": obi if (bids or asks) else cls.TON_FALLBACK_TA_METRICS["obi_l2"],
+                "venues": list(cls.TON_VENUES),
+                "exclusive_assets": list(cls.TON_EXCLUSIVE_ASSETS),
+            }
+
+        ta_result = cls.analyze_candles(symbol=symbol, candles=candles, obi=obi, timeframe=timeframe)
+        kumo_regime = ta_result.get("ichimoku", {}).get("kumo_regime", cls.TON_FALLBACK_TA_METRICS["kumo_regime"])
+        golden_pocket = ta_result.get("fibonacci", {}).get("golden_pocket_618", cls.TON_FALLBACK_TA_METRICS["golden_pocket_fib_618"])
+        rsi_14 = ta_result.get("rsi", {}).get("rsi_14", cls.TON_FALLBACK_TA_METRICS["rsi_14"])
+        obi_l2 = ta_result.get("obi_l2", obi)
+
+        telemetry = onchain_telemetry or {}
+        usdt_supply = float(telemetry.get("usdt_ton_supply_usd_b", cls.TON_FALLBACK_TA_METRICS["usdt_ton_supply_usd_b"]))
+        stonfi_tvl = float(telemetry.get("stonfi_tvl_usd_m", cls.TON_FALLBACK_TA_METRICS["stonfi_tvl_usd_m"]))
+
+        return {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "venue": venue,
+            "ta_metrics_source": "LIVE_COMPUTED",
+            "usdt_ton_supply_usd_b": usdt_supply,
+            "stonfi_tvl_usd_m": stonfi_tvl,
+            "kumo_regime": kumo_regime,
+            "golden_pocket_fib_618": golden_pocket,
+            "rsi_14": rsi_14,
+            "obi_l2": obi_l2,
+            "venues": list(cls.TON_VENUES),
+            "exclusive_assets": list(cls.TON_EXCLUSIVE_ASSETS),
+        }
+
+    @classmethod
+    def ingest_ton_market_snapshot(
+        cls,
+        market_feeds: Optional[Dict[str, Dict[str, Any]]] = None,
+        onchain_telemetry: Optional[Dict[str, Any]] = None,
+        venue: str = "STON.fi",
+    ) -> Dict[str, Any]:
+        """
+        Ingests TON market snapshot across market feeds and onchain telemetry.
+        """
+        feeds = market_feeds or {}
+        symbol = "TON-USDT"
+        candles: Optional[List[List[float]]] = None
+        bids: Optional[List[Tuple[float, float]]] = None
+        asks: Optional[List[Tuple[float, float]]] = None
+
+        if feeds:
+            target_sym = next(iter(feeds.keys()))
+            if target_sym in cls.TON_EXCLUSIVE_ASSETS:
+                symbol = target_sym
+            feed_data = feeds.get(symbol, next(iter(feeds.values())))
+            candles = feed_data.get("candles")
+            bids = feed_data.get("bids")
+            asks = feed_data.get("asks")
+
+        return cls.compute_ton_ta_metrics(
+            candles=candles,
+            bids=bids,
+            asks=asks,
+            onchain_telemetry=onchain_telemetry,
+            symbol=symbol,
+            venue=venue,
+        )
+
 
 class SocialMacroPanoramaTool:
     """
