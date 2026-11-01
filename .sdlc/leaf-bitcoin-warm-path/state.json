@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "change_id": "leaf-bitcoin-warm-path",
+  "title": "feat(leaf-bitcoin/warm-path): autonomous 900s cognitive scheduling, MemPalace wing & PolicyEnvelope compilation for leaf-bitcoin",
+  "issue": 30,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-bitcoin 900s warm-path cognitive reflection and PolicyEnvelope compilation in backend/agents/orchestrator.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/30-leaf-bitcoin-warm-path",
+  "worktree": ".worktrees/30-leaf-bitcoin-warm-path",
+  "base_branch": "master",
+  "base_sha": "950bcab5af1bedfe3a26b197d6b5e18956955480",
+  "created_at": "2026-11-01T15:08:43Z",
+  "human_gates": [],
+  "status": "merged",
+  "pr": 184,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "f12d2d08251113a14367c5a46b595cf1e664fcb1",
+      "updated_at": "2026-11-01T15:10:18Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/30-leaf-bitcoin-warm-path",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T15:10:26Z",
+    "mode": "full-auto",
+    "pr": 184,
+    "head_sha": "f12d2d08251113a14367c5a46b595cf1e664fcb1"
+  }
+}
