@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "sdlc-rebase-refresh",
+  "title": "chore(sdlc): mechanical-rebase SHA refresh and pre-digested agent briefs",
+  "issue": 208,
+  "lane": "M",
+  "lane_reason": "Tooling-only change to sdlc.py + brief template; no product behaviour",
+  "lane_change": null,
+  "branch": "sdlc/208-sdlc-rebase-refresh",
+  "worktree": ".worktrees/208-sdlc-rebase-refresh",
+  "base_branch": "master",
+  "base_sha": "7c5be77299035a462c776d13c1e9375ba3e29bb2",
+  "created_at": "2026-11-01T19:15:13Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "triage",
+  "pr": null,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/208-sdlc-rebase-refresh",
+  "partial_issue": false
+}
