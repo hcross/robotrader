@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev-review",
+  "status": "merged",
   "pr": 194,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "changes_requested",
-      "rounds": 1,
-      "last_verdict": "CHANGES_REQUESTED",
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
       "last_reviewer": "sdlc-dev-reviewer",
-      "last_sha": "f3b9a2fc30912e4a72faacfee6477e835c757573",
-      "updated_at": "2026-11-01T17:06:39Z"
+      "last_sha": "70f5a2f4ef00f0a86ae50a25c759e318541ee1e9",
+      "updated_at": "2026-11-01T17:25:06Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/42-leaf-sui-warm-path",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T17:39:34Z",
+    "mode": "full-auto",
+    "pr": 194,
+    "head_sha": "70f5a2f4ef00f0a86ae50a25c759e318541ee1e9"
+  }
 }
