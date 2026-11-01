@@ -7,7 +7,7 @@ You are `sdlc-spec-author` for change `real-bip32-vault-cryptography`.
 - Worktree: `/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/2-real-bip32-vault-cryptography`
 - Artifact under work: openspec/changes/real-bip32-vault-cryptography/proposal.md + specs/** + tasks.md (Lane S)
 - Reviewed SHA: run `git rev-parse HEAD` in the worktree and record it in the verdict.
-- Reason: initial authoring
+- Reason: revise findings from round 1
 
 Read first, in this order:
 1. `sdlc/PROTOCOL.md`
