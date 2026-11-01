@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "merge-ready",
+  "status": "merged",
   "pr": 219,
   "areas": [],
   "stages": {
@@ -36,14 +36,21 @@
     },
     "dev": {
       "status": "approved",
-      "rounds": 1,
+      "rounds": 2,
       "last_verdict": "APPROVE",
       "last_reviewer": "sdlc-dev-reviewer",
-      "last_sha": "56f3539640afa445e561faa4f933dbbdb15dd935",
-      "updated_at": "2026-11-01T21:52:09Z"
+      "last_sha": "b86f0b61553090d342303477ea5a8e03ce339add",
+      "updated_at": "2026-11-01T21:58:24Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/77-leaf-avalanche-rss-catalysts",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T22:02:11Z",
+    "mode": "full-auto",
+    "pr": 219,
+    "head_sha": "b86f0b61553090d342303477ea5a8e03ce339add"
+  }
 }
