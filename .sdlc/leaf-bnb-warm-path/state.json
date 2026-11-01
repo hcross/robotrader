@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-bnb-warm-path",
+  "title": "feat(leaf-bnb/warm-path): autonomous 900s cognitive scheduling, MemPalace wing & PolicyEnvelope compilation for leaf-bnb",
+  "issue": 54,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-bnb warm-path wiring in backend/agents/orchestrator.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/54-leaf-bnb-warm-path",
+  "worktree": ".worktrees/54-leaf-bnb-warm-path",
+  "base_branch": "master",
+  "base_sha": "ea323ca80468f8e8d7b9000fcb7eb23b2f481517",
+  "created_at": "2026-11-01T19:51:23Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 211,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "2eaef41ff7e8b865463bdb0b09e1f015487fbcf1",
+      "updated_at": "2026-11-01T20:40:23Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/54-leaf-bnb-warm-path",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T20:44:59Z",
+    "mode": "full-auto",
+    "pr": 211,
+    "head_sha": "2eaef41ff7e8b865463bdb0b09e1f015487fbcf1"
+  }
+}
