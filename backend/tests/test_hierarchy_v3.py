@@ -2108,7 +2108,82 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         with self.assertRaises(ValueError):
             TechnicalAnalysisTool.compute_tron_ta_metrics(symbol="TRX-USDT", venue="InvalidVenue")
 
+    def test_avalanche_rss_atom_parsing_and_catalyst_scoring(self) -> None:
+        """
+        Verifies Avalanche RSS/Atom parsing (Avalanche Subnets & Liquidity Book),
+        score_avalanche_catalyst classification across AVAX-USDC and JOE-AVAX,
+        and CURATED_FALLBACK behavior.
+        """
+        atom_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Avalanche Subnets &amp; Liquidity Book</title>
+          <entry>
+            <title>LFJ (Trader Joe) Liquidity Book record volume and AVAX/USDC spread compression</title>
+            <summary>Benqi lending growth, subnet tx share expansion, AVAX teleporter usage.</summary>
+          </entry>
+        </feed>
+        """
+        rss_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Avalanche Subnets &amp; Liquidity Book</title>
+            <item>
+              <title>Benqi lending surge and Avalanche subnet throughput record</title>
+              <description>LFJ Liquidity Book active bin shift, JOE-AVAX swap growth.</description>
+            </item>
+          </channel>
+        </rss>
+        """
 
+        payloads = {
+            "Avalanche Subnets & Liquidity Book": rss_xml,
+        }
+
+        feed_res = EcosystemRSSAggregator.verify_and_ingest_avalanche_feeds(
+            xml_payloads=payloads, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res["agent_id"], "leaf-avalanche")
+        self.assertEqual(feed_res["feed_mode"], "LIVE")
+        self.assertEqual(feed_res["live_count"], 1)
+        self.assertEqual(feed_res["curated_count"], 0)
+        self.assertGreaterEqual(len(feed_res["items"]), 1)
+
+        for item in feed_res["items"]:
+            self.assertEqual(item["source_kind"], "LIVE_RSS")
+            self.assertFalse(item["curated"])
+            self.assertIn("catalyst_score", item)
+            self.assertIn("impact", item)
+            self.assertIn("category", item)
+            self.assertIn("affected_assets", item)
+            for asset in item["affected_assets"]:
+                self.assertIn(asset, ["AVAX-USDC", "JOE-AVAX"])
+
+        for asset in ["AVAX-USDC", "JOE-AVAX"]:
+            self.assertIn(asset, feed_res["asset_catalyst_scores"])
+
+        payloads2 = {
+            "Avalanche Subnets & Liquidity Book": atom_xml,
+        }
+        feed_res2 = EcosystemRSSAggregator.verify_and_ingest_avalanche_feeds(
+            xml_payloads=payloads2, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res2["feed_mode"], "LIVE")
+        self.assertEqual(feed_res2["live_count"], 1)
+
+        fallback_res = EcosystemRSSAggregator.verify_and_ingest_avalanche_feeds(
+            xml_payloads={}, try_network=False, max_items=5
+        )
+        self.assertEqual(fallback_res["feed_mode"], "CURATED_FALLBACK")
+        self.assertEqual(fallback_res["live_count"], 0)
+        self.assertGreater(fallback_res["curated_count"], 0)
+        for item in fallback_res["items"]:
+            self.assertEqual(item["source_kind"], "CURATED_FIXTURE")
+            self.assertTrue(item["curated"])
+            self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
+
+        feed = EcosystemRSSAggregator.get_feed_for_agent("leaf-avalanche", try_network=False)
+        self.assertIn("items", feed)
+        self.assertIn("feed_mode", feed)
 
 if __name__ == "__main__":
     unittest.main()
