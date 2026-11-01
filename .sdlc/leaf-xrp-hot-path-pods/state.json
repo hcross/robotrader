@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-xrp-hot-path-pods",
+  "title": "feat(leaf-xrp/hot-path-pods): native Rust strategy pods & on-chain token safety gates for XRP Ledger",
+  "issue": 61,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-xrp pods and XRP safety gates in engine-rs/crates/strategies + tests",
+  "lane_change": null,
+  "branch": "sdlc/61-leaf-xrp-hot-path-pods",
+  "worktree": ".worktrees/61-leaf-xrp-hot-path-pods",
+  "base_branch": "master",
+  "base_sha": "55e63a0a2720dc381dbc421bb8684132a4fe1676",
+  "created_at": "2026-11-01T20:19:50Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 212,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "1562cfb4c927ec34f454207e9704b251ef1cd234",
+      "updated_at": "2026-11-01T21:06:50Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/61-leaf-xrp-hot-path-pods",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T21:09:25Z",
+    "mode": "full-auto",
+    "pr": 212,
+    "head_sha": "1562cfb4c927ec34f454207e9704b251ef1cd234"
+  }
+}
