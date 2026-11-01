@@ -1528,7 +1528,86 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
             TechnicalAnalysisTool.compute_xrp_ta_metrics(symbol="XRP-RLUSD", venue="InvalidVenue")
 
 
+    def test_xrp_rss_atom_parsing_and_catalyst_scoring(self) -> None:
+        """
+        Verifies XRP RSS/Atom parsing (XRPL Dev & RLUSD Institutional Feed),
+        score_xrp_catalyst classification across XRP-RLUSD and XRP-USDT, and
+        CURATED_FALLBACK behavior.
+        """
+        atom_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>XRPL Dev &amp; RLUSD Institutional Feed</title>
+          <entry>
+            <title>XRPL Native CLOB liquidity surge and RLUSD settlement corridors</title>
+            <summary>XLS-30 AMM pool expansion, order book open interest record.</summary>
+          </entry>
+        </feed>
+        """
+        rss_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>XRPL Dev &amp; RLUSD Institutional Feed</title>
+            <item>
+              <title>XRP spot surge on XRPL Native CLOB</title>
+              <description>RLUSD stable settlement, XLS-30 AMM liquidity.</description>
+            </item>
+          </channel>
+        </rss>
+        """
+
+        payloads = {
+            "XRPL Dev & RLUSD Institutional Feed": rss_xml,
+        }
+
+        feed_res = EcosystemRSSAggregator.verify_and_ingest_xrp_feeds(
+            xml_payloads=payloads, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res["agent_id"], "leaf-xrp")
+        self.assertEqual(feed_res["feed_mode"], "LIVE")
+        self.assertEqual(feed_res["live_count"], 1)
+        self.assertEqual(feed_res["curated_count"], 0)
+        self.assertGreaterEqual(len(feed_res["items"]), 1)
+
+        for item in feed_res["items"]:
+            self.assertEqual(item["source_kind"], "LIVE_RSS")
+            self.assertFalse(item["curated"])
+            self.assertIn("catalyst_score", item)
+            self.assertIn("impact", item)
+            self.assertIn("category", item)
+            self.assertIn("affected_assets", item)
+            for asset in item["affected_assets"]:
+                self.assertIn(asset, ["XRP-RLUSD", "XRP-USDT"])
+
+        for asset in ["XRP-RLUSD", "XRP-USDT"]:
+            self.assertIn(asset, feed_res["asset_catalyst_scores"])
+
+        payloads2 = {
+            "XRPL Dev & RLUSD Institutional Feed": atom_xml,
+        }
+        feed_res2 = EcosystemRSSAggregator.verify_and_ingest_xrp_feeds(
+            xml_payloads=payloads2, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res2["feed_mode"], "LIVE")
+        self.assertEqual(feed_res2["live_count"], 1)
+
+        fallback_res = EcosystemRSSAggregator.verify_and_ingest_xrp_feeds(
+            xml_payloads={}, try_network=False, max_items=5
+        )
+        self.assertEqual(fallback_res["feed_mode"], "CURATED_FALLBACK")
+        self.assertEqual(fallback_res["live_count"], 0)
+        self.assertGreater(fallback_res["curated_count"], 0)
+        for item in fallback_res["items"]:
+            self.assertEqual(item["source_kind"], "CURATED_FIXTURE")
+            self.assertTrue(item["curated"])
+            self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
+
+        feed = EcosystemRSSAggregator.get_feed_for_agent("leaf-xrp", try_network=False)
+        self.assertIn("items", feed)
+        self.assertIn("feed_mode", feed)
+
+
 if __name__ == "__main__":
+    unittest.main()
     unittest.main()
 
     def test_bitcoin_warm_path_reflection_and_policy_compilation(self) -> None:
