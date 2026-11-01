@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "sign-policy-and-flatten-killswitch",
+  "title": "Add HMAC-SHA256 PolicyEnvelope signing, Redis EX TTL key, and kill-switch flatten intents",
+  "issue": 8,
+  "lane": "L",
+  "lane_reason": "Completes issue #8 across PolicyEnvelope HMAC verification, Redis policy key TTL, and actionable kill-switch cancel/flatten intents",
+  "lane_change": null,
+  "branch": "sdlc/8-sign-policy-and-flatten-killswitch",
+  "worktree": ".worktrees/8-sign-policy-and-flatten-killswitch",
+  "base_branch": "master",
+  "base_sha": "0e1caef28e15f5978180c26a58050bfbcbb9f581",
+  "created_at": "2026-11-01T11:35:49Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "triage",
+  "pr": null,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/8-sign-policy-and-flatten-killswitch",
+  "partial_issue": false
+}
