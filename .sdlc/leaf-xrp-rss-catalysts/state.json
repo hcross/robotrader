@@ -14,8 +14,8 @@
   "human_gates": [
     "merge"
   ],
-  "status": "triage",
-  "pr": null,
+  "status": "merged",
+  "pr": 201,
   "areas": [],
   "stages": {
     "spec": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "0aa7b8f40f320771055476c42ecfe35afe7d0b37",
+      "updated_at": "2026-11-01T17:55:35Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/59-leaf-xrp-rss-catalysts",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T17:58:27Z",
+    "mode": "full-auto",
+    "pr": 201,
+    "head_sha": "0aa7b8f40f320771055476c42ecfe35afe7d0b37"
+  }
 }
