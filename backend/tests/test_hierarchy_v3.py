@@ -227,7 +227,7 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertEqual(res["status"], "completed")
         self.assertEqual(res["wing"], "leaf_bitcoin")
         self.assertEqual(res["drawer"]["next_wakeup_sec"], 900)
-        self.assertIn(res["drawer"]["thesis_continuity"], {"INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED"})
+        self.assertIn(res["drawer"]["thesis_continuity"], ("INITIAL", "INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED"))
 
         envelope_dict = res["policy_envelope"]
         self.assertEqual(envelope_dict["ttl_seconds"], 900)
@@ -798,7 +798,7 @@ if __name__ == "__main__":
         self.assertEqual(res["wing"], "leaf_bitcoin")
 
         drawer = res["drawer"]
-        self.assertIn(drawer["thesis_continuity"], {"INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED"})
+        self.assertIn(drawer["thesis_continuity"], ("INITIAL", "INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED"))
         self.assertEqual(drawer["next_wakeup_sec"], 900)
 
         penv = res["policy_envelope"]

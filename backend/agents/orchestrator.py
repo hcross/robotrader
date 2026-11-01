@@ -1068,8 +1068,6 @@ class OrchestratorAgent(BaseWarmAgent):
             telemetry_model = used_model if billed_tokens > 0 else ""
             
             continuity = str(parsed.get("thesis_continuity", "INITIAL"))
-            if continuity == "INITIAL":
-                continuity = "INIT_THESIS"
 
             drawer = PalaceDrawer(
                 drawer_id=f"drw_{wing}_{now_ms}",
