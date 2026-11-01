@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-ethereum-warm-path",
+  "title": "feat(leaf-ethereum/warm-path): autonomous 900s cognitive scheduling, MemPalace wing & PolicyEnvelope compilation for leaf-ethereum",
+  "issue": 36,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-ethereum 900s warm-path cognitive reflection and PolicyEnvelope compilation in backend/agents/orchestrator.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/36-leaf-ethereum-warm-path",
+  "worktree": ".worktrees/36-leaf-ethereum-warm-path",
+  "base_branch": "master",
+  "base_sha": "8f7b3a8379c95c13521a93ca7490599212bb42a1",
+  "created_at": "2026-11-01T15:29:15Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 189,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "e263b2998ba7a210f9632232330faaed56e4811d",
+      "updated_at": "2026-11-01T15:33:41Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/36-leaf-ethereum-warm-path",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T15:33:48Z",
+    "mode": "full-auto",
+    "pr": 189,
+    "head_sha": "e263b2998ba7a210f9632232330faaed56e4811d"
+  }
+}
