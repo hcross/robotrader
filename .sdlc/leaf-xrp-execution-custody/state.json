@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev-review",
+  "status": "merged",
   "pr": 215,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "changes_requested",
-      "rounds": 1,
-      "last_verdict": "CHANGES_REQUESTED",
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
       "last_reviewer": "sdlc-dev-reviewer",
-      "last_sha": "bd841c2216f4e9adbee7d82b96c48a710c777c11",
-      "updated_at": "2026-11-01T21:28:49Z"
+      "last_sha": "0ffdf563b8dc3c5ff0c47a3ea01ad0a4f6c1472a",
+      "updated_at": "2026-11-01T21:37:05Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/62-leaf-xrp-execution-custody",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T21:39:47Z",
+    "mode": "full-auto",
+    "pr": 215,
+    "head_sha": "0ffdf563b8dc3c5ff0c47a3ea01ad0a4f6c1472a"
+  }
 }
