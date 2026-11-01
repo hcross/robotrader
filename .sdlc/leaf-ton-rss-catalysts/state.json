@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "leaf-ton-rss-catalysts",
+  "title": "feat(leaf-ton/rss-catalysts): live RSS/Atom feed verification & catalyst scoring for TON",
+  "issue": 65,
+  "lane": "M",
+  "lane_reason": "Scoped ecosystem RSS verification and catalyst scoring for leaf-ton in backend/tools/rss_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/65-leaf-ton-rss-catalysts",
+  "worktree": ".worktrees/65-leaf-ton-rss-catalysts",
+  "base_branch": "master",
+  "base_sha": "e623bfd24095886b778cc068ff44ff77fc689857",
+  "created_at": "2026-11-01T17:40:08Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev-review",
+  "pr": 203,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "changes_requested",
+      "rounds": 1,
+      "last_verdict": "CHANGES_REQUESTED",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "e8112f27fc1fb94963988df7fb9044fba0a2d39a",
+      "updated_at": "2026-11-01T17:55:36Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/65-leaf-ton-rss-catalysts",
+  "partial_issue": false
+}
