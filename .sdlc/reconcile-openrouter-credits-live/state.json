@@ -14,17 +14,17 @@
   "human_gates": [
     "merge"
   ],
-  "status": "spec-review",
-  "pr": null,
+  "status": "merged",
+  "pr": 177,
   "areas": [],
   "stages": {
     "spec": {
-      "status": "changes_requested",
-      "rounds": 1,
-      "last_verdict": "CHANGES_REQUESTED",
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
       "last_reviewer": "sdlc-spec-reviewer",
-      "last_sha": "e376ae2affdfe3c45502f84b6bddbfaa36d20857",
-      "updated_at": "2026-11-01T11:49:05Z"
+      "last_sha": "0ada65e17513f507a27ca73e24555bf5b1defdf1",
+      "updated_at": "2026-11-01T11:57:37Z"
     },
     "plan": {
       "status": "skipped",
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "b7a295f14ee79739b7f1e9651d31929b41c78c1e",
+      "updated_at": "2026-11-01T12:19:14Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/5-reconcile-openrouter-credits-live",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T12:25:18Z",
+    "mode": "full-auto",
+    "pr": 177,
+    "head_sha": "b7a295f14ee79739b7f1e9651d31929b41c78c1e"
+  }
 }
