@@ -406,6 +406,86 @@ pub type BnbChainVenueAdapter = BnbVenueAdapter;
 pub type PancakeSwapBridgeQuote = BnbBridgeQuote;
 pub type PancakeSwapVenueAdapter = BnbVenueAdapter;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct XrpBridgeQuote {
+    pub venues: Vec<String>,
+    pub supported_tokens: Vec<String>,
+    pub bridge_protocol: String,
+    pub base_fee_usd: f64,
+    pub variable_bps: f64,
+    pub one_way_fee_usd: f64,
+    pub round_trip_cost_bps: f64,
+    pub hurdle_rate_bps: f64,
+    pub finality_sec: u64,
+}
+
+pub struct XrpVenueAdapter;
+
+impl XrpVenueAdapter {
+    pub const VENUES: [&'static str; 2] = [
+        "XRPL Native CLOB",
+        "XRPL XLS-30 AMM",
+    ];
+    pub const SUPPORTED_TOKENS: [&'static str; 3] = ["XRP", "RLUSD", "USDT"];
+    pub const BRIDGE_PROTOCOL: &'static str = "XRPL Native DEX / RLUSD Bridge";
+    pub const BASE_FEE_USD: f64 = 0.10;
+    pub const VARIABLE_BPS: f64 = 4.0;
+    pub const FINALITY_SEC: u64 = 4;
+
+    pub fn quote_bridge(notional_usd: f64) -> XrpBridgeQuote {
+        let one_way_fee_usd = Self::BASE_FEE_USD + notional_usd * (Self::VARIABLE_BPS / 10_000.0);
+        let one_way_bps = if notional_usd > 0.0 {
+            (one_way_fee_usd / notional_usd) * 10_000.0
+        } else {
+            Self::VARIABLE_BPS
+        };
+        let round_trip_cost_bps = one_way_bps * 2.0;
+        let hurdle_rate_bps = round_trip_cost_bps * 2.5;
+
+        XrpBridgeQuote {
+            venues: Self::VENUES.iter().map(|s| s.to_string()).collect(),
+            supported_tokens: Self::SUPPORTED_TOKENS.iter().map(|s| s.to_string()).collect(),
+            bridge_protocol: Self::BRIDGE_PROTOCOL.to_string(),
+            base_fee_usd: Self::BASE_FEE_USD,
+            variable_bps: Self::VARIABLE_BPS,
+            one_way_fee_usd,
+            round_trip_cost_bps,
+            hurdle_rate_bps,
+            finality_sec: Self::FINALITY_SEC,
+        }
+    }
+
+    pub fn validate_settlement_destination(dest: &str) -> bool {
+        // XRPL-bound destinations must name a specific bridge; a bare
+        // "bridge:" prefix is not a routable venue.
+        const XRP_BRIDGE_PREFIXES: [&str; 2] = ["bridge:xrpl:", "bridge:ripple:"];
+        for prefix in XRP_BRIDGE_PREFIXES {
+            if dest.starts_with(prefix) {
+                return dest.len() > prefix.len();
+            }
+        }
+
+        // XRPL classic address: "r" followed by 32 or 33 Ripple base58
+        // characters (33-34 total), matching the chain's own format check.
+        if let Some(rest) = dest.strip_prefix('r') {
+            let n = rest.chars().count();
+            if n != 32 && n != 33 {
+                return false;
+            }
+            const RIPPLE_BASE58: &str =
+                "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz";
+            return rest.chars().all(|c| RIPPLE_BASE58.contains(c));
+        }
+
+        false
+    }
+}
+
+pub type XrplBridgeQuote = XrpBridgeQuote;
+pub type XrplVenueAdapter = XrpVenueAdapter;
+pub type RippleBridgeQuote = XrpBridgeQuote;
+pub type RippleVenueAdapter = XrpVenueAdapter;
+
 pub struct SmartExecutionRouter {
     pub mode: ExecutionMode,
 }
@@ -499,6 +579,13 @@ impl SmartExecutionRouter {
             if sym != "BNB-USDT" && sym != "CAKE-BNB" {
                 return Err(format!(
                     "Leaf leaf-bnb violates symbol isolation: symbol {sym} not allowed"
+                ));
+            }
+        } else if leaf_id == "leaf-xrp" {
+            let sym = &order.intent.symbol;
+            if sym != "XRP-RLUSD" && sym != "XRP-USDT" {
+                return Err(format!(
+                    "Leaf leaf-xrp violates symbol isolation: symbol {sym} not allowed"
                 ));
             }
         }
@@ -842,6 +929,45 @@ mod tests {
 
         order.intent.symbol = "ETH-USDC".to_string();
         let res_err = router.execute_for_leaf("leaf-bnb", &order, 1000);
+        assert!(res_err.is_err());
+    }
+
+    #[test]
+    fn test_xrp_venue_adapter_bridge_quote_and_custody_destination() {
+        let quote = XrpVenueAdapter::quote_bridge(10_000.0);
+        assert_eq!(quote.venues.len(), 2);
+        assert!(quote.venues.contains(&"XRPL Native CLOB".to_string()));
+        assert!(quote.venues.contains(&"XRPL XLS-30 AMM".to_string()));
+        assert_eq!(quote.bridge_protocol, "XRPL Native DEX / RLUSD Bridge");
+        assert_eq!(quote.base_fee_usd, 0.10);
+        assert_eq!(quote.variable_bps, 4.0);
+        assert!((quote.one_way_fee_usd - (0.10 + 10_000.0 * 4.0 / 10_000.0)).abs() < 1e-9);
+        assert!(quote.hurdle_rate_bps > quote.round_trip_cost_bps);
+        assert_eq!(quote.finality_sec, 4);
+
+        // Test destination validation
+        assert!(XrpVenueAdapter::validate_settlement_destination("rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe"));
+        assert!(XrpVenueAdapter::validate_settlement_destination("rHb9CJAWyB4rXDegDivJLxvBty5c6qMxk"));
+        assert!(XrpVenueAdapter::validate_settlement_destination("bridge:xrpl:rDestination"));
+        assert!(XrpVenueAdapter::validate_settlement_destination("bridge:ripple:destination"));
+        assert!(!XrpVenueAdapter::validate_settlement_destination("rShort"));
+        assert!(!XrpVenueAdapter::validate_settlement_destination("0xd8da6bf26964af9d7eed9e03e53415d37aa96045"));
+        assert!(!XrpVenueAdapter::validate_settlement_destination("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"));
+    }
+
+    #[test]
+    fn test_smart_execution_router_execute_for_leaf_xrp_isolation() {
+        let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
+        let mut order = approved_order(Venue::BinanceSpot, OrderType::Limit, 0);
+
+        for sym in ["XRP-RLUSD", "XRP-USDT"] {
+            order.intent.symbol = sym.to_string();
+            let res = router.execute_for_leaf("leaf-xrp", &order, 1000);
+            assert!(res.is_ok(), "expected ok for {sym}");
+        }
+
+        order.intent.symbol = "ETH-USDC".to_string();
+        let res_err = router.execute_for_leaf("leaf-xrp", &order, 1000);
         assert!(res_err.is_err());
     }
 }
