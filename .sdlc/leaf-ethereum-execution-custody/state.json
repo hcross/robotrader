@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-ethereum-execution-custody",
+  "title": "feat(leaf-ethereum/execution-custody): live venue execution router (Uniswap v4) & chain-valid vault signing for Ethereum",
+  "issue": 38,
+  "lane": "M",
+  "lane_reason": "Scoped Ethereum venue execution routing and Circle CCTP / LayerZero Stargate bridge adapter in engine-rs/crates/exec-router/src/lib.rs",
+  "lane_change": null,
+  "branch": "sdlc/38-leaf-ethereum-execution-custody",
+  "worktree": ".worktrees/38-leaf-ethereum-execution-custody",
+  "base_branch": "master",
+  "base_sha": "5a4b4f31f5f493b4f7d7c9cc6b1ed8169bc30851",
+  "created_at": "2026-11-01T15:39:57Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 191,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "6d5a5d37d25302bed80e743b6002a9953ed5e289",
+      "updated_at": "2026-11-01T15:43:14Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/38-leaf-ethereum-execution-custody",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T15:43:20Z",
+    "mode": "full-auto",
+    "pr": 191,
+    "head_sha": "6d5a5d37d25302bed80e743b6002a9953ed5e289"
+  }
+}
