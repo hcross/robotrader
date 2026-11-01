@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-sui-hot-path-pods",
+  "title": "feat(leaf-sui/hot-path-pods): native Rust strategy pods & on-chain token safety gates for Sui in engine-rs",
+  "issue": 43,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-sui pods and token-safety in engine-rs/crates/strategies + tests",
+  "lane_change": null,
+  "branch": "sdlc/43-leaf-sui-hot-path-pods",
+  "worktree": ".worktrees/43-leaf-sui-hot-path-pods",
+  "base_branch": "master",
+  "base_sha": "e623bfd24095886b778cc068ff44ff77fc689857",
+  "created_at": "2026-11-01T17:40:00Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 200,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "1562822869706fabba031705b269d1ac9cd40bb7",
+      "updated_at": "2026-11-01T17:55:33Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/43-leaf-sui-hot-path-pods",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T17:58:08Z",
+    "mode": "full-auto",
+    "pr": 200,
+    "head_sha": "1562822869706fabba031705b269d1ac9cd40bb7"
+  }
+}
