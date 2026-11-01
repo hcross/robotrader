@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev",
+  "status": "merged",
   "pr": 178,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": "2026-11-01T11:57:21Z"
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "679cff2d95c14860d7e77aba3a8efbafcd81c366",
+      "updated_at": "2026-11-01T12:24:33Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/3-event-driven-fill-simulator",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T12:30:44Z",
+    "mode": "full-auto",
+    "pr": 178,
+    "head_sha": "679cff2d95c14860d7e77aba3a8efbafcd81c366"
+  }
 }
