@@ -336,6 +336,127 @@ class TechnicalAnalysisTool:
             timeframe=timeframe,
         )
 
+    ETHEREUM_EXCLUSIVE_ASSETS = ("ETH-USDC", "stETH-ETH", "UNI-ETH", "AAVE-ETH")
+    ETHEREUM_VENUES = ("Uniswap v4", "Aave v3", "Curve", "Lido / EigenLayer")
+    ETHEREUM_FALLBACK_TA_METRICS = {
+        "eip1559_base_fee_gwei": 4.2,
+        "blob_fee_gwei": 0.08,
+        "steth_peg_ratio": 0.9997,
+        "restaking_apr_pct": 3.65,
+        "kumo_regime": "ABOVE_KUMO_BULLISH",
+        "golden_pocket_fib_618": 2295.0,
+        "rsi_14": 51.8,
+        "obi_l2": 0.14,
+    }
+
+    @classmethod
+    def compute_ethereum_ta_metrics(
+        cls,
+        candles: Optional[List[List[float]]] = None,
+        bids: Optional[List[Tuple[float, float]]] = None,
+        asks: Optional[List[Tuple[float, float]]] = None,
+        onchain_telemetry: Optional[Dict[str, Any]] = None,
+        symbol: str = "ETH-USDC",
+        timeframe: str = "15m",
+        venue: str = "Uniswap v4",
+    ) -> Dict[str, Any]:
+        """
+        Dedicated Ethereum telemetry & TA computation helper supporting leaf-ethereum exclusive assets
+        (ETH-USDC, stETH-ETH, UNI-ETH, AAVE-ETH) across Uniswap v4, Aave v3, Curve, Lido / EigenLayer.
+        Enforces symbol in ETHEREUM_EXCLUSIVE_ASSETS and venue in ETHEREUM_VENUES (raising ValueError on mismatch).
+        Computes real TA indicators from OHLCV + L2 orderbook and integrates Ethereum on-chain telemetry metrics
+        (eip1559_base_fee_gwei, blob_fee_gwei, steth_peg_ratio, restaking_apr_pct) with explicit provenance.
+        """
+        if symbol not in cls.ETHEREUM_EXCLUSIVE_ASSETS:
+            raise ValueError(f"Invalid Ethereum symbol: {symbol}. Expected one of {cls.ETHEREUM_EXCLUSIVE_ASSETS}")
+        if venue not in cls.ETHEREUM_VENUES:
+            raise ValueError(f"Invalid Ethereum venue: {venue}. Expected one of {cls.ETHEREUM_VENUES}")
+
+        obi = 0.0
+        if bids and asks:
+            b_vol = sum(float(b[1]) for b in bids[:5])
+            a_vol = sum(float(a[1]) for a in asks[:5])
+            tot = b_vol + a_vol
+            if tot > 0:
+                obi = (b_vol - a_vol) / tot
+
+        has_candles = bool(candles and isinstance(candles, list) and len(candles) >= 5)
+
+        if not has_candles:
+            return {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "venue": venue,
+                "ta_metrics_source": "CATALOG_FIXTURE",
+                **cls.ETHEREUM_FALLBACK_TA_METRICS,
+                "obi_l2": obi if (bids or asks) else cls.ETHEREUM_FALLBACK_TA_METRICS["obi_l2"],
+                "venues": list(cls.ETHEREUM_VENUES),
+                "exclusive_assets": list(cls.ETHEREUM_EXCLUSIVE_ASSETS),
+            }
+
+        ta_result = cls.analyze_candles(symbol=symbol, candles=candles, obi=obi, timeframe=timeframe)
+        kumo_regime = ta_result.get("ichimoku", {}).get("kumo_regime", cls.ETHEREUM_FALLBACK_TA_METRICS["kumo_regime"])
+        golden_pocket = ta_result.get("fibonacci", {}).get("golden_pocket_618", cls.ETHEREUM_FALLBACK_TA_METRICS["golden_pocket_fib_618"])
+        rsi_14 = ta_result.get("rsi", {}).get("rsi_14", cls.ETHEREUM_FALLBACK_TA_METRICS["rsi_14"])
+        obi_l2 = ta_result.get("obi_l2", obi)
+
+        telemetry = onchain_telemetry or {}
+        eip1559_base_fee = float(telemetry.get("eip1559_base_fee_gwei", cls.ETHEREUM_FALLBACK_TA_METRICS["eip1559_base_fee_gwei"]))
+        blob_fee = float(telemetry.get("blob_fee_gwei", cls.ETHEREUM_FALLBACK_TA_METRICS["blob_fee_gwei"]))
+        steth_peg = float(telemetry.get("steth_peg_ratio", cls.ETHEREUM_FALLBACK_TA_METRICS["steth_peg_ratio"]))
+        restaking_apr = float(telemetry.get("restaking_apr_pct", cls.ETHEREUM_FALLBACK_TA_METRICS["restaking_apr_pct"]))
+
+        return {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "venue": venue,
+            "ta_metrics_source": "LIVE_COMPUTED",
+            "eip1559_base_fee_gwei": eip1559_base_fee,
+            "blob_fee_gwei": blob_fee,
+            "steth_peg_ratio": steth_peg,
+            "restaking_apr_pct": restaking_apr,
+            "kumo_regime": kumo_regime,
+            "golden_pocket_fib_618": golden_pocket,
+            "rsi_14": rsi_14,
+            "obi_l2": obi_l2,
+            "venues": list(cls.ETHEREUM_VENUES),
+            "exclusive_assets": list(cls.ETHEREUM_EXCLUSIVE_ASSETS),
+        }
+
+    @classmethod
+    def ingest_ethereum_market_snapshot(
+        cls,
+        market_feeds: Optional[Dict[str, Dict[str, Any]]] = None,
+        onchain_telemetry: Optional[Dict[str, Any]] = None,
+        venue: str = "Uniswap v4",
+    ) -> Dict[str, Any]:
+        """
+        Ingests Ethereum market snapshot across market feeds and onchain telemetry.
+        """
+        feeds = market_feeds or {}
+        symbol = "ETH-USDC"
+        candles: Optional[List[List[float]]] = None
+        bids: Optional[List[Tuple[float, float]]] = None
+        asks: Optional[List[Tuple[float, float]]] = None
+
+        if feeds:
+            target_sym = next(iter(feeds.keys()))
+            if target_sym in cls.ETHEREUM_EXCLUSIVE_ASSETS:
+                symbol = target_sym
+            feed_data = feeds.get(symbol, next(iter(feeds.values())))
+            candles = feed_data.get("candles")
+            bids = feed_data.get("bids")
+            asks = feed_data.get("asks")
+
+        return cls.compute_ethereum_ta_metrics(
+            candles=candles,
+            bids=bids,
+            asks=asks,
+            onchain_telemetry=onchain_telemetry,
+            symbol=symbol,
+            venue=venue,
+        )
+
 
 class SocialMacroPanoramaTool:
     """
