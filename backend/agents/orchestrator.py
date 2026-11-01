@@ -386,6 +386,10 @@ class OrchestratorAgent(BaseWarmAgent):
                 usdt_vol = float(ta_metrics.get("usdt_trc20_daily_vol_usd_b", 16.4))
                 energy_apy = float(ta_metrics.get("energy_rental_apy_pct", 11.2))
                 cat_score = round(min(0.99, max(0.50, 0.83 + (energy_apy / 100.0) - (usdt_vol / 5000.0))), 4)
+            elif leaf_id == "leaf-avalanche":
+                active_bin_bps = float(ta_metrics.get("liquidity_book_active_bin_bps", 10.0))
+                subnet_share = float(ta_metrics.get("subnet_tx_share_pct", 38.0))
+                cat_score = round(min(0.99, max(0.50, 0.83 + (subnet_share / 100.0) - (active_bin_bps / 1000.0))), 4)
             max_lev = float(leaf_state.get("max_leverage", 2.0))
             
             if leaf_id == "leaf-ethereum":
@@ -478,6 +482,19 @@ class OrchestratorAgent(BaseWarmAgent):
                     support_z = float(ta_metrics.get("support_usd", round(fib_618 * 0.98, 2)))
                     resistance_z = float(ta_metrics.get("resistance_usd", round(last_p * 1.05, 2)))
                     invalidation_p = float(ta_metrics.get("invalidation_price_usd", round(fib_618 * 0.97, 2)))
+            elif leaf_id == "leaf-avalanche":
+                if sym == "AVAX-USDC":
+                    last_p = float(ta_metrics.get("last_price", ta_metrics.get("golden_pocket_fib_618", 27.80)))
+                    fib_618 = float(ta_metrics.get("golden_pocket_fib_618", round(last_p * 0.992, 2)))
+                    support_z = float(ta_metrics.get("support_usd", round(fib_618 * 0.98, 2)))
+                    resistance_z = float(ta_metrics.get("resistance_usd", round(last_p * 1.05, 2)))
+                    invalidation_p = float(ta_metrics.get("invalidation_price_usd", round(fib_618 * 0.97, 2)))
+                else:
+                    last_p = float(ta_metrics.get("last_price", 27.80))
+                    fib_618 = float(ta_metrics.get("golden_pocket_fib_618", round(last_p * 0.992, 2)))
+                    support_z = float(ta_metrics.get("support_usd", round(fib_618 * 0.98, 2)))
+                    resistance_z = float(ta_metrics.get("resistance_usd", round(last_p * 1.05, 2)))
+                    invalidation_p = float(ta_metrics.get("invalidation_price_usd", round(fib_618 * 0.97, 2)))
             else:
                 last_p = float(ta_metrics.get("last_price", 80000.0 if "BTC" in sym else 150.0))
                 fib_618 = float(ta_metrics.get("golden_pocket_fib_618", round(last_p * 0.992, 2)))
@@ -508,6 +525,9 @@ class OrchestratorAgent(BaseWarmAgent):
             elif leaf_id == "leaf-tron":
                 energy_apy = float(ta_metrics.get("energy_rental_apy_pct", 11.2))
                 tp_bps = round(min(200.0, max(15.0, 45.0 + energy_apy * 2.0)), 2)
+            elif leaf_id == "leaf-avalanche":
+                active_bin_bps = float(ta_metrics.get("liquidity_book_active_bin_bps", 10.0))
+                tp_bps = round(min(200.0, max(15.0, 45.0 + active_bin_bps)), 2)
             sl_bps = max(10.0, min(150.0, float(llm_r.get("stop_loss_bps", 28.0))))
 
             asset_overrides[sym] = AssetOverride(
@@ -1207,7 +1227,7 @@ class OrchestratorAgent(BaseWarmAgent):
                 }
 
             base_interval_sec = leaf.get("base_interval_sec", 180)
-            default_interval = 900 if leaf_id in ("leaf-bitcoin", "leaf-ethereum", "leaf-sui", "leaf-hyperliquid", "leaf-xrp", "leaf-bnb", "leaf-tron") else int(base_interval_sec)
+            default_interval = 900 if leaf_id in ("leaf-bitcoin", "leaf-ethereum", "leaf-sui", "leaf-hyperliquid", "leaf-xrp", "leaf-bnb", "leaf-tron", "leaf-avalanche") else int(base_interval_sec)
             raw_wakeup = int(parsed.get("next_wakeup_sec", default_interval))
             next_sec = max(60, min(1800, raw_wakeup))
             call_cost = self.cost_guard.compute_call_cost(used_model, p_tok, c_tok)
