@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-ethereum-hot-path-pods",
+  "title": "feat(leaf-ethereum/hot-path-pods): native Rust strategy pods & on-chain token safety gates for Ethereum in engine-rs",
+  "issue": 37,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-ethereum hot-path strategy pod execution and ERC-20/LST safety gate in engine-rs/crates/strategies/src/lib.rs",
+  "lane_change": null,
+  "branch": "sdlc/37-leaf-ethereum-hot-path-pods",
+  "worktree": ".worktrees/37-leaf-ethereum-hot-path-pods",
+  "base_branch": "master",
+  "base_sha": "917e4ebd36663da88f9401dba207f5c1b71d4a31",
+  "created_at": "2026-11-01T15:34:00Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 190,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "06db4b54e45f2477f627afed9152b3b8a4f817b3",
+      "updated_at": "2026-11-01T15:39:38Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/37-leaf-ethereum-hot-path-pods",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T15:39:45Z",
+    "mode": "full-auto",
+    "pr": 190,
+    "head_sha": "06db4b54e45f2477f627afed9152b3b8a4f817b3"
+  }
+}
