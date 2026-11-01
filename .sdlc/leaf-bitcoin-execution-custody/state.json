@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-bitcoin-execution-custody",
+  "title": "feat(leaf-bitcoin/execution-custody): live venue execution router (Bitcoin L1 Native) & chain-valid vault signing for Bitcoin",
+  "issue": 32,
+  "lane": "M",
+  "lane_reason": "Scoped Bitcoin venue execution routing and ThorChain/wBTC bridge adapter in engine-rs/crates/exec-router/src/lib.rs",
+  "lane_change": null,
+  "branch": "sdlc/32-leaf-bitcoin-execution-custody",
+  "worktree": ".worktrees/32-leaf-bitcoin-execution-custody",
+  "base_branch": "master",
+  "base_sha": "34bf9df80f1b5f704779384dcf276fc2c394be75",
+  "created_at": "2026-11-01T15:16:11Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 186,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "d0798b346b598907f1c184c19442b524f91ff02b",
+      "updated_at": "2026-11-01T15:20:07Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/32-leaf-bitcoin-execution-custody",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T15:20:13Z",
+    "mode": "full-auto",
+    "pr": 186,
+    "head_sha": "d0798b346b598907f1c184c19442b524f91ff02b"
+  }
+}
