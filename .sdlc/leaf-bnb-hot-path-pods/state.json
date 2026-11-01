@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-bnb-hot-path-pods",
+  "title": "feat(leaf-bnb/hot-path-pods): native Rust strategy pods & on-chain token safety gates for BNB Chain",
+  "issue": 55,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-bnb pods and BNB safety gates in engine-rs/crates/strategies + tests",
+  "lane_change": null,
+  "branch": "sdlc/55-leaf-bnb-hot-path-pods",
+  "worktree": ".worktrees/55-leaf-bnb-hot-path-pods",
+  "base_branch": "master",
+  "base_sha": "d189e71ac2a1d1dd3bd24dc99cd2f350e42bf787",
+  "created_at": "2026-11-01T21:09:59Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 216,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "2e981c83d693a5afb0683b9a5514279336ede68c",
+      "updated_at": "2026-11-01T21:28:45Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/55-leaf-bnb-hot-path-pods",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T21:33:36Z",
+    "mode": "full-auto",
+    "pr": 216,
+    "head_sha": "2e981c83d693a5afb0683b9a5514279336ede68c"
+  }
+}
