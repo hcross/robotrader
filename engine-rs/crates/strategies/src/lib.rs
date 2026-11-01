@@ -1,6 +1,6 @@
 use robotrader_common::{
-    DirectionalBias, EcosystemPodSpec, ExecutionReport, MarketEvent, OrderIntent, OrderType, PodId,
-    PolicyEnvelope, Side, Venue,
+    DirectionalBias, EcosystemPodSpec, ExecutionReport, MarketEvent, OnChainTokenSafety, OrderIntent,
+    OrderType, PodId, PolicyEnvelope, Side, Venue,
 };
 
 pub const MAX_PODS_PER_BLOCKCHAIN: usize = 4;
@@ -451,6 +451,7 @@ pub struct EcosystemAdaptedPod {
     pub spec: EcosystemPodSpec,
     pub target_venue: Venue,
     pub inner: Box<dyn StrategyPod>,
+    pub leaf_id: String,
 }
 
 impl StrategyPod for EcosystemAdaptedPod {
@@ -463,6 +464,17 @@ impl StrategyPod for EcosystemAdaptedPod {
         event: &MarketEvent,
         envelope: &PolicyEnvelope,
     ) -> Vec<OrderIntent> {
+        let event_symbol = match event {
+            MarketEvent::FundingSnapshot { symbol, .. }
+            | MarketEvent::OrderbookTick { symbol, .. }
+            | MarketEvent::OnchainSmartMoneySwap { symbol, .. }
+            | MarketEvent::OnchainPoolLaunch { symbol, .. } => symbol.as_str(),
+        };
+        let allowed = leaf_exclusive_assets(&self.leaf_id);
+        if !allowed.is_empty() && !allowed.contains(&event_symbol) {
+            return Vec::new();
+        }
+
         let mut intents = self.inner.on_market_event(event, envelope);
         for intent in intents.iter_mut() {
             intent.venue = self.target_venue;
@@ -497,6 +509,27 @@ fn spec(
         default_weight,
         description: description.to_string(),
     }
+}
+
+pub fn leaf_exclusive_assets(leaf_id: &str) -> &'static [&'static str] {
+    if leaf_id == "leaf-bitcoin" {
+        &["BTC-USD", "wBTC-BTC", "sBTC-BTC"]
+    } else {
+        &[]
+    }
+}
+
+pub fn verify_bitcoin_wrapper_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    let allowed = leaf_exclusive_assets("leaf-bitcoin");
+    if !allowed.contains(&symbol) {
+        return false;
+    }
+    safety.supply_mint_immutable
+        && safety.transfer_freeze_disabled
+        && safety.no_honeypot_or_transfer_tax
+        && safety.tx_simulation_success
+        && safety.lp_locked_pct >= 80.0
+        && safety.top10_holder_pct <= 50.0
 }
 
 pub const CANONICAL_LEAF_IDS: &[&str] = &[
@@ -1048,6 +1081,7 @@ pub fn strategy_pods_for_leaf(leaf_id: &str) -> Vec<Box<dyn StrategyPod>> {
             spec: s,
             target_venue,
             inner,
+            leaf_id: leaf_id.to_string(),
         }));
     }
 
@@ -1146,6 +1180,110 @@ mod tests {
             cex_codes,
             vec!["cex_perp_funding_harvester", "cex_l2_obi_breakout", "cex_cross_pair_stat_arb"]
         );
+    }
+
+    #[test]
+    fn test_leaf_bitcoin_pods_asset_isolation_and_wrapper_safety() {
+        let mut pods = strategy_pods_for_leaf("leaf-bitcoin");
+        assert_eq!(pods.len(), 3);
+
+        let envelope = PolicyEnvelope::safe_baseline(1000);
+
+        // 1. Test valid events for BTC-USD, wBTC-BTC, sBTC-BTC produce intents
+        let funding_event = MarketEvent::FundingSnapshot {
+            timestamp_ms: 1000,
+            symbol: "BTC-USD".to_string(),
+            spot_price: 65000.0,
+            perp_price: 65200.0,
+            annualized_funding_apr: 0.25,
+        };
+        let ob_event = MarketEvent::OrderbookTick {
+            timestamp_ms: 1000,
+            symbol: "wBTC-BTC".to_string(),
+            mid_price: 65000.0,
+            bid_volume_top5: 10.0,
+            ask_volume_top5: 5.0,
+            cvd_delta: 2.0,
+            atr_pct: 1.5,
+            breakout_zscore: 2.2,
+            rsi_14: Some(55.0),
+        };
+        let smart_event = MarketEvent::OnchainSmartMoneySwap {
+            timestamp_ms: 1000,
+            symbol: "sBTC-BTC".to_string(),
+            token_address: "btc1qtest...".to_string(),
+            price_usd: 65000.0,
+            whale_wallet_winrate: 0.75,
+            buy_volume_usd: 50000.0,
+            safety: OnChainTokenSafety {
+                supply_mint_immutable: true,
+                transfer_freeze_disabled: true,
+                no_honeypot_or_transfer_tax: true,
+                lp_locked_pct: 90.0,
+                top10_holder_pct: 35.0,
+                tx_simulation_success: true,
+            },
+        };
+
+        let mut intent_count = 0;
+        for pod in &mut pods {
+            let intents = pod.on_market_event(&funding_event, &envelope);
+            if !intents.is_empty() {
+                intent_count += 1;
+                assert!(intents[0].rationale.contains("[btc_basis_carry @"));
+            }
+            let ob_intents = pod.on_market_event(&ob_event, &envelope);
+            if !ob_intents.is_empty() {
+                intent_count += 1;
+                assert!(ob_intents[0].rationale.contains("[btc_hash_ribbon_breakout @"));
+            }
+            let smart_intents = pod.on_market_event(&smart_event, &envelope);
+            if !smart_intents.is_empty() {
+                intent_count += 1;
+                assert!(smart_intents[0].rationale.contains("[btc_thorchain_peg_arb @"));
+            }
+        }
+        assert!(intent_count > 0, "Expected at least one intent from leaf-bitcoin pods");
+
+        // 2. Test non-Bitcoin events produce zero intents (asset isolation)
+        let sol_event = MarketEvent::FundingSnapshot {
+            symbol: "SOL-USDT".to_string(),
+            spot_price: 150.0,
+            perp_price: 151.0,
+            annualized_funding_apr: 0.30,
+            timestamp_ms: 1000,
+        };
+        let eth_event = MarketEvent::FundingSnapshot {
+            symbol: "ETH-USDC".to_string(),
+            spot_price: 3000.0,
+            perp_price: 3010.0,
+            annualized_funding_apr: 0.20,
+            timestamp_ms: 1000,
+        };
+
+        for pod in &mut pods {
+            assert!(pod.on_market_event(&sol_event, &envelope).is_empty());
+            assert!(pod.on_market_event(&eth_event, &envelope).is_empty());
+        }
+
+        // 3. Test verify_bitcoin_wrapper_safety
+        let clean_safety = OnChainTokenSafety {
+            supply_mint_immutable: true,
+            transfer_freeze_disabled: true,
+            no_honeypot_or_transfer_tax: true,
+            tx_simulation_success: true,
+            lp_locked_pct: 90.0,
+            top10_holder_pct: 35.0,
+        };
+        assert!(verify_bitcoin_wrapper_safety("wBTC-BTC", &clean_safety));
+        assert!(verify_bitcoin_wrapper_safety("sBTC-BTC", &clean_safety));
+        assert!(!verify_bitcoin_wrapper_safety("SOL-USDT", &clean_safety));
+
+        let compromised_safety = OnChainTokenSafety {
+            supply_mint_immutable: false,
+            ..clean_safety
+        };
+        assert!(!verify_bitcoin_wrapper_safety("wBTC-BTC", &compromised_safety));
     }
 }
 
