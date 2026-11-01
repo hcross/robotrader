@@ -302,6 +302,117 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         signed_bundle = SignedPolicyBundle.from_dict(res["signed_policy_bundle"])
         self.assertTrue(verify_policy_hmac(signed_bundle.policy, signed_bundle.signature, "robotrader-dev-hmac-key"))
 
+    def test_sui_warm_path_reflection_and_policy_compilation(self) -> None:
+        """
+        Verifies:
+        - `orchestrator.run_leaf_agent_reflection("leaf-sui", trigger_source="UNIT_TEST")` writes a drawer to `wing == "leaf_sui"` with `next_wakeup_sec == 900` and `thesis_continuity in ("INITIAL", "INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED")`.
+        - `res["policy_envelope"]["asset_overrides"]` keys are strictly `{"SUI-USDC", "DEEP-SUI", "CETUS-SUI"}` (zero non-Sui symbols) with all 11 `AssetOverride` fields populated and representative zone values for `DEEP-SUI` and `CETUS-SUI`.
+        - `verify_policy_hmac(SignedPolicyBundle.from_dict(res["signed_policy_bundle"]))` returns `True`.
+        """
+        cg = self.orchestrator.cost_guard
+        cg.auto_refill_enabled = False
+        cg.record_usage({"agent": "test", "cost": cg.daily_budget_usd, "tokens": 0})
+        self.assertTrue(cg.budget_exhausted)
+
+        res = self.orchestrator.run_leaf_agent_reflection("leaf-sui", trigger_source="UNIT_TEST")
+        self.assertEqual(res["status"], "completed")
+        self.assertEqual(res["wing"], "leaf_sui")
+        self.assertEqual(res["drawer"]["next_wakeup_sec"], 900)
+        self.assertIn(res["drawer"]["thesis_continuity"], ("INITIAL", "INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED"))
+
+        envelope_dict = res["policy_envelope"]
+        self.assertEqual(envelope_dict["ttl_seconds"], 900)
+        overrides = envelope_dict["asset_overrides"]
+        self.assertEqual(set(overrides.keys()), {"SUI-USDC", "DEEP-SUI", "CETUS-SUI"})
+
+        expected_11_keys = {
+            "catalyst_score",
+            "bias",
+            "max_leverage",
+            "support_zone_usd",
+            "resistance_zone_usd",
+            "invalidation_price_usd",
+            "entry_obi_threshold",
+            "max_rsi_long",
+            "min_rsi_short",
+            "take_profit_bps",
+            "stop_loss_bps",
+        }
+        for sym, override in overrides.items():
+            self.assertEqual(set(override.keys()), expected_11_keys)
+
+        deep_override = overrides["DEEP-SUI"]
+        self.assertAlmostEqual(deep_override["support_zone_usd"], 0.047, places=4)
+        self.assertAlmostEqual(deep_override["resistance_zone_usd"], 0.0504, places=4)
+        self.assertAlmostEqual(deep_override["invalidation_price_usd"], 0.0466, places=4)
+
+        cetus_override = overrides["CETUS-SUI"]
+        self.assertAlmostEqual(cetus_override["support_zone_usd"], 0.0235, places=4)
+        self.assertAlmostEqual(cetus_override["resistance_zone_usd"], 0.0252, places=4)
+        self.assertAlmostEqual(cetus_override["invalidation_price_usd"], 0.0233, places=4)
+
+        from backend.core.schemas import SignedPolicyBundle, verify_policy_hmac
+        signed_bundle = SignedPolicyBundle.from_dict(res["signed_policy_bundle"])
+        self.assertTrue(verify_policy_hmac(signed_bundle.policy, signed_bundle.signature, "robotrader-dev-hmac-key"))
+
+    def test_sui_warm_path_reflection_and_policy_compilation(self) -> None:
+        """
+        Verifies:
+        - `orchestrator.run_leaf_agent_reflection("leaf-sui", trigger_source="UNIT_TEST")` writes a drawer to `wing == "leaf_sui"` with `next_wakeup_sec == 900` and `thesis_continuity in ("INITIAL", "INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED")`.
+        - `res["policy_envelope"]["asset_overrides"]` keys are strictly `{"SUI-USDC", "DEEP-SUI", "CETUS-SUI"}` (zero non-Sui symbols) with all 11 `AssetOverride` fields populated and `DEEP-SUI`/`CETUS-SUI` ratio zones calibrated around their asset ratios.
+        - `verify_policy_hmac(SignedPolicyBundle.from_dict(res["signed_policy_bundle"]))` returns `True`.
+        """
+        cg = self.orchestrator.cost_guard
+        cg.auto_refill_enabled = False
+        cg.record_usage({"agent": "test", "cost": cg.daily_budget_usd, "tokens": 0})
+        self.assertTrue(cg.budget_exhausted)
+
+        res = self.orchestrator.run_leaf_agent_reflection("leaf-sui", trigger_source="UNIT_TEST")
+        self.assertEqual(res["status"], "completed")
+        self.assertEqual(res["wing"], "leaf_sui")
+        self.assertEqual(res["drawer"]["next_wakeup_sec"], 900)
+        self.assertIn(res["drawer"]["thesis_continuity"], ("INITIAL", "INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED"))
+
+        envelope_dict = res["policy_envelope"]
+        self.assertEqual(envelope_dict["ttl_seconds"], 900)
+        overrides = envelope_dict["asset_overrides"]
+        self.assertEqual(set(overrides.keys()), {"SUI-USDC", "DEEP-SUI", "CETUS-SUI"})
+
+        expected_11_keys = {
+            "catalyst_score",
+            "bias",
+            "max_leverage",
+            "support_zone_usd",
+            "resistance_zone_usd",
+            "invalidation_price_usd",
+            "entry_obi_threshold",
+            "max_rsi_long",
+            "min_rsi_short",
+            "take_profit_bps",
+            "stop_loss_bps",
+        }
+        for sym, override in overrides.items():
+            self.assertEqual(set(override.keys()), expected_11_keys)
+
+        deep_override = overrides["DEEP-SUI"]
+        self.assertAlmostEqual(deep_override["support_zone_usd"], 0.048 * 0.98, places=4)
+        self.assertAlmostEqual(deep_override["resistance_zone_usd"], 0.048 * 1.05, places=4)
+        self.assertAlmostEqual(deep_override["invalidation_price_usd"], 0.048 * 0.97, places=4)
+
+        cetus_override = overrides["CETUS-SUI"]
+        self.assertAlmostEqual(cetus_override["support_zone_usd"], 0.024 * 0.98, places=4)
+        self.assertAlmostEqual(cetus_override["resistance_zone_usd"], 0.024 * 1.05, places=4)
+        self.assertAlmostEqual(cetus_override["invalidation_price_usd"], 0.024 * 0.97, places=4)
+
+        sui_override = overrides["SUI-USDC"]
+        self.assertAlmostEqual(sui_override["support_zone_usd"], 2.96, places=2)
+        self.assertAlmostEqual(sui_override["resistance_zone_usd"], 3.17, places=2)
+        self.assertAlmostEqual(sui_override["invalidation_price_usd"], 2.93, places=2)
+
+        from backend.core.schemas import SignedPolicyBundle, verify_policy_hmac
+        signed_bundle = SignedPolicyBundle.from_dict(res["signed_policy_bundle"])
+        self.assertTrue(verify_policy_hmac(signed_bundle.policy, signed_bundle.signature, "robotrader-dev-hmac-key"))
+
     def test_cross_wing_mempalace_and_master_leaf_reflections(self) -> None:
         """
         Verifies that leaf agents write to their isolated wing (`wing=leaf_bitcoin`)
