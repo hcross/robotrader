@@ -424,10 +424,14 @@ class ProvenanceStatusAndUIBadgeTests(unittest.TestCase):
     def test_scenario_17_status_payload_reports_simulated_provenance(self) -> None:
         status = self.agent.get_status()
         self.assertIn("openrouter_credit", status)
+        credit = status["openrouter_credit"]
         self.assertEqual(
-            status["openrouter_credit"]["balance_source"],
+            credit["balance_source"],
             "SIMULATED_INTERNAL_LEDGER",
         )
+        self.assertEqual(credit["reconciliation_status"], "UNRECONCILED")
+        self.assertIsNone(credit["last_reconciled_ms"])
+        self.assertIsNone(credit["reconciled_balance_usd"])
 
     # --------------------------------------------------------------------------
     # Scenario 18: MasterOverview renders simulated ledger provenance badge
