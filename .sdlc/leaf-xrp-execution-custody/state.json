@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "leaf-xrp-execution-custody",
+  "title": "feat(leaf-xrp/execution-custody): live venue execution router & chain-valid vault signing for XRP Ledger",
+  "issue": 62,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-xrp venue adapter and bridge quote in engine-rs/crates/exec-router + tests",
+  "lane_change": null,
+  "branch": "sdlc/62-leaf-xrp-execution-custody",
+  "worktree": ".worktrees/62-leaf-xrp-execution-custody",
+  "base_branch": "master",
+  "base_sha": "d189e71ac2a1d1dd3bd24dc99cd2f350e42bf787",
+  "created_at": "2026-11-01T21:10:03Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "triage",
+  "pr": null,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/62-leaf-xrp-execution-custody",
+  "partial_issue": false
+}
