@@ -1527,6 +1527,75 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         with self.assertRaises(ValueError):
             TechnicalAnalysisTool.compute_xrp_ta_metrics(symbol="XRP-RLUSD", venue="InvalidVenue")
 
+    def test_bnb_leaf_ta_metrics_computation_and_fallback(self) -> None:
+        """
+        Verifies TechnicalAnalysisTool.compute_bnb_ta_metrics and ingest_bnb_market_snapshot.
+        """
+        from backend.tools.ta_tools import TechnicalAnalysisTool
+
+        sample_candles = [
+            [1700000000000 + i * 900000, 598.0 + i * 0.5, 600.0 + i * 0.5, 596.0 + i * 0.5, 599.0 + i * 0.5, 1000.0]
+            for i in range(25)
+        ]
+        sample_bids = [[598.5, 100.0], [598.0, 150.0]]
+        sample_asks = [[599.0, 80.0], [599.5, 120.0]]
+        sample_telemetry = {
+            "pancakeswap_24h_vol_usd_m": 1000.0,
+            "venus_usdt_supply_apr_pct": 7.5,
+        }
+
+        for sym in TechnicalAnalysisTool.BNB_EXCLUSIVE_ASSETS:
+            for venue in TechnicalAnalysisTool.BNB_VENUES:
+                res = TechnicalAnalysisTool.compute_bnb_ta_metrics(
+                    candles=sample_candles,
+                    bids=sample_bids,
+                    asks=sample_asks,
+                    onchain_telemetry=sample_telemetry,
+                    symbol=sym,
+                    venue=venue,
+                )
+                self.assertEqual(res["symbol"], sym)
+                self.assertEqual(res["venue"], venue)
+                self.assertEqual(res["ta_metrics_source"], "LIVE_COMPUTED")
+                self.assertEqual(res["pancakeswap_24h_vol_usd_m"], 1000.0)
+                self.assertEqual(res["venus_usdt_supply_apr_pct"], 7.5)
+                self.assertIn("kumo_regime", res)
+                self.assertIn("golden_pocket_fib_618", res)
+                self.assertIn("rsi_14", res)
+                self.assertIn("obi_l2", res)
+
+        market_feeds = {
+            "BNB-USDT": {
+                "candles": sample_candles,
+                "bids": sample_bids,
+                "asks": sample_asks,
+            }
+        }
+        ingest_res = TechnicalAnalysisTool.ingest_bnb_market_snapshot(
+            market_feeds=market_feeds,
+            onchain_telemetry=sample_telemetry,
+            venue="PancakeSwap v3",
+        )
+        self.assertEqual(ingest_res["ta_metrics_source"], "LIVE_COMPUTED")
+        self.assertEqual(ingest_res["symbol"], "BNB-USDT")
+
+        fallback_res = TechnicalAnalysisTool.compute_bnb_ta_metrics(
+            candles=[],
+            bids=None,
+            asks=None,
+            onchain_telemetry=None,
+            symbol="BNB-USDT",
+            venue="PancakeSwap v3",
+        )
+        self.assertEqual(fallback_res["ta_metrics_source"], "CATALOG_FIXTURE")
+        self.assertIn("pancakeswap_24h_vol_usd_m", fallback_res)
+        self.assertIn("venus_usdt_supply_apr_pct", fallback_res)
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_bnb_ta_metrics(symbol="BTC-USD", venue="PancakeSwap v3")
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_bnb_ta_metrics(symbol="BNB-USDT", venue="InvalidVenue")
 
 if __name__ == "__main__":
     unittest.main()

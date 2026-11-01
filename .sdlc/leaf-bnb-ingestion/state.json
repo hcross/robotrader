@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "leaf-bnb-ingestion",
+  "title": "feat(leaf-bnb/ingestion): live market data & on-chain TA telemetry pipeline for BNB Chain (BNB)",
+  "issue": 52,
+  "lane": "M",
+  "lane_reason": "Scoped telemetry & TA ingestion pipeline for leaf-bnb in backend/tools/ta_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/52-leaf-bnb-ingestion",
+  "worktree": ".worktrees/52-leaf-bnb-ingestion",
+  "base_branch": "master",
+  "base_sha": "031f32c6fe4fae6e34156685cd5fe9ff52f45f66",
+  "created_at": "2026-11-01T17:10:36Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merge-ready",
+  "pr": 197,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "3e679b1b391e37b8a314f995f4b950a4788b9211",
+      "updated_at": "2026-11-01T17:29:07Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/52-leaf-bnb-ingestion",
+  "partial_issue": false
+}
