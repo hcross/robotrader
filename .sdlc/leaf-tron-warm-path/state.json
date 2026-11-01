@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-tron-warm-path",
+  "title": "feat(leaf-tron/warm-path): autonomous 900s cognitive scheduling, MemPalace wing & PolicyEnvelope compilation for leaf-tron",
+  "issue": 72,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-tron warm-path wiring in backend/agents/orchestrator.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/72-leaf-tron-warm-path",
+  "worktree": ".worktrees/72-leaf-tron-warm-path",
+  "base_branch": "master",
+  "base_sha": "05c5f77cbf04f270c936573be08e5093be0e73f4",
+  "created_at": "2026-11-01T21:55:27Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 222,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "ae047385e518a9c58d50b61323a0115f60fa4ef3",
+      "updated_at": "2026-11-01T22:20:53Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/72-leaf-tron-warm-path",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T22:28:22Z",
+    "mode": "full-auto",
+    "pr": 222,
+    "head_sha": "ae047385e518a9c58d50b61323a0115f60fa4ef3"
+  }
+}
