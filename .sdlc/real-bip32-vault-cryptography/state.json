@@ -14,8 +14,8 @@
   "human_gates": [
     "merge"
   ],
-  "status": "plan",
-  "pr": null,
+  "status": "merged",
+  "pr": 181,
   "areas": [],
   "stages": {
     "spec": {
@@ -27,23 +27,30 @@
       "updated_at": "2026-11-01T12:12:27Z"
     },
     "plan": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-plan-reviewer",
+      "last_sha": "f7523c317c5ae136da94422a1fe782af7d7a22ef",
+      "updated_at": "2026-11-01T12:25:28Z"
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "ef10000b06f3e0b745faa877f274a99f0e4804c2",
+      "updated_at": "2026-11-01T13:13:55Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/2-real-bip32-vault-cryptography",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T13:14:29Z",
+    "mode": "full-auto",
+    "pr": 181,
+    "head_sha": "ef10000b06f3e0b745faa877f274a99f0e4804c2"
+  }
 }
