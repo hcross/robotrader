@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "leaf-sui-execution-custody",
+  "title": "feat(leaf-sui/execution-custody): live venue execution router & chain-valid vault signing for Sui",
+  "issue": 44,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-sui venue adapter and bridge quote in engine-rs/crates/exec-router + tests",
+  "lane_change": null,
+  "branch": "sdlc/44-leaf-sui-execution-custody",
+  "worktree": ".worktrees/44-leaf-sui-execution-custody",
+  "base_branch": "master",
+  "base_sha": "af3c181a7b56b5fca5af7682be80897deeff9c6b",
+  "created_at": "2026-11-01T17:58:40Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "triage",
+  "pr": 207,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/44-leaf-sui-execution-custody",
+  "partial_issue": false
+}
