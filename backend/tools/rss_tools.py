@@ -303,7 +303,10 @@ class EcosystemRSSAggregator:
             if not title:
                 continue
 
-            scored = cls.score_bitcoin_catalyst(title, summary)
+            if agent_id == "leaf-ethereum":
+                scored = cls.score_ethereum_catalyst(title, summary)
+            else:
+                scored = cls.score_bitcoin_catalyst(title, summary)
             items.append(
                 {
                     "source": source_name,
@@ -467,6 +470,177 @@ class EcosystemRSSAggregator:
             "updated_at_ms": now_ms,
         }
 
+    ETHEREUM_EXCLUSIVE_ASSETS: List[str] = ["ETH-USDC", "stETH-ETH", "UNI-ETH", "AAVE-ETH"]
+
+    @classmethod
+    def score_ethereum_catalyst(cls, title: str, summary: str = "") -> Dict[str, Any]:
+        """
+        Classifies Ethereum-specific catalyst categories ("ETH_LST_RESTAKING", "ETH_DEFI_UNIV4_AAVE",
+        "ETH_EIP1559_BLOB_GAS", "ETH_ETF_INSTITUTIONAL", "ETH_PROTOCOL_UPGRADE"), sentiment, catalyst_score,
+        impact, and affected_assets strictly within ETHEREUM_EXCLUSIVE_ASSETS.
+        """
+        combined = f"{title} {summary}".lower()
+
+        if any(w in combined for w in ["steth", "eigenlayer", "restaking", "staking", "lido", "liquid"]):
+            category = "ETH_LST_RESTAKING"
+        elif any(w in combined for w in ["uniswap", "v4", "hooks", "aave", "v3", "defi", "curve", "liquidity"]):
+            category = "ETH_DEFI_UNIV4_AAVE"
+        elif any(w in combined for w in ["eip-1559", "eip1559", "basefee", "blob", "gas", "burn"]):
+            category = "ETH_EIP1559_BLOB_GAS"
+        elif any(w in combined for w in ["etf", "institutional", "blackrock", "fidelity", "fund", "spot"]):
+            category = "ETH_ETF_INSTITUTIONAL"
+        else:
+            category = "ETH_PROTOCOL_UPGRADE"
+
+        if any(w in combined for w in ["record", "surge", "collapse", "major", "upgrade", "etf", "v4"]):
+            impact = "HIGH"
+        elif any(w in combined for w in ["moderate", "stable", "shift", "expansion", "growth", "hooks"]):
+            impact = "MEDIUM"
+        else:
+            impact = "LOW"
+
+        pos_keywords = ["surge", "accumulation", "expansion", "inflow", "calm", "stable", "growth", "bullish", "high", "hooks"]
+        neg_keywords = ["outflow", "congestion", "drop", "decline", "risk", "pressure", "bearish"]
+
+        score_mod = 0.0
+        for pk in pos_keywords:
+            if pk in combined:
+                score_mod += 0.15
+        for nk in neg_keywords:
+            if nk in combined:
+                score_mod -= 0.15
+
+        sentiment = max(-1.0, min(1.0, round(0.60 + score_mod, 2)))
+        catalyst_score = max(-1.0, min(1.0, round(0.65 + score_mod, 2)))
+
+        if any(w in combined for w in ["steth", "eigenlayer", "restaking", "staking", "lido"]):
+            affected_assets = ["stETH-ETH", "ETH-USDC"]
+        elif any(w in combined for w in ["uni", "uniswap", "v4", "hooks"]):
+            affected_assets = ["UNI-ETH", "ETH-USDC"]
+        elif any(w in combined for w in ["aave", "v3"]):
+            affected_assets = ["AAVE-ETH", "ETH-USDC"]
+        else:
+            affected_assets = list(cls.ETHEREUM_EXCLUSIVE_ASSETS)
+
+        affected_assets = [a for a in affected_assets if a in cls.ETHEREUM_EXCLUSIVE_ASSETS]
+        if not affected_assets:
+            affected_assets = ["ETH-USDC"]
+
+        return {
+            "sentiment": sentiment,
+            "catalyst_score": catalyst_score,
+            "impact": impact,
+            "category": category,
+            "affected_assets": affected_assets,
+        }
+
+    @classmethod
+    def verify_and_ingest_ethereum_feeds(
+        cls,
+        xml_payloads: Optional[Dict[str, bytes]] = None,
+        try_network: bool = False,
+        max_items: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Iterates across `leaf-ethereum` sources (`Week in Ethereum News`, `Ethereum Foundation Blog`),
+        parsing live/injected RSS/Atom XML (source_kind="LIVE_RSS", feed_mode="LIVE" or "MIXED"),
+        falling back cleanly to CURATED_FIXTURE (feed_mode="CURATED_FALLBACK"), and returning
+        asset_catalyst_scores for all 4 Ethereum exclusive assets (ETH-USDC, stETH-ETH, UNI-ETH, AAVE-ETH).
+        """
+        now_ms = int(time.time() * 1000)
+        sources = cls.ECOSYSTEM_RSS_SOURCES.get("leaf-ethereum", [])
+        items: List[Dict[str, Any]] = []
+        live_count = 0
+
+        xml_payloads = xml_payloads or {}
+
+        for src in sources:
+            s_name = src["name"]
+            s_url = src["url"]
+            payload = xml_payloads.get(s_name) or xml_payloads.get(s_url) or xml_payloads.get("https://weekinethereumnews.com/feed/" if "Week" in s_name else "https://blog.ethereum.org/en/feed.xml")
+            if payload is None:
+                for k, v in xml_payloads.items():
+                    if s_name.lower() in k.lower() or k.lower() in s_name.lower() or s_url in k or k in s_url:
+                        payload = v
+                        break
+
+            if payload is None and try_network:
+                try:
+                    req = urllib.request.Request(
+                        s_url,
+                        headers={"User-Agent": "Robotrader-v3-RSS/1.0"},
+                    )
+                    with urllib.request.urlopen(req, timeout=1.5) as resp:
+                        payload = resp.read()
+                except Exception:
+                    payload = None
+
+            if payload is not None:
+                parsed = cls.parse_feed_xml(payload, s_name, agent_id="leaf-ethereum", max_items=max_items)
+                if parsed:
+                    items.extend(parsed)
+                    live_count += len(parsed)
+
+        if not items:
+            curated = cls.CURATED_ECOSYSTEM_ITEMS.get("leaf-ethereum", [])
+            for item in curated[:max_items]:
+                entry = dict(item)
+                entry["source_kind"] = "CURATED_FIXTURE"
+                entry["curated"] = True
+                entry["timestamp_ms"] = item.get("timestamp_ms", cls.CURATED_FIXTURE_TIMESTAMP_MS)
+                scored = cls.score_ethereum_catalyst(entry.get("title", ""), entry.get("summary", ""))
+                entry.setdefault("sentiment", scored["sentiment"])
+                entry.setdefault("catalyst_score", scored["catalyst_score"])
+                entry.setdefault("impact", scored["impact"])
+                entry.setdefault("category", scored["category"])
+                entry.setdefault("affected_assets", scored["affected_assets"])
+                items.append(entry)
+
+        avg_sentiment = (
+            round(sum(float(i.get("sentiment", 0.5)) for i in items) / len(items), 2)
+            if items
+            else 0.5
+        )
+        avg_catalyst = (
+            round(sum(float(i.get("catalyst_score", 0.5)) for i in items) / len(items), 2)
+            if items
+            else 0.5
+        )
+
+        curated_count = sum(1 for i in items if i.get("source_kind") == "CURATED_FIXTURE")
+        if live_count > 0 and curated_count == 0:
+            feed_mode = "LIVE"
+        elif live_count > 0 and curated_count > 0:
+            feed_mode = "MIXED"
+        else:
+            feed_mode = "CURATED_FALLBACK"
+
+        asset_catalyst_scores: Dict[str, Dict[str, Any]] = {}
+        for asset in cls.ETHEREUM_EXCLUSIVE_ASSETS:
+            asset_items = [i for i in items if asset in i.get("affected_assets", [])]
+            if not asset_items:
+                asset_items = items
+            a_sent = round(sum(float(i.get("sentiment", 0.5)) for i in asset_items) / len(asset_items), 2) if asset_items else 0.5
+            a_cat = round(sum(float(i.get("catalyst_score", 0.5)) for i in asset_items) / len(asset_items), 2) if asset_items else 0.5
+            asset_catalyst_scores[asset] = {
+                "composite_sentiment": a_sent,
+                "composite_catalyst_score": a_cat,
+                "item_count": len(asset_items),
+            }
+
+        return {
+            "agent_id": "leaf-ethereum",
+            "sources": sources,
+            "composite_sentiment": avg_sentiment,
+            "composite_catalyst_score": avg_catalyst,
+            "items": items,
+            "asset_catalyst_scores": asset_catalyst_scores,
+            "feed_mode": feed_mode,
+            "live_count": live_count,
+            "curated_count": curated_count,
+            "updated_at_ms": now_ms,
+        }
+
     @classmethod
     def get_feed_for_agent(
         cls, agent_id: str, try_network: bool = False, max_items: int = 5
@@ -477,6 +651,18 @@ class EcosystemRSSAggregator:
         """
         if agent_id == "leaf-bitcoin":
             res = cls.verify_and_ingest_bitcoin_feeds(try_network=try_network, max_items=max_items)
+            return {
+                "agent_id": res["agent_id"],
+                "sources": res["sources"],
+                "composite_sentiment": res["composite_sentiment"],
+                "items": res["items"],
+                "feed_mode": res["feed_mode"],
+                "live_count": res["live_count"],
+                "curated_count": res["curated_count"],
+                "updated_at_ms": res["updated_at_ms"],
+            }
+        elif agent_id == "leaf-ethereum":
+            res = cls.verify_and_ingest_ethereum_feeds(try_network=try_network, max_items=max_items)
             return {
                 "agent_id": res["agent_id"],
                 "sources": res["sources"],
