@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "leaf-xrp-ingestion",
+  "title": "feat(leaf-xrp/ingestion): live market data & on-chain TA telemetry pipeline for XRP Ledger (XRP)",
+  "issue": 58,
+  "lane": "M",
+  "lane_reason": "Scoped telemetry & TA ingestion pipeline for leaf-xrp in backend/tools/ta_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/58-leaf-xrp-ingestion",
+  "worktree": ".worktrees/58-leaf-xrp-ingestion",
+  "base_branch": "master",
+  "base_sha": "031f32c6fe4fae6e34156685cd5fe9ff52f45f66",
+  "created_at": "2026-11-01T17:10:38Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev",
+  "pr": 196,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "in_progress",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": "2026-11-01T17:13:44Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/58-leaf-xrp-ingestion",
+  "partial_issue": false
+}

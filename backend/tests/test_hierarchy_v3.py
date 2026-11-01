@@ -1346,6 +1346,77 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertIn("feed_mode", feed)
 
 
+    def test_xrp_leaf_ta_metrics_computation_and_fallback(self) -> None:
+        """
+        Verifies TechnicalAnalysisTool.compute_xrp_ta_metrics and ingest_xrp_market_snapshot.
+        """
+        from backend.tools.ta_tools import TechnicalAnalysisTool
+
+        sample_candles = [
+            [1700000000000 + i * 900000, 1.4 + i * 0.02, 1.42 + i * 0.02, 1.38 + i * 0.02, 1.41 + i * 0.02, 1000.0]
+            for i in range(25)
+        ]
+        sample_bids = [[1.405, 100.0], [1.40, 150.0]]
+        sample_asks = [[1.415, 80.0], [1.42, 120.0]]
+        sample_telemetry = {
+            "xrpl_clob_spread_bps": 3.8,
+            "rlusd_pool_tvl_usd_m": 200.0,
+        }
+
+        for sym in TechnicalAnalysisTool.XRP_EXCLUSIVE_ASSETS:
+            for venue in TechnicalAnalysisTool.XRP_VENUES:
+                res = TechnicalAnalysisTool.compute_xrp_ta_metrics(
+                    candles=sample_candles,
+                    bids=sample_bids,
+                    asks=sample_asks,
+                    onchain_telemetry=sample_telemetry,
+                    symbol=sym,
+                    venue=venue,
+                )
+                self.assertEqual(res["symbol"], sym)
+                self.assertEqual(res["venue"], venue)
+                self.assertEqual(res["ta_metrics_source"], "LIVE_COMPUTED")
+                self.assertEqual(res["xrpl_clob_spread_bps"], 3.8)
+                self.assertEqual(res["rlusd_pool_tvl_usd_m"], 200.0)
+                self.assertIn("kumo_regime", res)
+                self.assertIn("golden_pocket_fib_618", res)
+                self.assertIn("rsi_14", res)
+                self.assertIn("obi_l2", res)
+
+        market_feeds = {
+            "XRP-RLUSD": {
+                "candles": sample_candles,
+                "bids": sample_bids,
+                "asks": sample_asks,
+            }
+        }
+        ingest_res = TechnicalAnalysisTool.ingest_xrp_market_snapshot(
+            market_feeds=market_feeds,
+            onchain_telemetry=sample_telemetry,
+            venue="XRPL Native CLOB",
+        )
+        self.assertEqual(ingest_res["ta_metrics_source"], "LIVE_COMPUTED")
+        self.assertEqual(ingest_res["symbol"], "XRP-RLUSD")
+
+        fallback_res = TechnicalAnalysisTool.compute_xrp_ta_metrics(
+            candles=[],
+            bids=None,
+            asks=None,
+            onchain_telemetry=None,
+            symbol="XRP-RLUSD",
+            venue="XRPL Native CLOB",
+        )
+        self.assertEqual(fallback_res["ta_metrics_source"], "CATALOG_FIXTURE")
+        self.assertIn("xrpl_clob_spread_bps", fallback_res)
+        self.assertIn("rlusd_pool_tvl_usd_m", fallback_res)
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_xrp_ta_metrics(symbol="BTC-USD", venue="XRPL Native CLOB")
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_xrp_ta_metrics(symbol="XRP-RLUSD", venue="InvalidVenue")
+
+
 if __name__ == "__main__":
     unittest.main()
 
