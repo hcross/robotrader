@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-xrp-warm-path",
+  "title": "feat(leaf-xrp/warm-path): autonomous 900s cognitive scheduling, MemPalace wing & PolicyEnvelope compilation for leaf-xrp",
+  "issue": 60,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-xrp warm-path wiring in backend/agents/orchestrator.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/60-leaf-xrp-warm-path",
+  "worktree": ".worktrees/60-leaf-xrp-warm-path",
+  "base_branch": "master",
+  "base_sha": "af3c181a7b56b5fca5af7682be80897deeff9c6b",
+  "created_at": "2026-11-01T17:58:42Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 206,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 3,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "85d32a56fb769735577ec150c89ef34b1b566383",
+      "updated_at": "2026-11-01T19:35:34Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/60-leaf-xrp-warm-path",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T20:19:29Z",
+    "mode": "full-auto",
+    "pr": 206,
+    "head_sha": "85d32a56fb769735577ec150c89ef34b1b566383"
+  }
+}
