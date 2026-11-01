@@ -1,3 +1,4 @@
+pub mod crypto_vault;
 pub mod vault;
 
 use robotrader_common::{
@@ -6,8 +7,15 @@ use robotrader_common::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+pub use bs58;
+pub use crypto_vault::{
+    validate_chain_address, verify_checkout_signature, AddressValidationError,
+    CryptoVaultBootstrap, CryptographicVault,
+};
 pub use vault::{
-    SeedInput, SimulatedVault, VaultBootstrap, VaultInitError, VaultModeInput, ZeroizingBytes,
+    parse_execution_mode, read_mode_input, read_seed_input, select_vault_mode,
+    select_vault_mode_from, sha256, SeedInput, SimulatedVault, VaultBackendKind, VaultBootstrap,
+    VaultInitError, VaultModeInput, ZeroizingBytes,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2156,8 +2164,11 @@ mod tests {
                 .validate_and_sign_transfer(false, "Solana", OPERATOR_DESTINATION, 1500.0, "SOL")
                 .expect("the simulated whitelist accepts the placeholder destination");
 
+            assert_eq!(receipt.vault_mode, "SIMULATED");
             assert!(receipt.simulated);
             assert!(!receipt.signature_is_chain_valid);
+            assert!(!receipt.signature_is_cryptographic);
+            assert_eq!(receipt.signature_scheme, "SIMULATED_HMAC_SHA256");
             assert_eq!(receipt.whitelist_enforcement, "SIMULATED");
             assert!(receipt.destination_whitelisted);
             assert!(receipt.key_zeroized_after_sign);
@@ -2202,6 +2213,546 @@ mod tests {
 
             let already_zero = ZeroizingBytes::new([0u8; 32]);
             assert!(already_zero.is_zeroized());
+        }
+    }
+
+    mod cryptographic_vault_tests {
+        use super::*;
+        use crate::vault::sha256;
+        use k256::elliptic_curve::sec1::ToEncodedPoint;
+        use robotrader_common::{CryptographicCurve, SeedSource};
+        use std::ffi::OsString;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP_CRYPTO: AtomicU64 = AtomicU64::new(0);
+
+        fn temporary_seed_path(tag: &str) -> PathBuf {
+            std::env::temp_dir().join(format!(
+                "robotrader-crypto-vault-{}-{}-{tag}.seed",
+                std::process::id(),
+                NEXT_TEMP_CRYPTO.fetch_add(1, Ordering::SeqCst)
+            ))
+        }
+
+        fn write_seed_file(tag: &str, contents: &str) -> PathBuf {
+            let path = temporary_seed_path(tag);
+            fs::write(&path, contents).expect("temporary seed file");
+            path
+        }
+
+        fn valid_hex_seed() -> String {
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string()
+        }
+
+        fn load_crypto(
+            execution_mode: VaultModeInput,
+            secret_file: impl Into<PathBuf>,
+            env_seed: SeedInput,
+            allow_test_seed: bool,
+            allowlist_file: Option<PathBuf>,
+        ) -> Result<CryptographicVault, VaultInitError> {
+            CryptographicVault::load(CryptoVaultBootstrap {
+                execution_mode,
+                secret_file: secret_file.into(),
+                env_seed,
+                allow_test_seed,
+                allowlist_file,
+            })
+        }
+
+        fn test_vault() -> CryptographicVault {
+            load_crypto(
+                VaultModeInput::Unset,
+                temporary_seed_path("absent"),
+                SeedInput::Unset,
+                true,
+                None,
+            )
+            .expect("default test configuration with allow_test_seed=true must construct")
+        }
+
+        #[test]
+        fn test_crypto_seed_precedence_and_entropy() {
+            let live = VaultModeInput::Value("LIVE".to_string());
+            let valid_hex = valid_hex_seed();
+            let short_hex = "0123456789abcdef".to_string(); // 8 bytes < 32 bytes
+
+            // 1. Secret file with valid seed
+            let secret_valid = write_seed_file("crypto-secret-valid", &format!("{valid_hex}\n"));
+            let from_secret = load_crypto(
+                live.clone(),
+                &secret_valid,
+                SeedInput::Value("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff".to_string()),
+                false,
+                None,
+            )
+            .expect("valid secret file must succeed");
+            assert_eq!(
+                from_secret.export_public_manifest().seed_source,
+                SeedSource::SecretFile
+            );
+
+            // 2. Secret file with insufficient entropy (<32 bytes)
+            let secret_short = write_seed_file("crypto-secret-short", &format!("{short_hex}\n"));
+            let short_err = load_crypto(
+                live.clone(),
+                &secret_short,
+                SeedInput::Unset,
+                false,
+                None,
+            )
+            .err()
+            .expect("short secret file must fail closed");
+            assert_eq!(short_err, VaultInitError::InsufficientEntropy);
+
+            // 3. Empty secret file falls through to environment seed
+            let secret_empty = write_seed_file("crypto-secret-empty", "   \n");
+            let from_env = load_crypto(
+                live.clone(),
+                &secret_empty,
+                SeedInput::Value(valid_hex.clone()),
+                false,
+                None,
+            )
+            .expect("empty secret must fall through to environment seed");
+            assert_eq!(
+                from_env.export_public_manifest().seed_source,
+                SeedSource::Environment
+            );
+
+            // 4. Environment seed with insufficient entropy (<32 bytes)
+            let env_short_err = load_crypto(
+                live.clone(),
+                temporary_seed_path("absent"),
+                SeedInput::Value(short_hex),
+                false,
+                None,
+            )
+            .err()
+            .expect("short environment seed must fail closed");
+            assert_eq!(env_short_err, VaultInitError::InsufficientEntropy);
+
+            // 5. LIVE mode without any seed fails closed
+            let missing_live = load_crypto(
+                live,
+                temporary_seed_path("absent"),
+                SeedInput::Unset,
+                false,
+                None,
+            )
+            .err()
+            .expect("live mode without seed must fail");
+            assert_eq!(missing_live, VaultInitError::MissingLiveSeed);
+
+            // 6. Non-live mode without seed rejects test seed if allow_test_seed is false
+            let test_rejected = load_crypto(
+                VaultModeInput::Unset,
+                temporary_seed_path("absent"),
+                SeedInput::Unset,
+                false,
+                None,
+            )
+            .err()
+            .expect("test seed must be rejected when allow_test_seed is false");
+            assert_eq!(test_rejected, VaultInitError::TestSeedNotAllowed);
+
+            // 7. Non-live mode with allow_test_seed succeeds with DeterministicDevnet
+            let test_allowed = load_crypto(
+                VaultModeInput::Unset,
+                temporary_seed_path("absent"),
+                SeedInput::Unset,
+                true,
+                None,
+            )
+            .expect("test seed must be allowed when allow_test_seed is true");
+            assert_eq!(
+                test_allowed.export_public_manifest().seed_source,
+                SeedSource::DeterministicDevnet
+            );
+
+            // 8. Non-unicode env seed fails closed
+            let non_unicode = load_crypto(
+                VaultModeInput::Unset,
+                temporary_seed_path("absent"),
+                SeedInput::NonUnicode,
+                true,
+                None,
+            )
+            .err()
+            .expect("non-unicode env seed must fail closed");
+            assert_eq!(non_unicode, VaultInitError::InvalidEnvironmentSeedEncoding);
+
+            // Clean up files
+            fs::remove_file(secret_valid).ok();
+            fs::remove_file(secret_short).ok();
+            fs::remove_file(secret_empty).ok();
+        }
+
+        #[test]
+        fn test_crypto_vault_manifest_contract() {
+            let vault = test_vault();
+            let manifest = vault.export_public_manifest();
+
+            assert_eq!(manifest.vault_mode, "CRYPTO_HD_BIP32");
+            assert!(!manifest.simulated);
+            assert_eq!(manifest.whitelist_enforcement, "STRICT_FORMAT_AND_ALLOWLIST");
+            assert_eq!(manifest.wallets.len(), 26);
+            assert!(manifest.simulation_notice.contains("Cryptographic HD vault BIP-32/SLIP-0010 active"));
+
+            let mut spendable_count = 0;
+            let mut non_spendable_count = 0;
+
+            for wallet in &manifest.wallets {
+                assert!(!wallet.simulated);
+                if wallet.address_is_spendable {
+                    spendable_count += 1;
+                } else {
+                    non_spendable_count += 1;
+                }
+            }
+
+            assert_eq!(spendable_count, 23);
+            assert_eq!(non_spendable_count, 3);
+        }
+
+        #[test]
+        fn test_hd_derivation_ed25519_solana() {
+            let vault = test_vault();
+            let sol = vault.derive_wallet_descriptor("leaf-solana").unwrap();
+
+            assert_eq!(sol.curve, CryptographicCurve::Ed25519Slip0010);
+            assert_eq!(sol.target_leaf_derivation_path, "m/44'/501'/0'/0'");
+            assert!(sol.address_is_spendable);
+            assert!(!sol.simulated);
+            assert_eq!(sol.target_slip44_coin_type, 501);
+
+            // Solana address must be a valid 32-byte Base58 string
+            let decoded = bs58::decode(&sol.leaf_hot_address).into_vec().unwrap();
+            assert_eq!(decoded.len(), 32);
+            assert!(validate_chain_address("solana", &sol.leaf_hot_address).is_ok());
+        }
+
+        #[test]
+        fn test_hd_derivation_secp256k1_ethereum_and_chainlink() {
+            let vault = test_vault();
+
+            let eth = vault.derive_wallet_descriptor("leaf-ethereum").unwrap();
+            assert_eq!(eth.curve, CryptographicCurve::Secp256k1EcdsaBip44);
+            assert_eq!(eth.target_master_derivation_path, "m/44'/60'/0'/0/0");
+            assert_eq!(eth.target_leaf_derivation_path, "m/44'/60'/1'/0/0");
+            assert!(eth.address_is_spendable);
+            assert!(!eth.simulated);
+            assert!(eth.leaf_hot_address.starts_with("0x"));
+            assert_eq!(eth.leaf_hot_address.len(), 42);
+            assert!(validate_chain_address("ethereum", &eth.leaf_hot_address).is_ok());
+
+            let link = vault.derive_wallet_descriptor("leaf-chainlink").unwrap();
+            assert_eq!(link.curve, CryptographicCurve::Secp256k1EcdsaBip44);
+            assert_eq!(link.target_master_derivation_path, "m/44'/60'/0'/0/0");
+            assert_eq!(link.target_leaf_derivation_path, "m/44'/60'/0'/0/1");
+            assert!(link.address_is_spendable);
+            assert!(!link.simulated);
+            assert!(link.leaf_hot_address.starts_with("0x"));
+            assert_eq!(link.leaf_hot_address.len(), 42);
+            assert!(validate_chain_address("chainlink", &link.leaf_hot_address).is_ok());
+        }
+
+        #[test]
+        fn test_hd_derivation_polkadot_and_non_bip32() {
+            let vault = test_vault();
+
+            let dot = vault.derive_wallet_descriptor("leaf-polkadot").unwrap();
+            assert_eq!(dot.curve, CryptographicCurve::Sr25519Substrate);
+            assert!(dot.address_is_spendable);
+            assert!(dot.leaf_hot_address.starts_with('1'));
+            assert!(validate_chain_address("polkadot", &dot.leaf_hot_address).is_ok());
+
+            let canton = vault.derive_wallet_descriptor("leaf-canton").unwrap();
+            assert_eq!(canton.curve, CryptographicCurve::MtlsX509Participant);
+            assert!(!canton.address_is_spendable);
+            assert!(canton.leaf_hot_address.starts_with("canton::"));
+            assert!(validate_chain_address("canton", &canton.leaf_hot_address).is_ok());
+
+            let binance = vault.derive_wallet_descriptor("leaf-binance-cex").unwrap();
+            assert_eq!(binance.curve, CryptographicCurve::HmacSha256NoWithdraw);
+            assert!(!binance.address_is_spendable);
+            assert!(binance.leaf_hot_address.starts_with("binance:"));
+            assert!(validate_chain_address("binance", &binance.leaf_hot_address).is_ok());
+
+            let sandbox = vault.derive_wallet_descriptor("leaf-paper-sandbox").unwrap();
+            assert_eq!(sandbox.curve, CryptographicCurve::VirtualZeroKey);
+            assert!(!sandbox.address_is_spendable);
+            assert!(sandbox.leaf_hot_address.starts_with("sandbox:"));
+            assert!(validate_chain_address("sandbox", &sandbox.leaf_hot_address).is_ok());
+        }
+
+        #[test]
+        fn test_spendable_addresses_across_all_26_leaves() {
+            let vault = test_vault();
+            let manifest = vault.export_public_manifest();
+
+            for wallet in &manifest.wallets {
+                let val_res = validate_chain_address(&wallet.chain, &wallet.leaf_hot_address);
+                assert!(
+                    val_res.is_ok(),
+                    "Leaf {} address {} failed validation: {:?}",
+                    wallet.leaf_id,
+                    wallet.leaf_hot_address,
+                    val_res
+                );
+            }
+
+            // Specific ecosystem assertions
+            let btc = vault.derive_wallet_descriptor("leaf-bitcoin").unwrap();
+            assert!(btc.leaf_hot_address.starts_with("bc1q"));
+            assert_eq!(btc.leaf_hot_address.len(), 42);
+
+            let tron = vault.derive_wallet_descriptor("leaf-tron").unwrap();
+            assert!(tron.leaf_hot_address.starts_with('T'));
+            assert_eq!(tron.leaf_hot_address.len(), 34);
+
+            let doge = vault.derive_wallet_descriptor("leaf-dogecoin").unwrap();
+            assert!(doge.leaf_hot_address.starts_with('D'));
+            assert_eq!(doge.leaf_hot_address.len(), 34);
+
+            let xrp = vault.derive_wallet_descriptor("leaf-xrp").unwrap();
+            assert!(xrp.leaf_hot_address.starts_with('r'));
+            assert!(xrp.leaf_hot_address.len() == 33 || xrp.leaf_hot_address.len() == 34);
+
+            let cosmos = vault.derive_wallet_descriptor("leaf-cosmos").unwrap();
+            assert!(cosmos.leaf_hot_address.starts_with("cosmos1"));
+
+            let sui = vault.derive_wallet_descriptor("leaf-sui").unwrap();
+            assert!(sui.leaf_hot_address.starts_with("0x"));
+            assert_eq!(sui.leaf_hot_address.len(), 66);
+
+            let aptos = vault.derive_wallet_descriptor("leaf-aptos").unwrap();
+            assert!(aptos.leaf_hot_address.starts_with("0x"));
+            assert_eq!(aptos.leaf_hot_address.len(), 66);
+
+            let ton = vault.derive_wallet_descriptor("leaf-ton").unwrap();
+            assert!(ton.leaf_hot_address.starts_with("EQ") || ton.leaf_hot_address.starts_with("UQ"));
+            assert_eq!(ton.leaf_hot_address.len(), 48);
+
+            let cardano = vault.derive_wallet_descriptor("leaf-cardano").unwrap();
+            assert!(cardano.leaf_hot_address.starts_with("addr1"));
+
+            let tezos = vault.derive_wallet_descriptor("leaf-tezos").unwrap();
+            assert!(tezos.leaf_hot_address.starts_with("tz1"));
+            assert_eq!(tezos.leaf_hot_address.len(), 36);
+
+            let stacks = vault.derive_wallet_descriptor("leaf-stacks").unwrap();
+            assert!(stacks.leaf_hot_address.starts_with("SP"));
+
+            let flow = vault.derive_wallet_descriptor("leaf-flow").unwrap();
+            assert!(flow.leaf_hot_address.starts_with("0x"));
+            assert_eq!(flow.leaf_hot_address.len(), 18);
+        }
+
+        #[test]
+        fn test_validate_chain_address_rules() {
+            // EVM checks
+            assert!(validate_chain_address("ethereum", "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed").is_ok());
+            assert!(validate_chain_address("ethereum", "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed").is_ok());
+            assert!(validate_chain_address("ethereum", "0x5AAEB6053F3E94C9B9A09F33669435E7EF1BEAED").is_ok());
+            // EVM invalid: missing 0x
+            assert!(matches!(
+                validate_chain_address("ethereum", "5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"),
+                Err(AddressValidationError::InvalidFormat { .. })
+            ));
+            // EVM invalid: wrong length
+            assert!(matches!(
+                validate_chain_address("ethereum", "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAe"),
+                Err(AddressValidationError::InvalidFormat { .. })
+            ));
+            // EVM invalid: corrupted EIP-55 checksum (flip 'F' to 'f' where hash requires uppercase)
+            assert!(matches!(
+                validate_chain_address("ethereum", "0x5aAeb6053f3E94C9b9A09f33669435E7Ef1BeAed"),
+                Err(AddressValidationError::InvalidChecksum { .. })
+            ));
+
+            // Solana checks
+            assert!(validate_chain_address("solana", "FK286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN").is_ok());
+            // Solana invalid: non-base58 char '0' or 'O'
+            assert!(matches!(
+                validate_chain_address("solana", "0K286wA4ggcyhMrxWnBUW92JVmJPQN6xkmQ9eXgjpgN"),
+                Err(AddressValidationError::InvalidFormat { .. })
+            ));
+            // Solana invalid: wrong decoded length
+            assert!(matches!(
+                validate_chain_address("solana", "1111111111111111111111111111111"),
+                Err(AddressValidationError::InvalidFormat { .. })
+            ));
+
+            // Bridges
+            assert!(validate_chain_address("solana", "bridge:cctp:0x1234567890abcdef").is_ok());
+            assert!(validate_chain_address("ethereum", "bridge:wormhole:0x1234567890abcdef").is_ok());
+            assert!(matches!(
+                validate_chain_address("ethereum", "bridge:unknown_bridge:0x1234"),
+                Err(AddressValidationError::InvalidFormat { .. })
+            ));
+        }
+
+        #[test]
+        fn test_allowlist_evaluator_exact_and_wildcard_rejection() {
+            let vault = test_vault();
+
+            // Broad prefixes must be rejected as wildcards
+            for prefix in ["0x", "r", "T", "D", "bc1q"] {
+                assert!(!vault.is_destination_allowed(prefix));
+            }
+
+            // Arbitrary unlisted EVM address must be rejected
+            let unlisted_evm = "0x0000000000000000000000000000000000000001";
+            assert!(!vault.is_destination_allowed(unlisted_evm));
+
+            // Internal addresses are automatically allowed
+            let sol = vault.derive_wallet_descriptor("leaf-solana").unwrap();
+            assert!(vault.is_destination_allowed(&sol.leaf_hot_address));
+            assert!(vault.is_destination_allowed(&sol.master_treasury_address));
+
+            // Canonical bridge URI is allowed
+            assert!(vault.is_destination_allowed("bridge:cctp:treasury"));
+
+            // Signing rejected destination fails closed with VaultSigningRejected
+            let rejected = vault.validate_and_sign_transfer(
+                false,
+                "leaf-solana",
+                "11111111111111111111111111111111", // valid 32-byte zero solana addr, but unlisted
+                100.0,
+                "SOL",
+            );
+            assert!(matches!(
+                rejected,
+                Err(RiskRejection::VaultSigningRejected { .. })
+            ));
+        }
+
+        #[test]
+        fn test_crypto_signing_ed25519_and_secp256k1() {
+            let vault = test_vault();
+
+            // 1. Ed25519 checkout signing for Solana
+            let sol = vault.derive_wallet_descriptor("leaf-solana").unwrap();
+            let sol_dest = sol.master_treasury_address.clone();
+            let receipt_sol = vault
+                .validate_and_sign_transfer(false, "leaf-solana", &sol_dest, 500.0, "SOL")
+                .expect("Solana signing must succeed");
+
+            assert_eq!(receipt_sol.vault_mode, "CRYPTO_HD_BIP32");
+            assert!(!receipt_sol.simulated);
+            assert!(!receipt_sol.signature_is_chain_valid);
+            assert!(receipt_sol.signature_is_cryptographic);
+            assert_eq!(receipt_sol.signature_scheme, "ED25519");
+            assert_eq!(receipt_sol.whitelist_enforcement, "STRICT_FORMAT_AND_ALLOWLIST");
+            assert!(receipt_sol.destination_whitelisted);
+            assert!(receipt_sol.key_zeroized_after_sign);
+            assert!(receipt_sol.signature_hex.starts_with("0x"));
+            assert_eq!(receipt_sol.signature_hex.len(), 2 + 128); // "0x" + 64 bytes hex
+
+            // Verify signature using verify_checkout_signature
+            let payload_sol = format!(
+                "ROBOTRADER_V3_TRANSFER|chain={}|signer={}|dest={}|amount_usd={:.4}|token={}",
+                receipt_sol.chain, receipt_sol.signer_address, receipt_sol.destination_address, 500.0, "SOL"
+            );
+            let digest_sol = sha256(payload_sol.as_bytes());
+            let sol_pub_bytes = bs58::decode(&receipt_sol.signer_address).into_vec().unwrap();
+            assert!(verify_checkout_signature(
+                &receipt_sol.chain,
+                &sol_pub_bytes,
+                &digest_sol,
+                &receipt_sol.signature_hex
+            ));
+
+            // Tampered signature fails
+            let mut tampered_hex = receipt_sol.signature_hex.clone();
+            let last_char = if tampered_hex.ends_with('0') { '1' } else { '0' };
+            tampered_hex.pop();
+            tampered_hex.push(last_char);
+            assert!(!verify_checkout_signature(
+                &receipt_sol.chain,
+                &sol_pub_bytes,
+                &digest_sol,
+                &tampered_hex
+            ));
+
+            // 2. Secp256k1 checkout signing for Ethereum
+            let eth = vault.derive_wallet_descriptor("leaf-ethereum").unwrap();
+            let eth_dest = eth.master_treasury_address.clone();
+            let receipt_eth = vault
+                .validate_and_sign_transfer(false, "leaf-ethereum", &eth_dest, 1000.0, "ETH")
+                .expect("Ethereum signing must succeed");
+
+            assert_eq!(receipt_eth.vault_mode, "CRYPTO_HD_BIP32");
+            assert!(!receipt_eth.simulated);
+            assert!(!receipt_eth.signature_is_chain_valid);
+            assert!(receipt_eth.signature_is_cryptographic);
+            assert_eq!(receipt_eth.signature_scheme, "SECP256K1_ECDSA");
+            assert_eq!(receipt_eth.whitelist_enforcement, "STRICT_FORMAT_AND_ALLOWLIST");
+            assert!(receipt_eth.destination_whitelisted);
+            assert!(receipt_eth.key_zeroized_after_sign);
+            assert!(receipt_eth.signature_hex.starts_with("0x"));
+            assert_eq!(receipt_eth.signature_hex.len(), 2 + 128);
+
+            // Verify Secp256k1 signature
+            let payload_eth = format!(
+                "ROBOTRADER_V3_TRANSFER|chain={}|signer={}|dest={}|amount_usd={:.4}|token={}",
+                receipt_eth.chain, receipt_eth.signer_address, receipt_eth.destination_address, 1000.0, "ETH"
+            );
+            let digest_eth = sha256(payload_eth.as_bytes());
+            // Derive leaf hot pubkey bytes for verification
+            let eth_seed = vault.master_seed.as_slice();
+            let eth_child = crate::crypto_vault::bip32_derive_secp256k1(eth_seed, &eth.target_leaf_derivation_path).unwrap();
+            let sk = k256::SecretKey::from_bytes((eth_child.as_slice()).into()).unwrap();
+            let compressed_pub = sk.public_key().to_encoded_point(true);
+            assert!(verify_checkout_signature(
+                &receipt_eth.chain,
+                compressed_pub.as_bytes(),
+                &digest_eth,
+                &receipt_eth.signature_hex
+            ));
+
+            // Tampered Secp256k1 signature fails
+            let mut tampered_eth_hex = receipt_eth.signature_hex.clone();
+            let last_char = if tampered_eth_hex.ends_with('0') { '1' } else { '0' };
+            tampered_eth_hex.pop();
+            tampered_eth_hex.push(last_char);
+            assert!(!verify_checkout_signature(
+                &receipt_eth.chain,
+                compressed_pub.as_bytes(),
+                &digest_eth,
+                &tampered_eth_hex
+            ));
+        }
+
+        #[test]
+        fn test_kill_switch_and_zero_amount_rejection() {
+            let vault = test_vault();
+            let sol = vault.derive_wallet_descriptor("leaf-solana").unwrap();
+            let sol_dest = sol.master_treasury_address.clone();
+
+            let killed = vault.validate_and_sign_transfer(true, "leaf-solana", &sol_dest, 100.0, "SOL");
+            assert!(matches!(killed, Err(RiskRejection::KillSwitchActive { .. })));
+
+            let zero_amount = vault.validate_and_sign_transfer(false, "leaf-solana", &sol_dest, 0.0, "SOL");
+            assert!(matches!(zero_amount, Err(RiskRejection::ZeroPositionSize)));
+
+            let neg_amount = vault.validate_and_sign_transfer(false, "leaf-solana", &sol_dest, -50.0, "SOL");
+            assert!(matches!(neg_amount, Err(RiskRejection::ZeroPositionSize)));
+        }
+
+        #[test]
+        fn test_select_vault_mode_pure() {
+            assert_eq!(select_vault_mode_from(None).unwrap(), VaultBackendKind::Simulated);
+            assert_eq!(select_vault_mode_from(Some(OsString::from(""))).unwrap(), VaultBackendKind::Simulated);
+            assert_eq!(select_vault_mode_from(Some(OsString::from("SIMULATED"))).unwrap(), VaultBackendKind::Simulated);
+            assert_eq!(select_vault_mode_from(Some(OsString::from("CRYPTO_HD_BIP32"))).unwrap(), VaultBackendKind::CryptoHdBip32);
+            assert_eq!(
+                select_vault_mode_from(Some(OsString::from("UNSUPPORTED_ENCLAVE"))).unwrap_err(),
+                VaultInitError::InvalidVaultMode("UNSUPPORTED_ENCLAVE".to_string())
+            );
         }
 
         #[test]
