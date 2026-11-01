@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-hyperliquid-hot-path-pods",
+  "title": "feat(leaf-hyperliquid/hot-path-pods): native Rust strategy pods & on-chain token safety gates for Hyperliquid",
+  "issue": 49,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-hyperliquid pods and HYPE safety gates in engine-rs/crates/strategies + tests",
+  "lane_change": null,
+  "branch": "sdlc/49-leaf-hyperliquid-hot-path-pods",
+  "worktree": ".worktrees/49-leaf-hyperliquid-hot-path-pods",
+  "base_branch": "master",
+  "base_sha": "ea323ca80468f8e8d7b9000fcb7eb23b2f481517",
+  "created_at": "2026-11-01T19:51:21Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 210,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "d6c820db12f1f2b28bd7e66c1974e9912872b030",
+      "updated_at": "2026-11-01T20:19:44Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/49-leaf-hyperliquid-hot-path-pods",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T20:26:39Z",
+    "mode": "full-auto",
+    "pr": 210,
+    "head_sha": "d6c820db12f1f2b28bd7e66c1974e9912872b030"
+  }
+}
