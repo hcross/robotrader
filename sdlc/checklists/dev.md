@@ -57,6 +57,8 @@
 - [ ] The reviewer ran the relevant commands and captured the output.
 - [ ] For hot-path changes: a benchmark or latency measurement is attached.
 - [ ] For backend/frontend changes: `docker compose up --build -d` was run and the service is reachable.
+- [ ] For a mechanical rebase: the commits carrying `[<change-id>]` keep the same
+      `git patch-id` before and after the rebase, and no new file appears in the diff.
 - [ ] For UI changes: a screenshot or recording is attached.
 
 ### Canonical commands

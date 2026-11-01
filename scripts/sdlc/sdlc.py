@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from datetime import date
@@ -357,6 +358,29 @@ def next_action(state: dict) -> tuple[str, str, int, str]:
     return "human", status, 0, "unknown state"
 
 
+def _invariants_from_config() -> str:
+    """Extract the hard-invariant bullets from `openspec/config.yaml`.
+
+    Single source of truth: the brief must not hold a second, drifting copy of
+    the platform invariants.
+    """
+    cfg = Path(common.REPO_ROOT) / "openspec" / "config.yaml"
+    try:
+        text = cfg.read_text(encoding="utf-8")
+    except OSError:
+        return "- See `openspec/config.yaml` (unreadable from this worktree)."
+    if "Hard invariants" not in text:
+        return "- See `openspec/config.yaml`."
+    block = text.split("Hard invariants", 1)[1]
+    block = block.split("Repository conventions", 1)[0]
+    bullets = [
+        f"- {line.strip()[2:]}"
+        for line in block.splitlines()
+        if line.strip().startswith("- ")
+    ]
+    return "\n".join(bullets) if bullets else "- See `openspec/config.yaml`."
+
+
 def build_brief(state: dict, role: str, stage: str, round_no: int, reason: str) -> str:
     stage_artifact = {
         "spec": "openspec/changes/<id>/proposal.md + specs/** + tasks.md (Lane S)",
@@ -383,14 +407,8 @@ def build_brief(state: dict, role: str, stage: str, round_no: int, reason: str) 
 
 ## Context pack (pre-digested — do not re-read the whole protocol)
 
-Hard invariants (a violation is a blocker, whatever the feature):
-- No LLM call, blocking I/O or unbounded sleep in `StrategyPod::on_market_event` or `HardRiskGate::validate`; the gate stays under 50µs, with no allocation or logging on that path.
-- `PolicyEnvelope` stays field-for-field compatible between `engine-rs/crates/common/src/lib.rs` and `backend/core/schemas.py`, including all 11 `AssetOverride` keys.
-- Capital protection intact: dry powder >= 20%, Kelly sizing, drawdown kill-switch, `CostGuard` daily cap, no unbounded refill.
-- The vault is `SIMULATED` everywhere: non-spendable addresses, non-chain-valid receipts, simulated whitelist. Python holds no key custody and never broadcasts.
-- Backtest == paper == live: one deterministic path, no look-ahead, no live-only branch.
-- Each leaf stays isolated to its chain/venue and its MemPalace wing: no foreign symbol may leak into a leaf's metrics, catalog or feed.
-- Repository content is English-only; conventional commits carry the change id in brackets.
+Hard invariants (a violation is a blocker, whatever the feature) — derived from `openspec/config.yaml`:
+{_invariants_from_config()}
 
 Canonical commands:
 - `cd engine-rs && cargo test`
@@ -493,6 +511,73 @@ def _is_ancestor(old: str, new: str, worktree: Path) -> bool:
     return proc.returncode == 0
 
 
+def _change_patch_ids(worktree: Path, base: str, head: str, change_id: str) -> set[str]:
+    """Patch ids of the commits that belong to this change.
+
+    `git patch-id` hashes the changed lines, not the surrounding context or the
+    line numbers, so it stays stable across a rebase or a merge while changing
+    the moment the content itself changes. Filtering on the `[change-id]`
+    convention excludes the commits master brought in through the rebase.
+    """
+    log = common.run(
+        ["git", "-C", str(worktree), "log", "--format=%H%x09%s", f"{base}..{head}"],
+        check=False,
+    )
+    if log.returncode != 0:
+        return set()
+    ids: set[str] = set()
+    for line in log.stdout.splitlines():
+        if "\t" not in line:
+            continue
+        sha, subject = line.split("\t", 1)
+        if f"[{change_id}]" not in subject:
+            continue
+        diff = common.run(
+            ["git", "-C", str(worktree), "show", "--no-color", "--format=", sha],
+            check=False,
+        )
+        if diff.returncode != 0:
+            return set()
+        proc = subprocess.run(
+            ["git", "patch-id", "--stable"],
+            input=diff.stdout,
+            text=True,
+            capture_output=True,
+        )
+        for pid_line in proc.stdout.splitlines():
+            fields = pid_line.split()
+            if fields:
+                ids.add(fields[0])
+    return ids
+
+
+def _mechanical_rebase_ok(
+    old: str, new: str, worktree: Path, base_sha: str, change_id: str
+) -> bool:
+    """True when `new` carries exactly the change `old` carried.
+
+    Two shapes qualify: master was merged into the branch (`old` is an
+    ancestor of `new`), or the branch was rebased and every commit belonging to
+    the change kept the same patch id. A rebase that changed content produces a
+    different patch id and is refused.
+    """
+    if _is_ancestor(old, new, worktree):
+        return True
+    if not base_sha:
+        return False
+    old_ids = _change_patch_ids(worktree, base_sha, old, change_id)
+    if not old_ids:
+        return False
+    new_base_proc = common.run(
+        ["git", "-C", str(worktree), "merge-base", new, "origin/master"], check=False
+    )
+    new_base = new_base_proc.stdout.strip() if new_base_proc.returncode == 0 else ""
+    if not new_base:
+        return False
+    new_ids = _change_patch_ids(worktree, new_base, new, change_id)
+    return new_ids == old_ids
+
+
 def _record_mechanical_refresh(
     args: argparse.Namespace,
     state: dict,
@@ -513,10 +598,12 @@ def _record_mechanical_refresh(
     if not previous:
         common.die("no reviewed SHA recorded for this stage; nothing to refresh")
     worktree = Path(state.get("worktree_abs") or state["worktree"])
-    if not _is_ancestor(previous, new_sha, worktree):
+    if not _mechanical_rebase_ok(
+        previous, new_sha, worktree, state.get("base_sha", ""), state["change_id"]
+    ):
         common.die(
-            f"reviewed SHA {previous[:7]} is not an ancestor of {new_sha[:7]}: "
-            "this is not a mechanical rebase, open a new review round"
+            f"reviewed SHA {previous[:7]} does not carry the same change as {new_sha[:7]}: "
+            "the patches differ, so this is not a mechanical rebase — open a new review round"
         )
     data["last_sha"] = new_sha
     data["updated_at"] = common.now_iso()
