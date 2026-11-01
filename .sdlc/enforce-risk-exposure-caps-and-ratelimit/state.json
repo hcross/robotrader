@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev-review",
+  "status": "merged",
   "pr": 180,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": "2026-11-01T12:26:12Z"
     },
     "dev": {
-      "status": "in_review",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": "2026-11-01T12:54:18Z"
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "a06a03d75ce57e02326d6dd6e5f01a1128f08365",
+      "updated_at": "2026-11-01T13:00:37Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/4-enforce-risk-exposure-caps-and-ratelimit",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T13:02:02Z",
+    "mode": "full-auto",
+    "pr": 180,
+    "head_sha": "a06a03d75ce57e02326d6dd6e5f01a1128f08365"
+  }
 }

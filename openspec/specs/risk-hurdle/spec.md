@@ -116,7 +116,7 @@ An order MUST be approved only when `expected_edge_bps > hurdle_bps`; equality M
 
 ### Requirement: Safety gates precede the edge hurdle
 
-`HardRiskGate::validate` MUST evaluate its gates in this order: active kill switch, daily drawdown circuit breaker, effective-envelope resolution and pod enablement, slippage ceiling, on-chain token safety when `intent.token_safety` is present, edge hurdle, leverage clamp, fractional-Kelly sizing and zero-position rejection. The edge hurdle MUST NOT preempt the slippage ceiling or the token-safety check.
+`HardRiskGate::validate` MUST evaluate its gates in this canonical order: active kill switch, daily drawdown circuit breaker, effective-envelope resolution and pod enablement, per-`(pod_id, symbol)` order rate-limit cooldown, slippage ceiling, on-chain token safety when `intent.token_safety` is present, execution-cost edge hurdle, leverage clamp, fractional-Kelly sizing (clamped by single-position cap `max_single_position_pct * equity`) and zero-position rejection, aggregate exposure caps (asset exposure -> pod exposure -> gross exposure), and bounded MEV priority tip attachment. The edge hurdle MUST NOT preempt the slippage ceiling, token-safety check, or rate-limit cooldown check.
 
 #### Scenario: The SCAM-SOL fixture is rejected as a rug, not by the hurdle
 
@@ -131,9 +131,15 @@ An order MUST be approved only when `expected_edge_bps > hurdle_bps`; equality M
 - **THEN** `validate` returns `RiskRejection::ExcessiveSlippage { requested_bps: 30, max_bps: 25 }`
 - **THEN** the returned variant is not `InsufficientEdge`
 
+#### Scenario: Rate limit cooldown check precedes execution cost hurdle
+
+- **WHEN** an intent is evaluated within `min_order_cooldown_ms` of a prior order on the same pod and symbol, with `expected_edge_bps` below the cost hurdle
+- **THEN** `validate` returns `RiskRejection::OrderRateLimited`
+- **THEN** the returned variant is not `InsufficientEdge`
+
 ### Requirement: All other risk gates keep their current behavior
 
-Each gate named here MUST keep its current decision rule and rejection variant for an intent that reaches it: active kill switch, daily drawdown circuit breaker, effective-envelope/TTL fallback, pod enablement, slippage ceiling, on-chain token safety, leverage clamp, fractional-Kelly sizing, zero-position rejection, and `validate_inference_refill`. The safety gates' precedence is defined by the preceding requirement. The leverage clamp, Kelly sizing, and zero-position rule MUST keep their current thresholds and MUST NOT gain a rejection variant.
+Each gate named here MUST keep its current decision rule and rejection variant for an intent that reaches it: active kill switch, daily drawdown circuit breaker, effective-envelope/TTL fallback, pod enablement, slippage ceiling, on-chain token safety, leverage clamp ceiling, zero-position rejection, and `validate_inference_refill`. The safety gates' precedence is defined by the preceding requirement. The leverage clamp and zero-position rule MUST keep their current thresholds and MUST NOT regress. New rejection variants `OrderRateLimited`, `AssetExposureExceeded`, `PodExposureExceeded`, and `GrossExposureExceeded` are evaluated at their designated pipeline positions without altering the behavior of pre-existing gates.
 
 #### Scenario: An already-active kill switch rejects first
 
