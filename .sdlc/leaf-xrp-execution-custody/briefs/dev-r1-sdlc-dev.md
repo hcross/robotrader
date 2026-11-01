@@ -7,7 +7,7 @@ You are `sdlc-dev` for change `leaf-xrp-execution-custody`.
 - Worktree: `/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/62-leaf-xrp-execution-custody`
 - Artifact under work: the PR diff
 - Reviewed SHA: run `git rev-parse HEAD` in the worktree and record it in the verdict.
-- Reason: initial authoring
+- Reason: revise findings from round 1
 
 ## Context pack (pre-digested — do not re-read the whole protocol)
 

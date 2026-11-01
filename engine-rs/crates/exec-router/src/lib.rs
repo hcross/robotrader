@@ -456,18 +456,25 @@ impl XrpVenueAdapter {
     }
 
     pub fn validate_settlement_destination(dest: &str) -> bool {
-        if dest.starts_with("bridge:") {
-            let prefix_len = "bridge:".len();
-            return dest.len() > prefix_len;
+        // XRPL-bound destinations must name a specific bridge; a bare
+        // "bridge:" prefix is not a routable venue.
+        const XRP_BRIDGE_PREFIXES: [&str; 2] = ["bridge:xrpl:", "bridge:ripple:"];
+        for prefix in XRP_BRIDGE_PREFIXES {
+            if dest.starts_with(prefix) {
+                return dest.len() > prefix.len();
+            }
         }
 
-        // XRPL classic address: "r" followed by 24..=34 base58 characters (33-34 canonical)
-        if dest.starts_with('r') {
-            let rest = &dest[1..];
-            if rest.len() < 24 || rest.len() > 34 {
+        // XRPL classic address: "r" followed by 32 or 33 Ripple base58
+        // characters (33-34 total), matching the chain's own format check.
+        if let Some(rest) = dest.strip_prefix('r') {
+            let n = rest.chars().count();
+            if n != 32 && n != 33 {
                 return false;
             }
-            return rest.chars().all(|c| c.is_ascii_alphanumeric());
+            const RIPPLE_BASE58: &str =
+                "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz";
+            return rest.chars().all(|c| RIPPLE_BASE58.contains(c));
         }
 
         false
@@ -939,7 +946,7 @@ mod tests {
         assert_eq!(quote.finality_sec, 4);
 
         // Test destination validation
-        assert!(XrpVenueAdapter::validate_settlement_destination("rN7n7otQDd6FczFgLdlqtyMVrn3NnrcEXN"));
+        assert!(XrpVenueAdapter::validate_settlement_destination("rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe"));
         assert!(XrpVenueAdapter::validate_settlement_destination("rHb9CJAWyB4rXDegDivJLxvBty5c6qMxk"));
         assert!(XrpVenueAdapter::validate_settlement_destination("bridge:xrpl:rDestination"));
         assert!(XrpVenueAdapter::validate_settlement_destination("bridge:ripple:destination"));
