@@ -1890,6 +1890,79 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         signed_bundle = SignedPolicyBundle.from_dict(res["signed_policy_bundle"])
         self.assertTrue(verify_policy_hmac(signed_bundle.policy, signed_bundle.signature, "robotrader-dev-hmac-key"))
 
+
+    def test_tron_leaf_ta_metrics_computation_and_fallback(self) -> None:
+        """
+        Verifies TechnicalAnalysisTool.compute_tron_ta_metrics and ingest_tron_market_snapshot.
+        """
+        from backend.tools.ta_tools import TechnicalAnalysisTool
+
+        sample_candles = [
+            [1700000000000 + i * 900000, 0.12 + i * 0.001, 0.122 + i * 0.001, 0.118 + i * 0.001, 0.121 + i * 0.001, 1000.0]
+            for i in range(25)
+        ]
+        sample_bids = [[0.1205, 100.0], [0.12, 150.0]]
+        sample_asks = [[0.1215, 80.0], [0.122, 120.0]]
+        sample_telemetry = {
+            "usdt_trc20_daily_vol_usd_b": 18.5,
+            "energy_rental_apy_pct": 9.7,
+        }
+
+        for sym in TechnicalAnalysisTool.TRON_EXCLUSIVE_ASSETS:
+            for venue in TechnicalAnalysisTool.TRON_VENUES:
+                res = TechnicalAnalysisTool.compute_tron_ta_metrics(
+                    candles=sample_candles,
+                    bids=sample_bids,
+                    asks=sample_asks,
+                    onchain_telemetry=sample_telemetry,
+                    symbol=sym,
+                    venue=venue,
+                )
+                self.assertEqual(res["symbol"], sym)
+                self.assertEqual(res["venue"], venue)
+                self.assertEqual(res["ta_metrics_source"], "LIVE_COMPUTED")
+                self.assertEqual(res["usdt_trc20_daily_vol_usd_b"], 18.5)
+                self.assertEqual(res["energy_rental_apy_pct"], 9.7)
+                self.assertIn("kumo_regime", res)
+                self.assertIn("golden_pocket_fib_618", res)
+                self.assertIn("rsi_14", res)
+                self.assertIn("obi_l2", res)
+
+        market_feeds = {
+            "TRX-USDT": {
+                "candles": sample_candles,
+                "bids": sample_bids,
+                "asks": sample_asks,
+            }
+        }
+        ingest_res = TechnicalAnalysisTool.ingest_tron_market_snapshot(
+            market_feeds=market_feeds,
+            onchain_telemetry=sample_telemetry,
+            venue="SunSwap v3",
+        )
+        self.assertEqual(ingest_res["ta_metrics_source"], "LIVE_COMPUTED")
+        self.assertEqual(ingest_res["symbol"], "TRX-USDT")
+
+        fallback_res = TechnicalAnalysisTool.compute_tron_ta_metrics(
+            candles=[],
+            bids=None,
+            asks=None,
+            onchain_telemetry=None,
+            symbol="TRX-USDT",
+            venue="SunSwap v3",
+        )
+        self.assertEqual(fallback_res["ta_metrics_source"], "CATALOG_FIXTURE")
+        self.assertIn("usdt_trc20_daily_vol_usd_b", fallback_res)
+        self.assertIn("energy_rental_apy_pct", fallback_res)
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_tron_ta_metrics(symbol="BTC-USD", venue="SunSwap v3")
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_tron_ta_metrics(symbol="TRX-USDT", venue="InvalidVenue")
+
+
+
 if __name__ == "__main__":
     unittest.main()
     unittest.main()
