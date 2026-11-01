@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 class EcosystemRSSAggregator:
@@ -258,13 +258,236 @@ class EcosystemRSSAggregator:
     CURATED_FIXTURE_TIMESTAMP_MS: int = 1730000000000
 
     @classmethod
+    def parse_feed_xml(
+        cls,
+        xml_bytes: bytes,
+        source_name: str,
+        agent_id: str = "leaf-bitcoin",
+        max_items: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Parses RSS 2.0 (<item>) or Atom (<entry> / {http://www.w3.org/2005/Atom}entry) XML bytes
+        into normalized item dictionaries enriched with catalyst scoring and strictly scoped assets.
+        """
+        now_ms = int(time.time() * 1000)
+        items: List[Dict[str, Any]] = []
+        try:
+            root = ET.fromstring(xml_bytes)
+        except Exception:
+            return items
+
+        node_elements = root.findall(".//item") + root.findall(".//{http://www.w3.org/2005/Atom}entry") + root.findall(".//{*}entry") + root.findall(".//entry")
+        # Deduplicate nodes by id/object identity while preserving order
+        seen = set()
+        unique_nodes = []
+        for n in node_elements:
+            if id(n) not in seen:
+                seen.add(id(n))
+                unique_nodes.append(n)
+        node_elements = unique_nodes
+
+        for node in node_elements[:max_items]:
+            title = (
+                node.findtext("title")
+                or node.findtext("{http://www.w3.org/2005/Atom}title")
+                or ""
+            ).strip()
+            summary = (
+                node.findtext("description")
+                or node.findtext("summary")
+                or node.findtext("{http://www.w3.org/2005/Atom}summary")
+                or node.findtext("{http://www.w3.org/2005/Atom}content")
+                or ""
+            ).strip()
+
+            if not title:
+                continue
+
+            scored = cls.score_bitcoin_catalyst(title, summary)
+            items.append(
+                {
+                    "source": source_name,
+                    "title": title[:180],
+                    "summary": summary[:300],
+                    "sentiment": scored["sentiment"],
+                    "catalyst_score": scored["catalyst_score"],
+                    "impact": scored["impact"],
+                    "category": scored["category"],
+                    "affected_assets": scored["affected_assets"],
+                    "source_kind": "LIVE_RSS",
+                    "curated": False,
+                    "timestamp_ms": now_ms,
+                }
+            )
+
+        return items
+
+    @classmethod
+    def score_bitcoin_catalyst(cls, title: str, summary: str = "") -> Dict[str, Any]:
+        """
+        Classifies Bitcoin-specific catalyst signals strictly scoped to BTC-USD, wBTC-BTC, and sBTC-BTC.
+        """
+        combined = f"{title} {summary}".lower()
+
+        if any(w in combined for w in ["etf", "spot", "inflow", "outflow", "fund", "blackrock", "fidelity"]):
+            category = "BTC_ETF_FLOW"
+        elif any(w in combined for w in ["mempool", "fee", "sat/vb", "congestion", "block"]):
+            category = "BTC_MEMPOOL_FEES"
+        elif any(w in combined for w in ["hash", "ribbon", "mining", "miner", "difficulty", "hashrate"]):
+            category = "BTC_HASH_RIBBON"
+        elif any(w in combined for w in ["wbtc", "sbtc", "bridge", "wrapped", "peg"]):
+            category = "BTC_WBTC_SBTC_BRIDGE"
+        else:
+            category = "BTC_PROTOCOL_OPTECH"
+
+        if any(w in combined for w in ["record", "surge", "collapse", "major", "halving", "upgrade", "etf"]):
+            impact = "HIGH"
+        elif any(w in combined for w in ["moderate", "stable", "shift", "expansion", "growth"]):
+            impact = "MEDIUM"
+        else:
+            impact = "LOW"
+
+        pos_keywords = ["surge", "accumulation", "expansion", "inflow", "calm", "stable", "growth", "bullish", "high"]
+        neg_keywords = ["outflow", "congestion", "drop", "decline", "risk", "pressure", "bearish"]
+
+        score_mod = 0.0
+        for pk in pos_keywords:
+            if pk in combined:
+                score_mod += 0.15
+        for nk in neg_keywords:
+            if nk in combined:
+                score_mod -= 0.15
+
+        sentiment = max(-1.0, min(1.0, round(0.60 + score_mod, 2)))
+        catalyst_score = max(-1.0, min(1.0, round(0.65 + score_mod, 2)))
+
+        if "wbtc" in combined:
+            affected_assets = ["wBTC-BTC", "BTC-USD"]
+        elif "sbtc" in combined:
+            affected_assets = ["sBTC-BTC", "BTC-USD"]
+        else:
+            affected_assets = ["BTC-USD", "wBTC-BTC", "sBTC-BTC"]
+
+        return {
+            "sentiment": sentiment,
+            "catalyst_score": catalyst_score,
+            "impact": impact,
+            "category": category,
+            "affected_assets": affected_assets,
+        }
+
+    @classmethod
+    def verify_and_ingest_bitcoin_feeds(
+        cls,
+        xml_payloads: Optional[Dict[str, bytes]] = None,
+        try_network: bool = False,
+        max_items: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Iterates across all configured `leaf-bitcoin` RSS/Atom sources, parses live or injected XML,
+        falls back cleanly to curated fixtures when offline/unreachable, and computes composite metrics.
+        """
+        now_ms = int(time.time() * 1000)
+        sources = cls.ECOSYSTEM_RSS_SOURCES.get("leaf-bitcoin", [])
+        items: List[Dict[str, Any]] = []
+        live_count = 0
+
+        xml_payloads = xml_payloads or {}
+
+        for src in sources:
+            s_name = src["name"]
+            s_url = src["url"]
+            payload = xml_payloads.get(s_name) or xml_payloads.get(s_url) or xml_payloads.get("https://bitcoinops.org/feed.xml" if "Optech" in s_name else "https://mempool.space/rss")
+            if payload is None:
+                for k, v in xml_payloads.items():
+                    if s_name.lower() in k.lower() or k.lower() in s_name.lower() or s_url in k or k in s_url:
+                        payload = v
+                        break
+
+            if payload is None and try_network:
+                try:
+                    req = urllib.request.Request(
+                        s_url,
+                        headers={"User-Agent": "Robotrader-v3-RSS/1.0"},
+                    )
+                    with urllib.request.urlopen(req, timeout=1.5) as resp:
+                        payload = resp.read()
+                except Exception:
+                    payload = None
+
+            if payload is not None:
+                parsed = cls.parse_feed_xml(payload, s_name, agent_id="leaf-bitcoin", max_items=max_items)
+                if parsed:
+                    items.extend(parsed)
+                    live_count += len(parsed)
+
+        if not items:
+            curated = cls.CURATED_ECOSYSTEM_ITEMS.get("leaf-bitcoin", [])
+            for item in curated[:max_items]:
+                entry = dict(item)
+                entry["source_kind"] = "CURATED_FIXTURE"
+                entry["curated"] = True
+                entry["timestamp_ms"] = item.get("timestamp_ms", cls.CURATED_FIXTURE_TIMESTAMP_MS)
+                scored = cls.score_bitcoin_catalyst(entry.get("title", ""), entry.get("summary", ""))
+                entry.setdefault("sentiment", scored["sentiment"])
+                entry.setdefault("catalyst_score", scored["catalyst_score"])
+                entry.setdefault("impact", scored["impact"])
+                entry.setdefault("category", scored["category"])
+                entry.setdefault("affected_assets", scored["affected_assets"])
+                items.append(entry)
+
+        avg_sentiment = (
+            round(sum(float(i.get("sentiment", 0.5)) for i in items) / len(items), 2)
+            if items
+            else 0.5
+        )
+        avg_catalyst = (
+            round(sum(float(i.get("catalyst_score", 0.5)) for i in items) / len(items), 2)
+            if items
+            else 0.5
+        )
+
+        curated_count = sum(1 for i in items if i.get("source_kind") == "CURATED_FIXTURE")
+        if live_count > 0 and curated_count == 0:
+            feed_mode = "LIVE"
+        elif live_count > 0 and curated_count > 0:
+            feed_mode = "MIXED"
+        else:
+            feed_mode = "CURATED_FALLBACK"
+
+        return {
+            "agent_id": "leaf-bitcoin",
+            "sources": sources,
+            "composite_sentiment": avg_sentiment,
+            "composite_catalyst_score": avg_catalyst,
+            "items": items,
+            "feed_mode": feed_mode,
+            "live_count": live_count,
+            "curated_count": curated_count,
+            "updated_at_ms": now_ms,
+        }
+
+    @classmethod
     def get_feed_for_agent(
         cls, agent_id: str, try_network: bool = False, max_items: int = 5
     ) -> Dict[str, Any]:
         """
         Returns strictly ecosystem-scoped RSS items and composite sentiment for `agent_id`
-        (`master` or `leaf-<ecosystem>`).
+        (`master` or `leaf-<ecosystem>`). Supports RSS 2.0 (<item>) and Atom (<entry>) for bitcoin.
         """
+        if agent_id == "leaf-bitcoin":
+            res = cls.verify_and_ingest_bitcoin_feeds(try_network=try_network, max_items=max_items)
+            return {
+                "agent_id": res["agent_id"],
+                "sources": res["sources"],
+                "composite_sentiment": res["composite_sentiment"],
+                "items": res["items"],
+                "feed_mode": res["feed_mode"],
+                "live_count": res["live_count"],
+                "curated_count": res["curated_count"],
+                "updated_at_ms": res["updated_at_ms"],
+            }
+
         now_ms = int(time.time() * 1000)
         sources = cls.ECOSYSTEM_RSS_SOURCES.get(
             agent_id,
@@ -346,4 +569,3 @@ class EcosystemRSSAggregator:
 
 
 CURATED_FIXTURE_TIMESTAMP_MS = EcosystemRSSAggregator.CURATED_FIXTURE_TIMESTAMP_MS
-
