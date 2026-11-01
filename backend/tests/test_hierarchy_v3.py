@@ -969,6 +969,86 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
             self.assertTrue(item["curated"])
             self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
 
+    def test_sui_rss_atom_parsing_and_catalyst_scoring(self) -> None:
+        """
+        Verifies RSS 2.0 ("Sui Foundation & DeepBook Updates") and Atom XML parsing,
+        score_sui_catalyst classification across SUI-USDC, DEEP-SUI, CETUS-SUI
+        (zero non-Sui symbols), and CURATED_FALLBACK behavior.
+        """
+        atom_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Sui Foundation &amp; DeepBook Updates</title>
+          <entry>
+            <title>DeepBook v3 CLOB record throughput and CETUS CLMM expansion</title>
+            <summary>Navi Protocol lending growth, mysticeti finality under 390ms.</summary>
+          </entry>
+        </feed>
+        """
+        rss_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Sui Foundation &amp; DeepBook Updates</title>
+            <item>
+              <title>Sui protocol upgrade and DEEP token surge</title>
+              <description>Navi borrow collateral stable, CETUS liquidity.</description>
+            </item>
+          </channel>
+        </rss>
+        """
+
+        payloads = {
+            "Sui Foundation & DeepBook Updates": rss_xml,
+        }
+
+        feed_res = EcosystemRSSAggregator.verify_and_ingest_sui_feeds(
+            xml_payloads=payloads, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res["agent_id"], "leaf-sui")
+        self.assertEqual(feed_res["feed_mode"], "LIVE")
+        self.assertEqual(feed_res["live_count"], 1)
+        self.assertEqual(feed_res["curated_count"], 0)
+        self.assertGreaterEqual(len(feed_res["items"]), 1)
+
+        for item in feed_res["items"]:
+            self.assertEqual(item["source_kind"], "LIVE_RSS")
+            self.assertFalse(item["curated"])
+            self.assertIn("catalyst_score", item)
+            self.assertIn("impact", item)
+            self.assertIn("category", item)
+            self.assertIn("affected_assets", item)
+            for asset in item["affected_assets"]:
+                self.assertIn(asset, ["SUI-USDC", "DEEP-SUI", "CETUS-SUI"])
+
+        for asset in ["SUI-USDC", "DEEP-SUI", "CETUS-SUI"]:
+            self.assertIn(asset, feed_res["asset_catalyst_scores"])
+
+        # Test Atom parsing too
+        payloads2 = {
+            "Sui Foundation & DeepBook Updates": atom_xml,
+        }
+        feed_res2 = EcosystemRSSAggregator.verify_and_ingest_sui_feeds(
+            xml_payloads=payloads2, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res2["feed_mode"], "LIVE")
+        self.assertEqual(feed_res2["live_count"], 1)
+
+        # Test fallback when payloads are empty and network is disabled
+        fallback_res = EcosystemRSSAggregator.verify_and_ingest_sui_feeds(
+            xml_payloads={}, try_network=False, max_items=5
+        )
+        self.assertEqual(fallback_res["feed_mode"], "CURATED_FALLBACK")
+        self.assertEqual(fallback_res["live_count"], 0)
+        self.assertGreater(fallback_res["curated_count"], 0)
+        for item in fallback_res["items"]:
+            self.assertEqual(item["source_kind"], "CURATED_FIXTURE")
+            self.assertTrue(item["curated"])
+            self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
+
+        # get_feed_for_agent serves Sui
+        feed = EcosystemRSSAggregator.get_feed_for_agent("leaf-sui", try_network=False)
+        self.assertIn("items", feed)
+        self.assertIn("feed_mode", feed)
+
     def test_sui_leaf_ta_metrics_computation_and_fallback(self) -> None:
         """
         Verifies TechnicalAnalysisTool.compute_sui_ta_metrics and ingest_sui_market_snapshot
