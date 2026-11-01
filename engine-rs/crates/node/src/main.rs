@@ -1,4 +1,7 @@
-use robotrader_backtest::{benchmark_market_stream_for_leaf, BacktestEngine};
+use robotrader_backtest::{
+    benchmark_market_stream_for_leaf, simulation_market_stream_for_leaf, BacktestEngine,
+    EventDrivenBacktestEngine,
+};
 use robotrader_common::PolicyEnvelope;
 use robotrader_risk_gate::{
     read_mode_input, read_seed_input, select_vault_mode, CryptoVaultBootstrap,
@@ -66,11 +69,14 @@ fn main() {
     let mut vault_allowlist_file: Option<PathBuf> = None;
     let mut validate_refill = false;
     let mut validate_refill_json: Option<String> = None;
+    let mut simulate_fills = false;
 
     for i in 0..args.len() {
         if (args[i] == "--leaf-id" || args[i] == "--leaf") && i + 1 < args.len() {
             leaf_id = args[i + 1].clone();
             custom_leaf_id = Some(args[i + 1].clone());
+        } else if args[i] == "--simulate-fills" {
+            simulate_fills = true;
         } else if args[i] == "--policy-json" && i + 1 < args.len() {
             custom_policy_json = Some(args[i + 1].clone());
         } else if args[i] == "--dump-pod-catalog" || args[i] == "--export-pod-catalog" {
@@ -358,6 +364,17 @@ fn main() {
         },
         None => None,
     };
+
+    if simulate_fills {
+        let (events, default_envelope) = simulation_market_stream_for_leaf(&leaf_id);
+        let envelope = custom_envelope.unwrap_or(default_envelope);
+
+        let engine = EventDrivenBacktestEngine::default();
+        let summary = engine.run_for_leaf(&leaf_id, &events, &envelope);
+        let json = serde_json::to_string_pretty(&summary).expect("Failed to serialize simulation summary");
+        println!("{json}");
+        return;
+    }
 
     let (events, default_envelope) = benchmark_market_stream_for_leaf(&leaf_id);
     let envelope = custom_envelope.unwrap_or(default_envelope);

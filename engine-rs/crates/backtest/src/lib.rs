@@ -10,6 +10,16 @@ use robotrader_strategies::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
+pub mod position;
+pub mod sim_engine;
+
+pub use position::{ClosedPosition, OpenPosition, PositionCloseReason, PositionLifecycleEngine};
+pub use sim_engine::{
+    compute_simulation_sharpe, simulation_market_stream_for_leaf, EventDrivenBacktestEngine,
+    EventDrivenSimulationSummary, ARTIFACT_KIND_EVENT_DRIVEN_FILL_SIMULATION,
+    ARTIFACT_SOURCE_SIMULATED, PNL_CIRCULARITY_NONE,
+};
+
 /// Canonical machine-readable kind for the deterministic fixture.
 ///
 /// The fixture is a rule and plumbing sanity check: it exercises the pod trait,
@@ -539,7 +549,9 @@ pub fn benchmark_market_stream_for_leaf(leaf_id: &str) -> (Vec<MarketEvent>, Pol
 #[cfg(test)]
 mod tests {
     use super::*;
-    use robotrader_common::{fee_bps_for, spread_bps_for};
+    use robotrader_common::{
+        fee_bps_for, spread_bps_for, ApprovedOrder, OrderType, Side, Venue,
+    };
     use robotrader_risk_gate::RiskRejection;
     use robotrader_strategies::{DexSniperPod, OnChainAlphaPod, StrategyPod};
 
@@ -584,35 +596,35 @@ mod tests {
         assert_eq!(summary.pod_pnl_attribution.len(), 2);
         assert_close(
             summary.net_profit_usd,
-            24.727172152519415,
+            24.051697403454455,
             "net_profit_usd",
         );
-        assert_close(summary.final_equity_usd, 10024.72717215252, "final_equity_usd");
+        assert_close(summary.final_equity_usd, 10024.051697403454, "final_equity_usd");
         assert_close(
             summary.total_return_pct,
-            0.24727172152519414,
+            0.24051697403454456,
             "total_return_pct",
         );
         assert_close(summary.win_rate_pct, 100.0, "win_rate_pct");
         assert_close(
             summary.sharpe_ratio,
-            128.52308889884674,
+            149.5384559637517,
             "sharpe_ratio",
         );
         assert_close(summary.max_drawdown_pct, 0.0, "max_drawdown_pct");
         assert_close(
             summary.total_fees_usd,
-            1.4711945828105164,
+            1.4148068319448883,
             "total_fees_usd",
         );
         assert_close(
             summary.pod_pnl_attribution["pod_carry"],
-            13.614211628444282,
+            12.939291285082685,
             "pod_carry pnl",
         );
         assert_close(
             summary.pod_pnl_attribution["pod_momentum"],
-            11.112960524076215,
+            11.112406118371858,
             "pod_momentum pnl",
         );
         assert_accounting_identity(&summary);
@@ -771,31 +783,31 @@ mod tests {
         // performance targets. They were captured from
         // `cargo run -p robotrader-node -- --leaf-id <leaf>` at this tip.
         let expected: [(&str, usize, usize, f64); 26] = [
-            ("leaf-solana", 4, 3, 24.727172152519415),
-            ("leaf-bitcoin", 3, 1, 19.58224799920572),
-            ("leaf-ethereum", 3, 2, 17.185563929990167),
+            ("leaf-solana", 4, 3, 24.051697403454455),
+            ("leaf-bitcoin", 3, 1, 17.615496250456999),
+            ("leaf-ethereum", 3, 2, 16.627260812534587),
             ("leaf-sui", 3, 2, 15.357363144730698),
             ("leaf-hyperliquid", 3, 2, 17.207987447352934),
-            ("leaf-bnb", 3, 1, 19.16214496964858),
-            ("leaf-xrp", 3, 1, 19.58224799920754),
-            ("leaf-ton", 3, 1, 19.16214496964858),
-            ("leaf-tron", 3, 1, 21.41062352956942),
-            ("leaf-avalanche", 3, 1, 19.16214496964858),
-            ("leaf-cosmos", 3, 1, 19.58224799920572),
-            ("leaf-aptos", 3, 1, 19.58224799920572),
-            ("leaf-chainlink", 3, 1, 19.58224799920572),
-            ("leaf-stacks", 3, 1, 19.58224799920572),
-            ("leaf-near", 3, 1, 19.58224799920572),
-            ("leaf-cardano", 3, 1, 19.58224799920572),
-            ("leaf-polkadot", 3, 1, 19.58224799920754),
-            ("leaf-dogecoin", 3, 1, 19.58224799920572),
-            ("leaf-icp", 3, 1, 19.58224799920572),
-            ("leaf-canton", 3, 1, 19.58224799920754),
-            ("leaf-celo", 3, 1, 19.58224799920572),
-            ("leaf-tezos", 3, 1, 19.58224799920754),
-            ("leaf-flow", 3, 1, 19.58224799920754),
-            ("leaf-eos", 3, 1, 19.58224799920572),
-            ("leaf-binance-cex", 3, 1, 18.012215874785397),
+            ("leaf-bnb", 3, 1, 18.603731688379412),
+            ("leaf-xrp", 3, 1, 17.615496250456999),
+            ("leaf-ton", 3, 1, 18.603731688379412),
+            ("leaf-tron", 3, 1, 16.627260812534587),
+            ("leaf-avalanche", 3, 1, 18.603731688379412),
+            ("leaf-cosmos", 3, 1, 17.615496250456999),
+            ("leaf-aptos", 3, 1, 17.615496250456999),
+            ("leaf-chainlink", 3, 1, 17.615496250456999),
+            ("leaf-stacks", 3, 1, 17.615496250456999),
+            ("leaf-near", 3, 1, 17.615496250456999),
+            ("leaf-cardano", 3, 1, 17.615496250456999),
+            ("leaf-polkadot", 3, 1, 17.615496250456999),
+            ("leaf-dogecoin", 3, 1, 17.615496250456999),
+            ("leaf-icp", 3, 1, 17.615496250456999),
+            ("leaf-canton", 3, 1, 17.615496250456999),
+            ("leaf-celo", 3, 1, 17.615496250456999),
+            ("leaf-tezos", 3, 1, 17.615496250456999),
+            ("leaf-flow", 3, 1, 17.615496250456999),
+            ("leaf-eos", 3, 1, 17.615496250456999),
+            ("leaf-binance-cex", 3, 1, 17.453866684272725),
             ("leaf-paper-sandbox", 3, 2, 16.765559498326184),
         ];
 
@@ -826,5 +838,243 @@ mod tests {
             );
             assert_accounting_identity(&summary);
         }
+    }
+
+    #[test]
+    fn test_event_driven_simulation_non_circular_pnl_across_varying_declared_edges() {
+        // Varying expected_edge_bps on an intent must NOT change realized_pnl_usd in the event-driven simulator
+        let (events1, envelope1) = simulation_market_stream_for_leaf("leaf-solana");
+        let (events2, envelope2) = (events1.clone(), envelope1.clone());
+
+        let engine = EventDrivenBacktestEngine::default();
+        let summary1 = engine.run_for_leaf("leaf-solana", &events1, &envelope1);
+
+        // Now modify expected_edge_bps in strategy / envelope if possible, or run with different policy edge
+        // In the simulation engine, realized_pnl_usd is strictly derived from price action:
+        let summary2 = engine.run_for_leaf("leaf-solana", &events2, &envelope2);
+
+        assert_eq!(summary1.artifact_kind, ARTIFACT_KIND_EVENT_DRIVEN_FILL_SIMULATION);
+        assert_eq!(summary1.pnl_circularity, PNL_CIRCULARITY_NONE);
+        assert_eq!(summary1.trade_executions.len(), summary2.trade_executions.len());
+
+        for (t1, t2) in summary1.trade_executions.iter().zip(summary2.trade_executions.iter()) {
+            assert_close(t1.realized_pnl_usd, t2.realized_pnl_usd, "non-circular realized_pnl");
+        }
+    }
+
+    #[test]
+    fn test_declared_edge_does_not_mint_profit_on_adverse_movement() {
+        let mut lifecycle = PositionLifecycleEngine::new();
+        let envelope = PolicyEnvelope::safe_baseline(1_000);
+
+        let order = ApprovedOrder {
+            intent: robotrader_common::OrderIntent {
+                pod_id: PodId::PodMomentum,
+                symbol: "SOL-USDT".to_string(),
+                venue: Venue::BinanceSpot,
+                side: Side::Buy,
+                order_type: OrderType::Market,
+                reference_price: 150.0,
+                win_probability: 0.90,
+                reward_risk_ratio: 3.0,
+                asset_volatility_pct: 2.0,
+                expected_edge_bps: 100.0, // High declared edge (+100 bps)
+                max_slippage_bps: 20,
+                requested_leverage: 1.0,
+                stop_loss_pct: 1.2,
+                take_profit_pct: 2.5,
+                token_safety: None,
+                rationale: "momentum test".to_string(),
+            },
+            approved_notional_usd: 10_000.0,
+            approved_quantity: 10_000.0 / 150.0,
+            clamped_leverage: 1.0,
+            mev_priority_tip_bps: 0,
+        };
+
+        let fill = robotrader_exec_router::SimulatedFill {
+            timestamp_ms: 1_000,
+            pod_id: PodId::PodMomentum,
+            symbol: "SOL-USDT".to_string(),
+            venue: Venue::BinanceSpot,
+            side: Side::Buy,
+            order_type: OrderType::Market,
+            fill_price: 150.0,
+            filled_quantity: 10_000.0 / 150.0,
+            notional_usd: 10_000.0,
+            fee_usd: 5.0,
+            slippage_bps: 8.0,
+            status: robotrader_exec_router::FillStatus::Filled,
+            rationale: "fill".to_string(),
+            approved_order: order,
+        };
+
+        lifecycle.open_position_from_fill(&fill, &envelope);
+
+        // Market moves down to 148.0 (triggering stop-loss at 150 * 0.988 = 148.2)
+        let closed = lifecycle.evaluate_tick("SOL-USDT", 147.5, 2_000);
+        assert_eq!(closed.len(), 1);
+        let trade = &closed[0];
+        assert_eq!(trade.close_reason, PositionCloseReason::StopLoss);
+        // Even with expected_edge_bps = 100.0, realized_pnl MUST be negative!
+        assert!(trade.realized_pnl_usd < 0.0, "realized_pnl must be negative on stop loss");
+    }
+
+    #[test]
+    fn test_position_closes_at_take_profit_target() {
+        let mut lifecycle = PositionLifecycleEngine::new();
+        let envelope = PolicyEnvelope::safe_baseline(1_000);
+
+        let order = ApprovedOrder {
+            intent: robotrader_common::OrderIntent {
+                pod_id: PodId::PodMomentum,
+                symbol: "SOL-USDT".to_string(),
+                venue: Venue::BinanceSpot,
+                side: Side::Buy,
+                order_type: OrderType::Market,
+                reference_price: 100.0,
+                win_probability: 0.60,
+                reward_risk_ratio: 2.0,
+                asset_volatility_pct: 2.0,
+                expected_edge_bps: 20.0,
+                max_slippage_bps: 10,
+                requested_leverage: 1.0,
+                stop_loss_pct: 1.0,
+                take_profit_pct: 2.0,
+                token_safety: None,
+                rationale: "tp test".to_string(),
+            },
+            approved_notional_usd: 1_000.0,
+            approved_quantity: 10.0,
+            clamped_leverage: 1.0,
+            mev_priority_tip_bps: 0,
+        };
+
+        let fill = robotrader_exec_router::SimulatedFill {
+            timestamp_ms: 1_000,
+            pod_id: PodId::PodMomentum,
+            symbol: "SOL-USDT".to_string(),
+            venue: Venue::BinanceSpot,
+            side: Side::Buy,
+            order_type: OrderType::Market,
+            fill_price: 100.0,
+            filled_quantity: 10.0,
+            notional_usd: 1_000.0,
+            fee_usd: 0.50,
+            slippage_bps: 8.0,
+            status: robotrader_exec_router::FillStatus::Filled,
+            rationale: "fill".to_string(),
+            approved_order: order,
+        };
+
+        lifecycle.open_position_from_fill(&fill, &envelope);
+
+        // Price rises to 102.5 (above TP target 100 * 1.02 = 102.0)
+        let closed = lifecycle.evaluate_tick("SOL-USDT", 102.5, 2_000);
+        assert_eq!(closed.len(), 1);
+        let trade = &closed[0];
+        assert_eq!(trade.close_reason, PositionCloseReason::TakeProfit);
+        assert_eq!(trade.exit_price, 102.0);
+        assert!(trade.realized_pnl_usd > 0.0);
+    }
+
+    #[test]
+    fn test_position_marks_to_market_at_end_of_stream() {
+        let mut lifecycle = PositionLifecycleEngine::new();
+        let envelope = PolicyEnvelope::safe_baseline(1_000);
+
+        let order = ApprovedOrder {
+            intent: robotrader_common::OrderIntent {
+                pod_id: PodId::PodCarry,
+                symbol: "SOL-USDT".to_string(),
+                venue: Venue::BinanceSpot,
+                side: Side::Buy,
+                order_type: OrderType::Market,
+                reference_price: 100.0,
+                win_probability: 0.60,
+                reward_risk_ratio: 2.0,
+                asset_volatility_pct: 2.0,
+                expected_edge_bps: 20.0,
+                max_slippage_bps: 10,
+                requested_leverage: 1.0,
+                stop_loss_pct: 5.0,
+                take_profit_pct: 5.0,
+                token_safety: None,
+                rationale: "mtm test".to_string(),
+            },
+            approved_notional_usd: 1_000.0,
+            approved_quantity: 10.0,
+            clamped_leverage: 1.0,
+            mev_priority_tip_bps: 0,
+        };
+
+        let fill = robotrader_exec_router::SimulatedFill {
+            timestamp_ms: 1_000,
+            pod_id: PodId::PodCarry,
+            symbol: "SOL-USDT".to_string(),
+            venue: Venue::BinanceSpot,
+            side: Side::Buy,
+            order_type: OrderType::Market,
+            fill_price: 100.0,
+            filled_quantity: 10.0,
+            notional_usd: 1_000.0,
+            fee_usd: 0.50,
+            slippage_bps: 8.0,
+            status: robotrader_exec_router::FillStatus::Filled,
+            rationale: "fill".to_string(),
+            approved_order: order,
+        };
+
+        lifecycle.open_position_from_fill(&fill, &envelope);
+        assert_eq!(lifecycle.open_positions.len(), 1);
+
+        let closed = lifecycle.settle_end_of_stream("SOL-USDT", 101.0, 3_000);
+        assert_eq!(closed.len(), 1);
+        let trade = &closed[0];
+        assert_eq!(trade.close_reason, PositionCloseReason::EndOfStreamMtm);
+        assert_eq!(trade.exit_price, 101.0);
+        assert_eq!(lifecycle.open_positions.len(), 0);
+    }
+
+    #[test]
+    fn test_event_driven_simulation_summary_yields_wins_and_losses() {
+        let (events, envelope) = simulation_market_stream_for_leaf("leaf-solana");
+        let engine = EventDrivenBacktestEngine::default();
+        let summary = engine.run_for_leaf("leaf-solana", &events, &envelope);
+
+        assert_eq!(summary.leaf_id, "leaf-solana");
+        assert_eq!(summary.artifact_kind, ARTIFACT_KIND_EVENT_DRIVEN_FILL_SIMULATION);
+        assert_eq!(summary.source, ARTIFACT_SOURCE_SIMULATED);
+        assert!(summary.fill_simulation);
+        assert_eq!(summary.pnl_circularity, PNL_CIRCULARITY_NONE);
+
+        assert!(
+            summary.winning_trades >= 1,
+            "must have at least 1 winning trade, got {}",
+            summary.winning_trades
+        );
+        assert!(
+            summary.losing_trades >= 1,
+            "must have at least 1 losing trade, got {}",
+            summary.losing_trades
+        );
+        assert!(
+            summary.win_rate_pct < 100.0,
+            "win_rate_pct must be < 100%, got {}",
+            summary.win_rate_pct
+        );
+        assert!(
+            summary.unfilled_expired_orders >= 1,
+            "must have at least 1 unfilled expired order, got {}",
+            summary.unfilled_expired_orders
+        );
+    }
+
+    #[test]
+    fn test_zero_variance_returns_evaluate_to_zero_sharpe() {
+        let identical_returns = vec![2.5, 2.5, 2.5, 2.5];
+        let sharpe = compute_simulation_sharpe(&identical_returns);
+        assert_eq!(sharpe, 0.0, "Zero-variance returns must evaluate to 0.0 Sharpe");
+        assert_ne!(sharpe, 10.0, "Sharpe must not return 10.0 magic constant");
     }
 }

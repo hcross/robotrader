@@ -525,6 +525,10 @@ pub struct PortfolioState {
     pub daily_start_equity_usd: f64,
     pub asset_exposures_usd: HashMap<String, f64>,
     pub pod_exposures_usd: HashMap<String, f64>,
+    #[serde(default)]
+    pub gross_exposure_usd: f64,
+    #[serde(default)]
+    pub last_order_ts_ms: HashMap<String, u64>,
 }
 
 impl PortfolioState {
@@ -536,6 +540,8 @@ impl PortfolioState {
             daily_start_equity_usd: initial_equity_usd,
             asset_exposures_usd: HashMap::new(),
             pod_exposures_usd: HashMap::new(),
+            gross_exposure_usd: 0.0,
+            last_order_ts_ms: HashMap::new(),
         }
     }
 
@@ -581,6 +587,60 @@ mod tests {
         assert_eq!(
             env.effective(1_061_000).envelope_id,
             "safe_baseline_fallback"
+        );
+    }
+
+    #[test]
+    fn test_legacy_portfolio_state_omitting_exposure_fields_decodes_cleanly() {
+        let legacy_json = r#"{
+            "initial_equity_usd": 10000.0,
+            "current_equity_usd": 9850.0,
+            "high_water_mark_usd": 10500.0,
+            "daily_start_equity_usd": 10000.0,
+            "asset_exposures_usd": {"SOL-USDT": 1500.0},
+            "pod_exposures_usd": {"pod_carry": 1500.0}
+        }"#;
+
+        let state: PortfolioState =
+            serde_json::from_str(legacy_json).expect("legacy JSON must deserialize");
+        assert_eq!(state.initial_equity_usd, 10000.0);
+        assert_eq!(state.current_equity_usd, 9850.0);
+        assert_eq!(state.high_water_mark_usd, 10500.0);
+        assert_eq!(state.daily_start_equity_usd, 10000.0);
+        assert_eq!(state.asset_exposures_usd.get("SOL-USDT"), Some(&1500.0));
+        assert_eq!(state.pod_exposures_usd.get("pod_carry"), Some(&1500.0));
+        assert_eq!(state.gross_exposure_usd, 0.0);
+        assert!(state.last_order_ts_ms.is_empty());
+    }
+
+    #[test]
+    fn test_portfolio_state_roundtrip_preserves_all_fields() {
+        let mut state = PortfolioState::new(10000.0);
+        state.current_equity_usd = 10250.0;
+        state.high_water_mark_usd = 10500.0;
+        state.daily_start_equity_usd = 10000.0;
+        state.asset_exposures_usd.insert("SOL-USDT".to_string(), 1500.0);
+        state.asset_exposures_usd.insert("BTC-USDT".to_string(), -800.0);
+        state.pod_exposures_usd.insert("pod_carry".to_string(), 1500.0);
+        state.pod_exposures_usd.insert("pod_momentum".to_string(), 800.0);
+        state.gross_exposure_usd = 5000.0;
+        state
+            .last_order_ts_ms
+            .insert("pod_carry:SOL-USDT".to_string(), 1792180000123);
+
+        let json = serde_json::to_string(&state).expect("state must serialize");
+        let decoded: PortfolioState = serde_json::from_str(&json).expect("state must deserialize");
+
+        assert_eq!(decoded.initial_equity_usd, state.initial_equity_usd);
+        assert_eq!(decoded.current_equity_usd, state.current_equity_usd);
+        assert_eq!(decoded.high_water_mark_usd, state.high_water_mark_usd);
+        assert_eq!(decoded.daily_start_equity_usd, state.daily_start_equity_usd);
+        assert_eq!(decoded.asset_exposures_usd, state.asset_exposures_usd);
+        assert_eq!(decoded.pod_exposures_usd, state.pod_exposures_usd);
+        assert_eq!(decoded.gross_exposure_usd, 5000.0);
+        assert_eq!(
+            decoded.last_order_ts_ms.get("pod_carry:SOL-USDT"),
+            Some(&1792180000123)
         );
     }
 }

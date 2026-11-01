@@ -6,6 +6,8 @@ import os
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Deque, Dict, Iterator, List, Optional, Tuple
@@ -145,6 +147,13 @@ class LLMMonitorAgent(BaseWarmAgent):
         self.auto_refill_enabled: bool = True
         self.refill_history: List[Dict[str, Any]] = []
         self.last_refill_rejection: Optional[Dict[str, Any]] = None
+
+        # Provenance, live reconciliation, and settlement metadata
+        self.balance_source: str = "SIMULATED_INTERNAL_LEDGER"
+        self.reconciliation_status: str = "UNRECONCILED"
+        self.last_reconciled_ms: Optional[int] = None
+        self.reconciled_balance_usd: Optional[float] = None
+        self._refill_seq: int = 0
 
     @staticmethod
     def _resolve_ledger_path(ledger_path: Optional[Path | str]) -> Path:
@@ -543,6 +552,112 @@ class LLMMonitorAgent(BaseWarmAgent):
             force=force,
         )
 
+    def reconcile_openrouter_credits(
+        self, timeout_sec: float = 3.0
+    ) -> Dict[str, Any]:
+        """
+        Reconciles the inference credit balance against the live OpenRouter API.
+
+        Queries `GET https://openrouter.ai/api/v1/credits` with bearer authentication.
+        If the API key is missing or a placeholder, skips the probe and preserves simulated provenance.
+        On success, updates `openrouter_balance_usd` to (credits - usage) and transitions provenance to
+        `MEASURED_OPENROUTER_API`. On failure/timeout, preserves the balance, reverts provenance to
+        `SIMULATED_INTERNAL_LEDGER`, and retains previous reconciliation metrics.
+        """
+        api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+        is_placeholder = (
+            not api_key
+            or api_key.startswith("your_")
+            or api_key == "sk-or-v1-placeholder"
+        )
+        if is_placeholder:
+            with self._lock:
+                self.balance_source = "SIMULATED_INTERNAL_LEDGER"
+                self.reconciliation_status = "SKIPPED_NO_API_KEY"
+                return {
+                    "reconciliation_status": "SKIPPED_NO_API_KEY",
+                    "balance_source": "SIMULATED_INTERNAL_LEDGER",
+                    "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
+                    "reconciled_balance_usd": self.reconciled_balance_usd,
+                    "last_reconciled_ms": self.last_reconciled_ms,
+                    "reason": "OpenRouter API key is missing or set to placeholder",
+                }
+
+        url = "https://openrouter.ai/api/v1/credits"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "Robotrader/3.0",
+            },
+            method="GET",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+                status_code = getattr(resp, "status", 200)
+                if status_code != 200:
+                    raise urllib.error.HTTPError(
+                        url, status_code, f"HTTP status {status_code}", resp.headers, None
+                    )
+                raw_body = resp.read()
+                body_str = raw_body.decode("utf-8")
+                payload = json.loads(body_str)
+
+                if not isinstance(payload, dict):
+                    raise ValueError("OpenRouter credits response root must be a JSON object")
+                data = payload.get("data")
+                if not isinstance(data, dict):
+                    raise ValueError("OpenRouter credits response missing 'data' object")
+
+                total_credits = data.get("total_credits")
+                total_usage = data.get("total_usage")
+
+                if (
+                    isinstance(total_credits, bool)
+                    or isinstance(total_usage, bool)
+                    or not isinstance(total_credits, (int, float))
+                    or not isinstance(total_usage, (int, float))
+                ):
+                    raise ValueError("OpenRouter total_credits and total_usage must be numeric")
+
+                if (
+                    math.isnan(total_credits)
+                    or math.isinf(total_credits)
+                    or math.isnan(total_usage)
+                    or math.isinf(total_usage)
+                ):
+                    raise ValueError("OpenRouter total_credits and total_usage must be finite numbers")
+
+                now_ms = self._now_ms()
+                new_balance = round(max(0.0, float(total_credits) - float(total_usage)), 4)
+                with self._lock:
+                    self.openrouter_balance_usd = new_balance
+                    self.reconciled_balance_usd = new_balance
+                    self.balance_source = "MEASURED_OPENROUTER_API"
+                    self.reconciliation_status = "RECONCILED_OK"
+                    self.last_reconciled_ms = now_ms
+                    return {
+                        "reconciliation_status": "RECONCILED_OK",
+                        "balance_source": "MEASURED_OPENROUTER_API",
+                        "openrouter_balance_usd": new_balance,
+                        "reconciled_balance_usd": new_balance,
+                        "last_reconciled_ms": now_ms,
+                        "reason": "Reconciliation successful",
+                    }
+        except Exception as e:
+            with self._lock:
+                self.balance_source = "SIMULATED_INTERNAL_LEDGER"
+                self.reconciliation_status = "RECONCILE_FAILED"
+                return {
+                    "reconciliation_status": "RECONCILE_FAILED",
+                    "balance_source": "SIMULATED_INTERNAL_LEDGER",
+                    "openrouter_balance_usd": round(self.openrouter_balance_usd, 4),
+                    "reconciled_balance_usd": self.reconciled_balance_usd,
+                    "last_reconciled_ms": self.last_reconciled_ms,
+                    "reason": f"OpenRouter credits probe failed: {e}",
+                }
+
     def trigger_openrouter_refill(
         self,
         realized_trading_pnl_usd: float,
@@ -646,6 +761,15 @@ class LLMMonitorAgent(BaseWarmAgent):
                 self.openrouter_balance_usd = round(self.openrouter_balance_usd + approved_usd, 4)
                 self._epoch_window.append((now_ms, approved_usd))
                 epoch_total = round(epoch_refilled_usd + approved_usd, 6)
+
+                self._refill_seq += 1
+                settlement_receipt_id = f"or-refill-{now_ms}-{self._refill_seq:03d}"
+                settlement_mode = (
+                    "OPERATOR_OUT_OF_BAND_INTENT"
+                    if self.balance_source == "MEASURED_OPENROUTER_API"
+                    else "SIMULATED_LEDGER_INCREMENT"
+                )
+
                 event = {
                     "timestamp_ms": now_ms,
                     "amount_usd": approved_usd,
@@ -656,6 +780,8 @@ class LLMMonitorAgent(BaseWarmAgent):
                     "source": source,
                     "reason": reason,
                     "validator": "RUST_HARD_RISK_GATE",
+                    "settlement_mode": settlement_mode,
+                    "settlement_receipt_id": settlement_receipt_id,
                 }
                 self.refill_history.insert(0, event)
                 self.refill_history = self.refill_history[:25]
@@ -664,6 +790,8 @@ class LLMMonitorAgent(BaseWarmAgent):
                     "refilled_usd": approved_usd,
                     "event": event,
                     "openrouter_balance_usd": self.openrouter_balance_usd,
+                    "settlement_mode": settlement_mode,
+                    "settlement_receipt_id": settlement_receipt_id,
                 }
 
             if verdict.get("status") == "skipped_sufficient_balance":
@@ -726,7 +854,10 @@ class LLMMonitorAgent(BaseWarmAgent):
                 "last_refill_rejection": self.last_refill_rejection,
                 "auto_refill_enabled": self.auto_refill_enabled,
                 "refill_history": self.refill_history[:5],
-                "balance_source": "SIMULATED_INTERNAL_LEDGER",
+                "balance_source": self.balance_source,
+                "reconciliation_status": self.reconciliation_status,
+                "last_reconciled_ms": self.last_reconciled_ms,
+                "reconciled_balance_usd": self.reconciled_balance_usd,
             },
             "auto_wallet_refill": auto_refill_label,
             "auto_refill_policy": auto_refill_policy,

@@ -64,6 +64,57 @@ pub enum RiskRejection {
 
     #[error("Simulated vault signing rejected: {reason}")]
     VaultSigningRejected { reason: String },
+
+    #[error("Order for pod {pod_id} on symbol {symbol} rate-limited: {elapsed_ms}ms elapsed < {min_cooldown_ms}ms min cooldown")]
+    OrderRateLimited {
+        pod_id: String,
+        symbol: String,
+        elapsed_ms: u64,
+        min_cooldown_ms: u64,
+    },
+
+    #[error("Asset exposure cap exceeded for {symbol}: current ${current_usd:.2} + requested ${requested_usd:.2} > max ${max_usd:.2}")]
+    AssetExposureExceeded {
+        symbol: String,
+        current_usd: f64,
+        requested_usd: f64,
+        max_usd: f64,
+    },
+
+    #[error("Pod exposure cap exceeded for {pod_id}: current ${current_usd:.2} + requested ${requested_usd:.2} > max ${max_usd:.2}")]
+    PodExposureExceeded {
+        pod_id: String,
+        current_usd: f64,
+        requested_usd: f64,
+        max_usd: f64,
+    },
+
+    #[error("Gross portfolio exposure cap exceeded: current ${current_gross_usd:.2} + requested ${requested_usd:.2} > max ${max_gross_usd:.2}")]
+    GrossExposureExceeded {
+        current_gross_usd: f64,
+        requested_usd: f64,
+        max_gross_usd: f64,
+    },
+}
+
+fn default_max_asset_exposure_pct() -> f64 {
+    0.15
+}
+
+fn default_max_pod_exposure_pct() -> f64 {
+    0.40
+}
+
+fn default_max_gross_exposure_pct() -> f64 {
+    1.50
+}
+
+fn default_min_order_cooldown_ms() -> u64 {
+    0
+}
+
+fn default_max_mev_tip_bps() -> u32 {
+    50
 }
 
 /// Hard risk limits enforced by [`HardRiskGate::validate`].
@@ -87,6 +138,16 @@ pub struct RiskLimits {
     pub min_onchain_lp_locked_pct: f64,
     #[serde(alias = "max_solana_top10_holder_pct")]
     pub max_onchain_top10_holder_pct: f64,
+    #[serde(default = "default_max_asset_exposure_pct")]
+    pub max_asset_exposure_pct: f64,
+    #[serde(default = "default_max_pod_exposure_pct")]
+    pub max_pod_exposure_pct: f64,
+    #[serde(default = "default_max_gross_exposure_pct")]
+    pub max_gross_exposure_pct: f64,
+    #[serde(default = "default_min_order_cooldown_ms")]
+    pub min_order_cooldown_ms: u64,
+    #[serde(default = "default_max_mev_tip_bps")]
+    pub max_mev_tip_bps: u32,
 }
 
 impl Default for RiskLimits {
@@ -101,6 +162,11 @@ impl Default for RiskLimits {
             max_slippage_ceiling_bps: 150,
             min_onchain_lp_locked_pct: 80.0,
             max_onchain_top10_holder_pct: 35.0,
+            max_asset_exposure_pct: 0.15,
+            max_pod_exposure_pct: 0.40,
+            max_gross_exposure_pct: 1.50,
+            min_order_cooldown_ms: 0,
+            max_mev_tip_bps: 50,
         }
     }
 }
@@ -292,8 +358,7 @@ impl HardRiskGate {
         let pod_capital = equity_usd * pod_weight.clamp(0.0, 1.0);
         let desired_notional = pod_capital * fractional_kelly * vol_scalar * clamped_leverage;
 
-        let hard_cap_notional =
-            equity_usd * self.limits.max_single_position_pct * clamped_leverage;
+        let hard_cap_notional = equity_usd * self.limits.max_single_position_pct;
 
         desired_notional.min(hard_cap_notional)
     }
@@ -301,13 +366,13 @@ impl HardRiskGate {
     /// Synchronous pre-trade firewall.
     ///
     /// Gates run in this order: kill switch, daily drawdown circuit breaker,
-    /// effective-envelope resolution and pod enablement, slippage ceiling,
-    /// on-chain token safety when present, per-intent execution-cost hurdle,
-    /// leverage clamp, then fractional-Kelly sizing and zero-position
-    /// rejection. The hurdle is
-    /// `2 x fee + spread + max_slippage_bps + effective_buffer_bps` and is
-    /// computed from the intent alone; no portfolio, chain, or sibling-leaf
-    /// state is read. See `README.md` for the measured hot-path budget.
+    /// effective-envelope resolution and pod enablement, per-(pod_id, symbol)
+    /// order rate-limit cooldown, slippage ceiling, on-chain token safety when
+    /// present, per-intent execution-cost hurdle, leverage clamp, then
+    /// fractional-Kelly sizing (clamped by single-position cap) and zero-position
+    /// rejection, aggregate exposure caps (asset exposure -> pod exposure ->
+    /// gross exposure), and bounded MEV priority tip attachment.
+    /// See `README.md` for the measured hot-path budget.
     pub fn validate(
         &mut self,
         intent: &OrderIntent,
@@ -349,7 +414,29 @@ impl HardRiskGate {
                 envelope_id: envelope.envelope_id.clone(),
             })?;
 
-        // 3. Validate slippage bounds before economic gates: a safety rejection
+        // 3. Rate-limiting cooldown check per (pod_id, symbol)
+        if self.limits.min_order_cooldown_ms > 0 {
+            let mut buf = [0u8; 64];
+            let mut cursor = std::io::Cursor::new(&mut buf[..]);
+            use std::io::Write;
+            if write!(cursor, "{}:{}", intent.pod_id.as_str(), intent.symbol).is_ok() {
+                let len = cursor.position() as usize;
+                if let Ok(key) = std::str::from_utf8(&buf[..len]) {
+                    if let Some(&last_ts) = portfolio.last_order_ts_ms.get(key) {
+                        if now_ms < last_ts + self.limits.min_order_cooldown_ms {
+                            return Err(RiskRejection::OrderRateLimited {
+                                pod_id: intent.pod_id.as_str().to_string(),
+                                symbol: intent.symbol.clone(),
+                                elapsed_ms: now_ms.saturating_sub(last_ts),
+                                min_cooldown_ms: self.limits.min_order_cooldown_ms,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Validate slippage bounds before economic gates: a safety rejection
         //    must keep its own variant instead of becoming `InsufficientEdge`.
         let effective_slippage_cap = pod_alloc
             .max_slippage_bps
@@ -363,19 +450,21 @@ impl HardRiskGate {
             });
         }
 
-        // 4. On-chain token anti-rug gate (mandatory if safety payload is present)
+        // 5. On-chain token anti-rug gate (mandatory if safety payload is present)
         if let Some(ref safety) = intent.token_safety {
             self.validate_token_safety(safety)?;
         }
 
-        // 5. Validate expected alpha edge against the per-intent execution-cost
+        // 6. Validate expected alpha edge against the per-intent execution-cost
         //    hurdle: round-trip fee + spread + declared impact + buffer.
         //
-        //    The priority tip is computed once here and reused unchanged in the
-        //    `ApprovedOrder`. `!(edge > hurdle)` is the strict boundary: it also
-        //    rejects a `NaN` edge. A `+inf` edge is strictly above every finite
-        //    hurdle and is therefore approved, matching the spec's `>` rule.
-        let mev_priority_tip_bps = ((intent.expected_edge_bps * 0.10) as u32).clamp(2, 25);
+        //    The priority tip is bounded by max_mev_tip_bps and effective_slippage_cap
+        //    with panic-free clamping boundaries.
+        let tip_ceiling = self.limits.max_mev_tip_bps.min(effective_slippage_cap);
+        let tip_floor = 2u32.min(tip_ceiling);
+        let mev_priority_tip_bps =
+            ((intent.expected_edge_bps * 0.10) as u32).clamp(tip_floor, tip_ceiling);
+
         let round_trip_fee_bps = fee_bps_for(intent.venue, intent.order_type) * 2.0;
         let spread_bps = spread_bps_for(intent.order_type, mev_priority_tip_bps);
         let impact_bps = intent.max_slippage_bps as f64;
@@ -393,7 +482,7 @@ impl HardRiskGate {
             });
         }
 
-        // 6. Clamp leverage against both AI AssetOverride and Hard Ceiling
+        // 7. Clamp leverage against both AI AssetOverride and Hard Ceiling
         let ai_leverage_cap = envelope
             .asset_overrides
             .get(&intent.symbol)
@@ -406,7 +495,7 @@ impl HardRiskGate {
             .min(self.limits.max_leverage_ceiling)
             .max(1.0);
 
-        // 7. Compute position size via Fractional Kelly & Volatility Targeting
+        // 8. Compute position size via Fractional Kelly & Volatility Targeting
         let approved_notional_usd = self.compute_kelly_notional(
             intent,
             portfolio.current_equity_usd,
@@ -416,6 +505,59 @@ impl HardRiskGate {
 
         if approved_notional_usd <= 10.0 || intent.reference_price <= 0.0 {
             return Err(RiskRejection::ZeroPositionSize);
+        }
+
+        // 9. Asset exposure cap check
+        let existing_asset_usd = portfolio
+            .asset_exposures_usd
+            .get(&intent.symbol)
+            .copied()
+            .unwrap_or(0.0)
+            .abs();
+        let max_asset_usd = portfolio.current_equity_usd * self.limits.max_asset_exposure_pct;
+        if existing_asset_usd + approved_notional_usd > max_asset_usd {
+            return Err(RiskRejection::AssetExposureExceeded {
+                symbol: intent.symbol.clone(),
+                current_usd: existing_asset_usd,
+                requested_usd: approved_notional_usd,
+                max_usd: max_asset_usd,
+            });
+        }
+
+        // 10. Pod exposure cap check
+        let existing_pod_usd = portfolio
+            .pod_exposures_usd
+            .get(pod_key)
+            .copied()
+            .unwrap_or(0.0)
+            .abs();
+        let max_pod_usd = portfolio.current_equity_usd * self.limits.max_pod_exposure_pct;
+        if existing_pod_usd + approved_notional_usd > max_pod_usd {
+            return Err(RiskRejection::PodExposureExceeded {
+                pod_id: pod_key.to_string(),
+                current_usd: existing_pod_usd,
+                requested_usd: approved_notional_usd,
+                max_usd: max_pod_usd,
+            });
+        }
+
+        // 11. Gross portfolio exposure cap check
+        let current_gross_usd = if portfolio.gross_exposure_usd > 0.0 {
+            portfolio.gross_exposure_usd
+        } else {
+            portfolio
+                .asset_exposures_usd
+                .values()
+                .map(|v| v.abs())
+                .sum()
+        };
+        let max_gross_usd = portfolio.current_equity_usd * self.limits.max_gross_exposure_pct;
+        if current_gross_usd + approved_notional_usd > max_gross_usd {
+            return Err(RiskRejection::GrossExposureExceeded {
+                current_gross_usd,
+                requested_usd: approved_notional_usd,
+                max_gross_usd,
+            });
         }
 
         let approved_quantity = approved_notional_usd / intent.reference_price;
@@ -483,8 +625,8 @@ mod tests {
 
         // Requested 10x must be clamped to hard ceiling 3.0x
         assert_eq!(approved.clamped_leverage, 3.0);
-        // Max single position cap = 15% * 10,000 * 3.0 = $4,500
-        assert!(approved.approved_notional_usd <= 4_500.0);
+        // Max single position cap = 15% * 10,000 = $1,500 (decoupled from leverage)
+        assert!(approved.approved_notional_usd <= 1_500.0);
         assert!(approved.approved_notional_usd > 100.0);
     }
 
@@ -1057,6 +1199,683 @@ mod tests {
             gate.validate(&intent, &portfolio, &envelope, 1_000_500),
             Err(RiskRejection::InsufficientEdge { .. })
         ));
+    }
+
+    #[test]
+    fn test_risk_limits_default_values_match_specification() {
+        let limits = RiskLimits::default();
+        assert_eq!(limits.max_asset_exposure_pct, 0.15);
+        assert_eq!(limits.max_pod_exposure_pct, 0.40);
+        assert_eq!(limits.max_gross_exposure_pct, 1.50);
+        assert_eq!(limits.min_order_cooldown_ms, 0);
+        assert_eq!(limits.max_mev_tip_bps, 50);
+    }
+
+    #[test]
+    fn test_deserializing_legacy_risk_limits_json_populates_defaults() {
+        let legacy_json = r#"{
+            "max_daily_drawdown_pct": 3.0,
+            "max_single_position_pct": 0.15,
+            "max_leverage_ceiling": 3.0,
+            "kelly_fraction": 0.25,
+            "target_annual_volatility_pct": 25.0,
+            "min_edge_buffer_bps": 2.0,
+            "max_slippage_ceiling_bps": 150,
+            "min_onchain_lp_locked_pct": 80.0,
+            "max_onchain_top10_holder_pct": 35.0
+        }"#;
+
+        let limits: RiskLimits =
+            serde_json::from_str(legacy_json).expect("legacy RiskLimits JSON must deserialize");
+        assert_eq!(limits.max_daily_drawdown_pct, 3.0);
+        assert_eq!(limits.max_single_position_pct, 0.15);
+        assert_eq!(limits.max_leverage_ceiling, 3.0);
+        assert_eq!(limits.kelly_fraction, 0.25);
+        assert_eq!(limits.target_annual_volatility_pct, 25.0);
+        assert_eq!(limits.min_edge_buffer_bps, 2.0);
+        assert_eq!(limits.max_slippage_ceiling_bps, 150);
+        assert_eq!(limits.min_onchain_lp_locked_pct, 80.0);
+        assert_eq!(limits.max_onchain_top10_holder_pct, 35.0);
+        assert_eq!(limits.max_asset_exposure_pct, 0.15);
+        assert_eq!(limits.max_pod_exposure_pct, 0.40);
+        assert_eq!(limits.max_gross_exposure_pct, 1.50);
+        assert_eq!(limits.min_order_cooldown_ms, 0);
+        assert_eq!(limits.max_mev_tip_bps, 50);
+    }
+
+    #[test]
+    fn test_high_leverage_does_not_multiply_single_position_notional_cap() {
+        let gate = HardRiskGate::new(RiskLimits::default());
+        let mut intent = sample_intent();
+        intent.requested_leverage = 3.0;
+        // With 3x leverage, cap must remain 15% of $10,000 = $1,500, not $4,500
+        let notional = gate.compute_kelly_notional(&intent, 10_000.0, 0.50, 3.0);
+        assert!(notional <= 1_500.0);
+        assert_ne!(notional, 4_500.0);
+    }
+
+    #[test]
+    fn test_single_position_notional_respects_15_pct_equity_ceiling_at_3x_leverage() {
+        let gate = HardRiskGate::new(RiskLimits::default());
+        let mut intent = sample_intent();
+        intent.win_probability = 0.99;
+        intent.reward_risk_ratio = 10.0;
+        intent.requested_leverage = 3.0;
+
+        let notional = gate.compute_kelly_notional(&intent, 10_000.0, 1.0, 3.0);
+        assert_eq!(notional, 1_500.0);
+    }
+
+    #[test]
+    fn test_fractional_kelly_sizing_clamps_notional_to_single_position_cap() {
+        let gate = HardRiskGate::new(RiskLimits::default());
+        let mut intent = sample_intent();
+        intent.win_probability = 0.90;
+        intent.reward_risk_ratio = 5.0;
+        intent.asset_volatility_pct = 1.0;
+
+        let notional = gate.compute_kelly_notional(&intent, 10_000.0, 1.0, 2.0);
+        assert_eq!(notional, 1_500.0);
+    }
+
+    #[test]
+    fn test_large_expected_edge_cannot_exceed_max_mev_tip_cap() {
+        let mut limits = RiskLimits::default();
+        limits.max_mev_tip_bps = 50;
+        limits.max_slippage_ceiling_bps = 150;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        enable_pod(&mut envelope, PodId::PodSniper, 0.20, 150);
+
+        let intent = intent_for(
+            PodId::PodSniper,
+            Venue::OnchainAtomicPool,
+            OrderType::MevBundleAtomic,
+            500.0,
+            150,
+        );
+        let portfolio = PortfolioState::new(10_000.0);
+        let approved = gate
+            .validate(&intent, &portfolio, &envelope, 1_000_500)
+            .expect("order should pass");
+        assert_eq!(approved.mev_priority_tip_bps, 50);
+    }
+
+    #[test]
+    fn test_mev_tip_respects_tighter_slippage_ceiling() {
+        let mut limits = RiskLimits::default();
+        limits.max_mev_tip_bps = 50;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        enable_pod(&mut envelope, PodId::PodSniper, 0.20, 15);
+
+        let intent = intent_for(
+            PodId::PodSniper,
+            Venue::OnchainAtomicPool,
+            OrderType::MevBundleAtomic,
+            200.0,
+            15,
+        );
+        let portfolio = PortfolioState::new(10_000.0);
+        let approved = gate
+            .validate(&intent, &portfolio, &envelope, 1_000_500)
+            .expect("order should pass");
+        assert_eq!(approved.mev_priority_tip_bps, 15);
+    }
+
+    #[test]
+    fn test_tight_slippage_ceiling_below_2_clamps_safely_without_panicking() {
+        let mut limits = RiskLimits::default();
+        limits.max_mev_tip_bps = 50;
+        limits.min_edge_buffer_bps = 0.0;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        enable_pod(&mut envelope, PodId::PodCarry, 0.50, 1);
+
+        let mut intent = intent_for(
+            PodId::PodCarry,
+            Venue::HyperliquidPerp,
+            OrderType::PostOnlyMaker,
+            100.0,
+            1,
+        );
+        intent.reference_price = 150.0;
+        let portfolio = PortfolioState::new(10_000.0);
+        let approved = gate
+            .validate(&intent, &portfolio, &envelope, 1_000_500)
+            .expect("order should pass without panic in clamp");
+        assert_eq!(approved.mev_priority_tip_bps, 1);
+    }
+
+    #[test]
+    fn test_moderate_edge_derives_proportional_tip_within_bounds() {
+        let mut limits = RiskLimits::default();
+        limits.max_mev_tip_bps = 50;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        enable_pod(&mut envelope, PodId::PodCarry, 0.50, 50);
+
+        let intent = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            80.0,
+            15,
+        );
+        let portfolio = PortfolioState::new(10_000.0);
+        let approved = gate
+            .validate(&intent, &portfolio, &envelope, 1_000_500)
+            .expect("order should pass");
+        assert_eq!(approved.mev_priority_tip_bps, 8);
+    }
+
+    #[test]
+    fn test_order_within_cooldown_period_is_rejected() {
+        let mut limits = RiskLimits::default();
+        limits.min_order_cooldown_ms = 100;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut portfolio = PortfolioState::new(10_000.0);
+        portfolio
+            .last_order_ts_ms
+            .insert("pod_momentum:SOL-USDT".to_string(), 1_000_000);
+
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let mut intent = intent_for(
+            PodId::PodMomentum,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        intent.symbol = "SOL-USDT".to_string();
+
+        let res = gate.validate(&intent, &portfolio, &envelope, 1_000_050);
+        match res {
+            Err(RiskRejection::OrderRateLimited {
+                pod_id,
+                symbol,
+                elapsed_ms,
+                min_cooldown_ms,
+            }) => {
+                assert_eq!(pod_id, "pod_momentum");
+                assert_eq!(symbol, "SOL-USDT");
+                assert_eq!(elapsed_ms, 50);
+                assert_eq!(min_cooldown_ms, 100);
+            }
+            other => panic!("expected OrderRateLimited, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_order_after_cooldown_period_elapsed_is_approved() {
+        let mut limits = RiskLimits::default();
+        limits.min_order_cooldown_ms = 100;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut portfolio = PortfolioState::new(10_000.0);
+        portfolio
+            .last_order_ts_ms
+            .insert("pod_momentum:SOL-USDT".to_string(), 1_000_000);
+
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let mut intent = intent_for(
+            PodId::PodMomentum,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        intent.symbol = "SOL-USDT".to_string();
+
+        assert!(gate
+            .validate(&intent, &portfolio, &envelope, 1_000_150)
+            .is_ok());
+    }
+
+    #[test]
+    fn test_cooldown_is_isolated_per_pod_and_symbol_pair() {
+        let mut limits = RiskLimits::default();
+        limits.min_order_cooldown_ms = 100;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut portfolio = PortfolioState::new(10_000.0);
+        portfolio
+            .last_order_ts_ms
+            .insert("pod_momentum:SOL-USDT".to_string(), 1_000_000);
+
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+
+        // Different pod (pod_carry on SOL-USDT) passes
+        let carry_intent = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        assert!(gate
+            .validate(&carry_intent, &portfolio, &envelope, 1_000_050)
+            .is_ok());
+
+        // Different symbol (pod_momentum on BTC-USDT) passes
+        let mut btc_intent = intent_for(
+            PodId::PodMomentum,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        btc_intent.symbol = "BTC-USDT".to_string();
+        assert!(gate
+            .validate(&btc_intent, &portfolio, &envelope, 1_000_050)
+            .is_ok());
+    }
+
+    #[test]
+    fn test_zero_cooldown_disables_rate_limiting() {
+        let mut limits = RiskLimits::default();
+        limits.min_order_cooldown_ms = 0;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut portfolio = PortfolioState::new(10_000.0);
+        portfolio
+            .last_order_ts_ms
+            .insert("pod_carry:SOL-USDT".to_string(), 1_000_000);
+
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let intent = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+
+        assert!(gate
+            .validate(&intent, &portfolio, &envelope, 1_000_000)
+            .is_ok());
+    }
+
+    #[test]
+    fn test_rate_limit_cooldown_check_precedes_execution_cost_hurdle() {
+        let mut limits = RiskLimits::default();
+        limits.min_order_cooldown_ms = 100;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut portfolio = PortfolioState::new(10_000.0);
+        portfolio
+            .last_order_ts_ms
+            .insert("pod_carry:SOL-USDT".to_string(), 1_000_000);
+
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        // edge is 1.0, below hurdle, but within cooldown -> OrderRateLimited must win
+        let failing_edge_intent = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::Market,
+            1.0,
+            15,
+        );
+
+        match gate.validate(&failing_edge_intent, &portfolio, &envelope, 1_000_050) {
+            Err(RiskRejection::OrderRateLimited { .. }) => {}
+            other => panic!("expected OrderRateLimited, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_order_exceeding_asset_exposure_cap_is_rejected() {
+        let portfolio = PortfolioState::new(10_000.0);
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+
+        let mut intent = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        intent.symbol = "SOL-USDT".to_string();
+        // Calibrate Kelly sizing to request $1,600 notional:
+        // Set max_single_position_pct = 0.16 -> hard cap notional = 10000 * 0.16 = 1600.0
+        let mut sized_limits = RiskLimits::default();
+        sized_limits.max_single_position_pct = 0.16;
+        sized_limits.max_asset_exposure_pct = 0.15;
+        let mut gate = HardRiskGate::new(sized_limits);
+
+        intent.win_probability = 0.99;
+        intent.reward_risk_ratio = 10.0;
+        intent.asset_volatility_pct = 1.0;
+        intent.requested_leverage = 1.0;
+
+        let res = gate.validate(&intent, &portfolio, &envelope, 1_000_500);
+        match res {
+            Err(RiskRejection::AssetExposureExceeded {
+                symbol,
+                current_usd,
+                requested_usd,
+                max_usd,
+            }) => {
+                assert_eq!(symbol, "SOL-USDT");
+                assert_eq!(current_usd, 0.0);
+                assert_eq!(requested_usd, 1600.0);
+                assert_eq!(max_usd, 1500.0);
+            }
+            other => panic!("expected AssetExposureExceeded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_existing_short_asset_exposure_accumulates_via_absolute_value() {
+        let mut limits = RiskLimits::default();
+        limits.max_single_position_pct = 0.06; // $600 requested
+        limits.max_asset_exposure_pct = 0.15;  // $1,500 max
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut portfolio = PortfolioState::new(10_000.0);
+        portfolio
+            .asset_exposures_usd
+            .insert("SOL-USDT".to_string(), -1_000.0); // short position
+
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let mut intent = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        intent.symbol = "SOL-USDT".to_string();
+        intent.win_probability = 0.99;
+        intent.reward_risk_ratio = 10.0;
+        intent.asset_volatility_pct = 1.0;
+
+        let res = gate.validate(&intent, &portfolio, &envelope, 1_000_500);
+        match res {
+            Err(RiskRejection::AssetExposureExceeded {
+                symbol,
+                current_usd,
+                requested_usd,
+                max_usd,
+            }) => {
+                assert_eq!(symbol, "SOL-USDT");
+                assert_eq!(current_usd, 1000.0);
+                assert_eq!(requested_usd, 600.0);
+                assert_eq!(max_usd, 1500.0);
+            }
+            other => panic!("expected AssetExposureExceeded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_order_within_asset_exposure_cap_is_approved() {
+        let mut limits = RiskLimits::default();
+        limits.max_single_position_pct = 0.04; // $400 requested
+        limits.max_asset_exposure_pct = 0.15;  // $1,500 max
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut portfolio = PortfolioState::new(10_000.0);
+        portfolio
+            .asset_exposures_usd
+            .insert("SOL-USDT".to_string(), 1_000.0);
+
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let mut intent = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        intent.symbol = "SOL-USDT".to_string();
+        intent.win_probability = 0.99;
+        intent.reward_risk_ratio = 10.0;
+        intent.asset_volatility_pct = 1.0;
+
+        let res = gate.validate(&intent, &portfolio, &envelope, 1_000_500);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_order_exceeding_pod_exposure_cap_is_rejected() {
+        let mut limits = RiskLimits::default();
+        limits.kelly_fraction = 1.0;
+        limits.max_leverage_ceiling = 5.0;
+        limits.max_single_position_pct = 0.42; // $4,200 requested
+        limits.max_pod_exposure_pct = 0.40;    // $4,000 max
+        limits.max_asset_exposure_pct = 1.00;  // wide asset cap so pod cap triggers
+        let mut gate = HardRiskGate::new(limits);
+
+        let portfolio = PortfolioState::new(10_000.0);
+        let mut envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        envelope.pod_allocations.get_mut("pod_carry").unwrap().capital_weight = 1.0;
+
+        let mut intent = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        intent.win_probability = 0.99;
+        intent.reward_risk_ratio = 10.0;
+        intent.asset_volatility_pct = 1.0;
+        intent.requested_leverage = 3.0;
+
+        let res = gate.validate(&intent, &portfolio, &envelope, 1_000_500);
+        match res {
+            Err(RiskRejection::PodExposureExceeded {
+                pod_id,
+                current_usd,
+                requested_usd,
+                max_usd,
+            }) => {
+                assert_eq!(pod_id, "pod_carry");
+                assert_eq!(current_usd, 0.0);
+                assert_eq!(requested_usd, 4200.0);
+                assert_eq!(max_usd, 4000.0);
+            }
+            other => panic!("expected PodExposureExceeded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_prior_pod_exposure_prevents_subsequent_order_exceeding_cap() {
+        let mut limits = RiskLimits::default();
+        limits.kelly_fraction = 1.0;
+        limits.max_leverage_ceiling = 5.0;
+        limits.max_single_position_pct = 0.15; // $1,500 requested
+        limits.max_pod_exposure_pct = 0.40;    // $4,000 max
+        limits.max_asset_exposure_pct = 1.00;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut portfolio = PortfolioState::new(10_000.0);
+        portfolio
+            .pod_exposures_usd
+            .insert("pod_momentum".to_string(), 3_000.0);
+
+        let mut envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        envelope.pod_allocations.get_mut("pod_momentum").unwrap().capital_weight = 1.0;
+
+        let mut intent = intent_for(
+            PodId::PodMomentum,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        intent.win_probability = 0.99;
+        intent.reward_risk_ratio = 10.0;
+        intent.asset_volatility_pct = 1.0;
+        intent.requested_leverage = 3.0;
+
+        let res = gate.validate(&intent, &portfolio, &envelope, 1_000_500);
+        match res {
+            Err(RiskRejection::PodExposureExceeded {
+                pod_id,
+                current_usd,
+                requested_usd,
+                max_usd,
+            }) => {
+                assert_eq!(pod_id, "pod_momentum");
+                assert_eq!(current_usd, 3000.0);
+                assert_eq!(requested_usd, 1500.0);
+                assert_eq!(max_usd, 4000.0);
+            }
+            other => panic!("expected PodExposureExceeded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_order_within_pod_exposure_cap_is_approved() {
+        let mut limits = RiskLimits::default();
+        limits.max_single_position_pct = 0.08; // $800 requested
+        limits.max_pod_exposure_pct = 0.40;    // $4,000 max
+        limits.max_asset_exposure_pct = 1.00;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut portfolio = PortfolioState::new(10_000.0);
+        portfolio
+            .pod_exposures_usd
+            .insert("pod_momentum".to_string(), 3_000.0);
+
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let mut intent = intent_for(
+            PodId::PodMomentum,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        intent.win_probability = 0.99;
+        intent.reward_risk_ratio = 10.0;
+        intent.asset_volatility_pct = 1.0;
+
+        let res = gate.validate(&intent, &portfolio, &envelope, 1_000_500);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_order_exceeding_gross_portfolio_exposure_cap_is_rejected() {
+        let mut limits = RiskLimits::default();
+        limits.kelly_fraction = 1.0;
+        limits.max_leverage_ceiling = 5.0;
+        limits.max_single_position_pct = 0.20; // $2,000 requested
+        limits.max_gross_exposure_pct = 1.50;  // $15,000 max
+        limits.max_asset_exposure_pct = 1.00;
+        limits.max_pod_exposure_pct = 1.00;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut portfolio = PortfolioState::new(10_000.0);
+        portfolio.gross_exposure_usd = 14_000.0;
+
+        let mut envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        envelope.pod_allocations.get_mut("pod_carry").unwrap().capital_weight = 1.0;
+
+        let mut intent = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        intent.win_probability = 0.99;
+        intent.reward_risk_ratio = 10.0;
+        intent.asset_volatility_pct = 1.0;
+        intent.requested_leverage = 3.0;
+
+        let res = gate.validate(&intent, &portfolio, &envelope, 1_000_500);
+        match res {
+            Err(RiskRejection::GrossExposureExceeded {
+                current_gross_usd,
+                requested_usd,
+                max_gross_usd,
+            }) => {
+                assert_eq!(current_gross_usd, 14000.0);
+                assert_eq!(requested_usd, 2000.0);
+                assert_eq!(max_gross_usd, 15000.0);
+            }
+            other => panic!("expected GrossExposureExceeded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_short_and_long_positions_both_contribute_to_gross_exposure() {
+        let mut limits = RiskLimits::default();
+        limits.max_single_position_pct = 0.15; // $1,500 requested
+        limits.max_gross_exposure_pct = 1.50;  // $15,000 max
+        limits.max_asset_exposure_pct = 1.00;
+        limits.max_pod_exposure_pct = 1.00;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut portfolio = PortfolioState::new(10_000.0);
+        portfolio.gross_exposure_usd = 0.0; // falls back to summing absolute values
+        portfolio
+            .asset_exposures_usd
+            .insert("BTC-USDT".to_string(), 6_000.0);
+        portfolio
+            .asset_exposures_usd
+            .insert("ETH-USDT".to_string(), -8_000.0);
+
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let mut intent = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        intent.symbol = "SOL-USDT".to_string();
+        intent.win_probability = 0.99;
+        intent.reward_risk_ratio = 10.0;
+        intent.asset_volatility_pct = 1.0;
+
+        let res = gate.validate(&intent, &portfolio, &envelope, 1_000_500);
+        match res {
+            Err(RiskRejection::GrossExposureExceeded {
+                current_gross_usd,
+                requested_usd,
+                max_gross_usd,
+            }) => {
+                assert_eq!(current_gross_usd, 14000.0);
+                assert_eq!(requested_usd, 1500.0);
+                assert_eq!(max_gross_usd, 15000.0);
+            }
+            other => panic!("expected GrossExposureExceeded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_order_within_gross_exposure_cap_is_approved() {
+        let mut limits = RiskLimits::default();
+        limits.max_single_position_pct = 0.08; // $800 requested
+        limits.max_gross_exposure_pct = 1.50;  // $15,000 max
+        limits.max_asset_exposure_pct = 1.00;
+        limits.max_pod_exposure_pct = 1.00;
+        let mut gate = HardRiskGate::new(limits);
+
+        let mut portfolio = PortfolioState::new(10_000.0);
+        portfolio.gross_exposure_usd = 14_000.0;
+
+        let envelope = PolicyEnvelope::safe_baseline(1_000_000);
+        let mut intent = intent_for(
+            PodId::PodCarry,
+            Venue::BinancePerp,
+            OrderType::PostOnlyMaker,
+            35.0,
+            15,
+        );
+        intent.win_probability = 0.99;
+        intent.reward_risk_ratio = 10.0;
+        intent.asset_volatility_pct = 1.0;
+
+        let res = gate.validate(&intent, &portfolio, &envelope, 1_000_500);
+        assert!(res.is_ok());
     }
 
     mod simulated_vault_tests {

@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "reconcile-openrouter-credits-live",
+  "title": "Reconcile OpenRouter live /api/v1/credits balance and out-of-band settlement receipts",
+  "issue": 5,
+  "lane": "S",
+  "lane_reason": "Additive live OpenRouter /api/v1/credits reconciliation and out-of-band settlement tracking in backend/agents/monitor.py to complete issue #5",
+  "lane_change": null,
+  "branch": "sdlc/5-reconcile-openrouter-credits-live",
+  "worktree": ".worktrees/5-reconcile-openrouter-credits-live",
+  "base_branch": "master",
+  "base_sha": "0e1caef28e15f5978180c26a58050bfbcbb9f581",
+  "created_at": "2026-11-01T11:35:43Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 177,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "0ada65e17513f507a27ca73e24555bf5b1defdf1",
+      "updated_at": "2026-11-01T11:57:37Z"
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "b7a295f14ee79739b7f1e9651d31929b41c78c1e",
+      "updated_at": "2026-11-01T12:19:14Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/5-reconcile-openrouter-credits-live",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T12:25:18Z",
+    "mode": "full-auto",
+    "pr": 177,
+    "head_sha": "b7a295f14ee79739b7f1e9651d31929b41c78c1e"
+  }
+}
