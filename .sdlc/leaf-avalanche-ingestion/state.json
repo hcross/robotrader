@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-avalanche-ingestion",
+  "title": "feat(leaf-avalanche/ingestion): live market data & on-chain TA telemetry pipeline for Avalanche (AVAX)",
+  "issue": 76,
+  "lane": "M",
+  "lane_reason": "Scoped telemetry & TA ingestion pipeline for leaf-avalanche in backend/tools/ta_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/76-leaf-avalanche-ingestion",
+  "worktree": ".worktrees/76-leaf-avalanche-ingestion",
+  "base_branch": "master",
+  "base_sha": "1e45e6056c674aff3f41e05d8c1971b4fc06473a",
+  "created_at": "2026-11-01T21:34:10Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 218,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "b045b1105e494a13aecddf407c6cae75ae7cd217",
+      "updated_at": "2026-11-01T21:40:12Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/76-leaf-avalanche-ingestion",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T21:42:58Z",
+    "mode": "full-auto",
+    "pr": 218,
+    "head_sha": "b045b1105e494a13aecddf407c6cae75ae7cd217"
+  }
+}
