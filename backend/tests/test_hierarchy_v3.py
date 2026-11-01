@@ -1694,6 +1694,76 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         with self.assertRaises(ValueError):
             TechnicalAnalysisTool.compute_bnb_ta_metrics(symbol="BNB-USDT", venue="InvalidVenue")
 
+    def test_avalanche_leaf_ta_metrics_computation_and_fallback(self) -> None:
+        """
+        Verifies TechnicalAnalysisTool.compute_avalanche_ta_metrics and ingest_avalanche_market_snapshot.
+        """
+        from backend.tools.ta_tools import TechnicalAnalysisTool
+
+        sample_candles = [
+            [1700000000000 + i * 900000, 10.0 + i * 0.5, 10.5 + i * 0.5, 9.5 + i * 0.5, 10.2 + i * 0.5, 1000.0]
+            for i in range(25)
+        ]
+        sample_bids = [[10.1, 100.0], [10.0, 150.0]]
+        sample_asks = [[10.3, 80.0], [10.4, 120.0]]
+        sample_telemetry = {
+            "liquidity_book_active_bin_bps": 12.0,
+            "subnet_tx_share_pct": 41.0,
+        }
+
+        for sym in TechnicalAnalysisTool.AVALANCHE_EXCLUSIVE_ASSETS:
+            for venue in TechnicalAnalysisTool.AVALANCHE_VENUES:
+                res = TechnicalAnalysisTool.compute_avalanche_ta_metrics(
+                    candles=sample_candles,
+                    bids=sample_bids,
+                    asks=sample_asks,
+                    onchain_telemetry=sample_telemetry,
+                    symbol=sym,
+                    venue=venue,
+                )
+                self.assertEqual(res["symbol"], sym)
+                self.assertEqual(res["venue"], venue)
+                self.assertEqual(res["ta_metrics_source"], "LIVE_COMPUTED")
+                self.assertEqual(res["liquidity_book_active_bin_bps"], 12.0)
+                self.assertEqual(res["subnet_tx_share_pct"], 41.0)
+                self.assertIn("kumo_regime", res)
+                self.assertIn("golden_pocket_fib_618", res)
+                self.assertIn("rsi_14", res)
+                self.assertIn("obi_l2", res)
+
+        market_feeds = {
+            "AVAX-USDC": {
+                "candles": sample_candles,
+                "bids": sample_bids,
+                "asks": sample_asks,
+            }
+        }
+        ingest_res = TechnicalAnalysisTool.ingest_avalanche_market_snapshot(
+            market_feeds=market_feeds,
+            onchain_telemetry=sample_telemetry,
+            venue="LFJ (Trader Joe) Liquidity Book",
+        )
+        self.assertEqual(ingest_res["ta_metrics_source"], "LIVE_COMPUTED")
+        self.assertEqual(ingest_res["symbol"], "AVAX-USDC")
+
+        fallback_res = TechnicalAnalysisTool.compute_avalanche_ta_metrics(
+            candles=[],
+            bids=None,
+            asks=None,
+            onchain_telemetry=None,
+            symbol="AVAX-USDC",
+            venue="LFJ (Trader Joe) Liquidity Book",
+        )
+        self.assertEqual(fallback_res["ta_metrics_source"], "CATALOG_FIXTURE")
+        self.assertIn("liquidity_book_active_bin_bps", fallback_res)
+        self.assertIn("subnet_tx_share_pct", fallback_res)
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_avalanche_ta_metrics(symbol="BTC-USD", venue="LFJ (Trader Joe) Liquidity Book")
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_avalanche_ta_metrics(symbol="AVAX-USDC", venue="InvalidVenue")
+
     def test_xrp_rss_atom_parsing_and_catalyst_scoring(self) -> None:
         """
         Verifies XRP RSS/Atom parsing (XRPL Dev & RLUSD Institutional Feed),

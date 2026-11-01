@@ -1013,6 +1013,111 @@ class TechnicalAnalysisTool:
             venue=venue,
         )
 
+    AVALANCHE_EXCLUSIVE_ASSETS = ("AVAX-USDC", "JOE-AVAX")
+    AVALANCHE_VENUES = ("LFJ (Trader Joe) Liquidity Book", "Benqi")
+    AVALANCHE_FALLBACK_TA_METRICS = {
+        "liquidity_book_active_bin_bps": 10.0,
+        "subnet_tx_share_pct": 38.0,
+        "kumo_regime": "INSIDE_KUMO_NEUTRAL",
+        "golden_pocket_fib_618": 27.8,
+        "rsi_14": 48.7,
+        "obi_l2": 0.06,
+    }
+
+    @classmethod
+    def compute_avalanche_ta_metrics(
+        cls,
+        candles=None,
+        bids=None,
+        asks=None,
+        onchain_telemetry=None,
+        symbol="AVAX-USDC",
+        timeframe="15m",
+        venue="LFJ (Trader Joe) Liquidity Book",
+    ):
+        if symbol not in cls.AVALANCHE_EXCLUSIVE_ASSETS:
+            raise ValueError(f"Invalid Avalanche symbol: {symbol}. Expected one of {cls.AVALANCHE_EXCLUSIVE_ASSETS}")
+        if venue not in cls.AVALANCHE_VENUES:
+            raise ValueError(f"Invalid Avalanche venue: {venue}. Expected one of {cls.AVALANCHE_VENUES}")
+
+        obi = 0.0
+        if bids and asks:
+            b_vol = sum(float(b[1]) for b in bids[:5])
+            a_vol = sum(float(a[1]) for a in asks[:5])
+            tot = b_vol + a_vol
+            if tot > 0:
+                obi = (b_vol - a_vol) / tot
+
+        has_candles = bool(candles and isinstance(candles, list) and len(candles) >= 5)
+
+        if not has_candles:
+            return {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "venue": venue,
+                "ta_metrics_source": "CATALOG_FIXTURE",
+                **cls.AVALANCHE_FALLBACK_TA_METRICS,
+                "obi_l2": obi if (bids or asks) else cls.AVALANCHE_FALLBACK_TA_METRICS["obi_l2"],
+                "venues": list(cls.AVALANCHE_VENUES),
+                "exclusive_assets": list(cls.AVALANCHE_EXCLUSIVE_ASSETS),
+            }
+
+        ta_result = cls.analyze_candles(symbol=symbol, candles=candles, obi=obi, timeframe=timeframe)
+        kumo_regime = ta_result.get("ichimoku", {}).get("kumo_regime", cls.AVALANCHE_FALLBACK_TA_METRICS["kumo_regime"])
+        golden_pocket = ta_result.get("fibonacci", {}).get("golden_pocket_618", cls.AVALANCHE_FALLBACK_TA_METRICS["golden_pocket_fib_618"])
+        rsi_14 = ta_result.get("rsi", {}).get("rsi_14", cls.AVALANCHE_FALLBACK_TA_METRICS["rsi_14"])
+        obi_l2 = ta_result.get("obi_l2", obi)
+
+        telemetry = onchain_telemetry or {}
+        liquidity_book_active_bin_bps = float(telemetry.get("liquidity_book_active_bin_bps", cls.AVALANCHE_FALLBACK_TA_METRICS["liquidity_book_active_bin_bps"]))
+        subnet_tx_share_pct = float(telemetry.get("subnet_tx_share_pct", cls.AVALANCHE_FALLBACK_TA_METRICS["subnet_tx_share_pct"]))
+
+        return {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "venue": venue,
+            "ta_metrics_source": "LIVE_COMPUTED",
+            "liquidity_book_active_bin_bps": liquidity_book_active_bin_bps,
+            "subnet_tx_share_pct": subnet_tx_share_pct,
+            "kumo_regime": kumo_regime,
+            "golden_pocket_fib_618": golden_pocket,
+            "rsi_14": rsi_14,
+            "obi_l2": obi_l2,
+            "venues": list(cls.AVALANCHE_VENUES),
+            "exclusive_assets": list(cls.AVALANCHE_EXCLUSIVE_ASSETS),
+        }
+
+    @classmethod
+    def ingest_avalanche_market_snapshot(
+        cls,
+        market_feeds=None,
+        onchain_telemetry=None,
+        venue="LFJ (Trader Joe) Liquidity Book",
+    ):
+        feeds = market_feeds or {}
+        symbol = "AVAX-USDC"
+        candles = None
+        bids = None
+        asks = None
+
+        if feeds:
+            target_sym = next(iter(feeds.keys()))
+            if target_sym in cls.AVALANCHE_EXCLUSIVE_ASSETS:
+                symbol = target_sym
+            feed_data = feeds.get(symbol, next(iter(feeds.values())))
+            candles = feed_data.get("candles")
+            bids = feed_data.get("bids")
+            asks = feed_data.get("asks")
+
+        return cls.compute_avalanche_ta_metrics(
+            candles=candles,
+            bids=bids,
+            asks=asks,
+            onchain_telemetry=onchain_telemetry,
+            symbol=symbol,
+            venue=venue,
+        )
+
 
 class SocialMacroPanoramaTool:
     """
