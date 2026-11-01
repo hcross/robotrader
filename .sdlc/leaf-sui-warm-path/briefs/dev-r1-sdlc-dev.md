@@ -7,7 +7,7 @@ You are `sdlc-dev` for change `leaf-sui-warm-path`.
 - Worktree: `/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/42-leaf-sui-warm-path`
 - Artifact under work: the PR diff
 - Reviewed SHA: run `git rev-parse HEAD` in the worktree and record it in the verdict.
-- Reason: initial authoring
+- Reason: revise findings from round 1
 
 Read first, in this order:
 1. `sdlc/PROTOCOL.md`
