@@ -349,6 +349,10 @@ class OrchestratorAgent(BaseWarmAgent):
                 base_fee = float(ta_metrics.get("eip1559_base_fee_gwei", 4.2))
                 restake_apr = float(ta_metrics.get("restaking_apr_pct", 3.65))
                 cat_score = round(min(0.99, max(0.50, 0.80 + (restake_apr / 100.0) - (base_fee / 100.0))), 4)
+            elif leaf_id == "leaf-sui":
+                mysticeti = float(ta_metrics.get("mysticeti_finality_ms", 385.0))
+                deepbook_vol = float(ta_metrics.get("deepbook_v3_vol_usd_m", 482.0))
+                cat_score = round(min(0.99, max(0.50, 0.83 + (deepbook_vol / 5000.0) - (mysticeti / 10000.0))), 4)
 
             max_lev = float(leaf_state.get("max_leverage", 2.0))
             
@@ -371,6 +375,25 @@ class OrchestratorAgent(BaseWarmAgent):
                     support_z = float(ta_metrics.get("support_usd", round(fib_618 * 0.98, 2)))
                     resistance_z = float(ta_metrics.get("resistance_usd", round(last_p * 1.05, 2)))
                     invalidation_p = float(ta_metrics.get("invalidation_price_usd", round(fib_618 * 0.97, 2)))
+            elif leaf_id == "leaf-sui":
+                if sym == "SUI-USDC":
+                    last_p = float(ta_metrics.get("last_price", ta_metrics.get("golden_pocket_fib_618", 3.02)))
+                    fib_618 = float(ta_metrics.get("golden_pocket_fib_618", round(last_p * 0.992, 2)))
+                    support_z = float(ta_metrics.get("support_usd", round(fib_618 * 0.98, 2)))
+                    resistance_z = float(ta_metrics.get("resistance_usd", round(last_p * 1.05, 2)))
+                    invalidation_p = float(ta_metrics.get("invalidation_price_usd", round(fib_618 * 0.97, 2)))
+                elif sym in ("DEEP-SUI", "CETUS-SUI"):
+                    ratio = 0.048 if sym == "DEEP-SUI" else 0.024
+                    support_z = round(ratio * 0.98, 4)
+                    resistance_z = round(ratio * 1.05, 4)
+                    invalidation_p = round(ratio * 0.97, 4)
+                    last_p = ratio
+                else:
+                    last_p = float(ta_metrics.get("last_price", 3.02))
+                    fib_618 = float(ta_metrics.get("golden_pocket_fib_618", round(last_p * 0.992, 2)))
+                    support_z = float(ta_metrics.get("support_usd", round(fib_618 * 0.98, 2)))
+                    resistance_z = float(ta_metrics.get("resistance_usd", round(last_p * 1.05, 2)))
+                    invalidation_p = float(ta_metrics.get("invalidation_price_usd", round(fib_618 * 0.97, 2)))
             else:
                 last_p = float(ta_metrics.get("last_price", 80000.0 if "BTC" in sym else 150.0))
                 fib_618 = float(ta_metrics.get("golden_pocket_fib_618", round(last_p * 0.992, 2)))
@@ -385,6 +408,9 @@ class OrchestratorAgent(BaseWarmAgent):
             if leaf_id == "leaf-ethereum":
                 restake_apr = float(ta_metrics.get("restaking_apr_pct", 3.65))
                 tp_bps = round(min(200.0, max(15.0, 45.0 + restake_apr * 2.0)), 2)
+            elif leaf_id == "leaf-sui":
+                deepbook_vol = float(ta_metrics.get("deepbook_v3_vol_usd_m", 482.0))
+                tp_bps = round(min(200.0, max(15.0, 45.0 + deepbook_vol / 100.0)), 2)
 
             sl_bps = max(10.0, min(150.0, float(llm_r.get("stop_loss_bps", 28.0))))
 
@@ -1085,7 +1111,7 @@ class OrchestratorAgent(BaseWarmAgent):
                 }
 
             base_interval_sec = leaf.get("base_interval_sec", 180)
-            default_interval = 900 if leaf_id in ("leaf-bitcoin", "leaf-ethereum") else int(base_interval_sec)
+            default_interval = 900 if leaf_id in ("leaf-bitcoin", "leaf-ethereum", "leaf-sui") else int(base_interval_sec)
             raw_wakeup = int(parsed.get("next_wakeup_sec", default_interval))
             next_sec = max(60, min(1800, raw_wakeup))
             call_cost = self.cost_guard.compute_call_cost(used_model, p_tok, c_tok)

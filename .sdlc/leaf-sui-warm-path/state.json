@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "leaf-sui-warm-path",
+  "title": "feat(leaf-sui/warm-path): autonomous 900s cognitive scheduling, MemPalace wing & PolicyEnvelope compilation for leaf-sui",
+  "issue": 42,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-sui warm-path wiring in backend/agents/orchestrator.py mirroring leaf-ethereum-warm-path, plus tests",
+  "lane_change": null,
+  "branch": "sdlc/42-leaf-sui-warm-path",
+  "worktree": ".worktrees/42-leaf-sui-warm-path",
+  "base_branch": "master",
+  "base_sha": "6f1f3d57c32ca46f07206d0875a7d862959cd574",
+  "created_at": "2026-11-01T16:46:06Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "dev-review",
+  "pr": 194,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "changes_requested",
+      "rounds": 1,
+      "last_verdict": "CHANGES_REQUESTED",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "f3b9a2fc30912e4a72faacfee6477e835c757573",
+      "updated_at": "2026-11-01T17:06:39Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/42-leaf-sui-warm-path",
+  "partial_issue": false
+}
