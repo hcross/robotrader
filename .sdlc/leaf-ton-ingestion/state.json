@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "leaf-ton-ingestion",
+  "title": "feat(leaf-ton/ingestion): live market data & on-chain TA telemetry pipeline for TON (TON)",
+  "issue": 64,
+  "lane": "M",
+  "lane_reason": "Scoped telemetry & TA ingestion pipeline for leaf-ton in backend/tools/ta_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/64-leaf-ton-ingestion",
+  "worktree": ".worktrees/64-leaf-ton-ingestion",
+  "base_branch": "master",
+  "base_sha": "031f32c6fe4fae6e34156685cd5fe9ff52f45f66",
+  "created_at": "2026-11-01T17:10:41Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "triage",
+  "pr": 199,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/64-leaf-ton-ingestion",
+  "partial_issue": false
+}

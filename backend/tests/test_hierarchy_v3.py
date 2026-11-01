@@ -1191,6 +1191,78 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         with self.assertRaises(ValueError):
             TechnicalAnalysisTool.compute_hyperliquid_ta_metrics(symbol="HYPE-USDC", venue="InvalidVenue")
 
+    def test_ton_leaf_ta_metrics_computation_and_fallback(self) -> None:
+        """
+        Verifies TechnicalAnalysisTool.compute_ton_ta_metrics and ingest_ton_market_snapshot
+        across all 2 exclusive TON assets (`TON-USDT`, `NOT-TON`),
+        verifying `LIVE_COMPUTED` vs `CATALOG_FIXTURE` fallback and `ValueError` on non-TON symbols/venues.
+        """
+        from backend.tools.ta_tools import TechnicalAnalysisTool
+
+        sample_candles = [
+            [1700000000000 + i * 900000, 5.0 + i * 0.05, 5.1 + i * 0.05, 4.9 + i * 0.05, 5.05 + i * 0.05, 1000.0]
+            for i in range(25)
+        ]
+        sample_bids = [[5.03, 100.0], [5.02, 150.0]]
+        sample_asks = [[5.07, 80.0], [5.08, 120.0]]
+        sample_telemetry = {
+            "usdt_ton_supply_usd_b": 1.5,
+            "stonfi_tvl_usd_m": 250.0,
+        }
+
+        for sym in TechnicalAnalysisTool.TON_EXCLUSIVE_ASSETS:
+            for venue in TechnicalAnalysisTool.TON_VENUES:
+                res = TechnicalAnalysisTool.compute_ton_ta_metrics(
+                    candles=sample_candles,
+                    bids=sample_bids,
+                    asks=sample_asks,
+                    onchain_telemetry=sample_telemetry,
+                    symbol=sym,
+                    venue=venue,
+                )
+                self.assertEqual(res["symbol"], sym)
+                self.assertEqual(res["venue"], venue)
+                self.assertEqual(res["ta_metrics_source"], "LIVE_COMPUTED")
+                self.assertEqual(res["usdt_ton_supply_usd_b"], 1.5)
+                self.assertEqual(res["stonfi_tvl_usd_m"], 250.0)
+                self.assertIn("kumo_regime", res)
+                self.assertIn("golden_pocket_fib_618", res)
+                self.assertIn("rsi_14", res)
+                self.assertIn("obi_l2", res)
+
+        market_feeds = {
+            "TON-USDT": {
+                "candles": sample_candles,
+                "bids": sample_bids,
+                "asks": sample_asks,
+            }
+        }
+        ingest_res = TechnicalAnalysisTool.ingest_ton_market_snapshot(
+            market_feeds=market_feeds,
+            onchain_telemetry=sample_telemetry,
+            venue="STON.fi",
+        )
+        self.assertEqual(ingest_res["ta_metrics_source"], "LIVE_COMPUTED")
+        self.assertEqual(ingest_res["symbol"], "TON-USDT")
+
+        fallback_res = TechnicalAnalysisTool.compute_ton_ta_metrics(
+            candles=[],
+            bids=None,
+            asks=None,
+            onchain_telemetry=None,
+            symbol="TON-USDT",
+            venue="STON.fi",
+        )
+        self.assertEqual(fallback_res["ta_metrics_source"], "CATALOG_FIXTURE")
+        self.assertIn("usdt_ton_supply_usd_b", fallback_res)
+        self.assertIn("stonfi_tvl_usd_m", fallback_res)
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_ton_ta_metrics(symbol="BTC-USD", venue="STON.fi")
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_ton_ta_metrics(symbol="TON-USDT", venue="InvalidVenue")
+
 
 
 
