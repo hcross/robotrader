@@ -855,6 +855,72 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         with self.assertRaises(ValueError):
             TechnicalAnalysisTool.compute_ethereum_ta_metrics(symbol="ETH-USDC", venue="InvalidVenue")
 
+    def test_ethereum_rss_atom_parsing_and_catalyst_scoring(self) -> None:
+        """
+        Verifies RSS 2.0 ("Week in Ethereum News") and Atom ("Ethereum Foundation Blog") XML parsing,
+        score_ethereum_catalyst classification across ETH-USDC, stETH-ETH, UNI-ETH, AAVE-ETH
+        (zero non-Ethereum symbols), and CURATED_FALLBACK behavior.
+        """
+        atom_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Ethereum Foundation Blog</title>
+          <entry>
+            <title>Pectra upgrade and restaking staking rewards stability with Lido stETH</title>
+            <summary>EigenLayer restaking APR steady and basefee EIP-1559 low.</summary>
+          </entry>
+        </feed>
+        """
+        rss_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Week in Ethereum News</title>
+            <item>
+              <title>Uniswap v4 hooks and Aave v3 liquidity expansion</title>
+              <description>Institutional ETF inflows and blob gas optimization.</description>
+            </item>
+          </channel>
+        </rss>
+        """
+
+        payloads = {
+            "Week in Ethereum News": rss_xml,
+            "Ethereum Foundation Blog": atom_xml,
+        }
+
+        feed_res = EcosystemRSSAggregator.verify_and_ingest_ethereum_feeds(
+            xml_payloads=payloads, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res["agent_id"], "leaf-ethereum")
+        self.assertEqual(feed_res["feed_mode"], "LIVE")
+        self.assertEqual(feed_res["live_count"], 2)
+        self.assertEqual(feed_res["curated_count"], 0)
+        self.assertGreaterEqual(len(feed_res["items"]), 2)
+
+        for item in feed_res["items"]:
+            self.assertEqual(item["source_kind"], "LIVE_RSS")
+            self.assertFalse(item["curated"])
+            self.assertIn("catalyst_score", item)
+            self.assertIn("impact", item)
+            self.assertIn("category", item)
+            self.assertIn("affected_assets", item)
+            for asset in item["affected_assets"]:
+                self.assertIn(asset, ["ETH-USDC", "stETH-ETH", "UNI-ETH", "AAVE-ETH"])
+
+        for asset in ["ETH-USDC", "stETH-ETH", "UNI-ETH", "AAVE-ETH"]:
+            self.assertIn(asset, feed_res["asset_catalyst_scores"])
+
+        # Test fallback when payloads are empty and network is disabled
+        fallback_res = EcosystemRSSAggregator.verify_and_ingest_ethereum_feeds(
+            xml_payloads={}, try_network=False, max_items=5
+        )
+        self.assertEqual(fallback_res["feed_mode"], "CURATED_FALLBACK")
+        self.assertEqual(fallback_res["live_count"], 0)
+        self.assertGreater(fallback_res["curated_count"], 0)
+        for item in fallback_res["items"]:
+            self.assertEqual(item["source_kind"], "CURATED_FIXTURE")
+            self.assertTrue(item["curated"])
+            self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
+
 
 
 if __name__ == "__main__":
