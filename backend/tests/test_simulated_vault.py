@@ -47,8 +47,11 @@ SIMULATED_MANIFEST = {
 SIMULATED_RECEIPT = {
     "leaf_id": "leaf-solana",
     "chain": "Solana",
+    "vault_mode": "SIMULATED",
     "simulated": True,
     "signature_is_chain_valid": False,
+    "signature_is_cryptographic": False,
+    "signature_scheme": "SIMULATED_HMAC_SHA256",
     "whitelist_enforcement": "SIMULATED",
     "signer_address": "simulated-signer",
     "destination_address": "SolanaDestination123",
@@ -56,6 +59,56 @@ SIMULATED_RECEIPT = {
     "token": "SOL",
     "destination_whitelisted": True,
     "signature_hex": "0xsimulatedaudittoken",
+    "key_zeroized_after_sign": True,
+}
+
+CRYPTO_HD_MANIFEST = {
+    "vault_version": "3.0.0",
+    "vault_mode": "CRYPTO_HD_BIP32",
+    "execution_mode": "PAPER",
+    "simulated": False,
+    "simulation_notice": "Cryptographic HD vault BIP-32/SLIP-0010 active.",
+    "seed_source": "DETERMINISTIC_DEVNET",
+    "master_seed_fingerprint": "vault-fp-crypto-test",
+    "python_private_key_access": False,
+    "whitelist_enforcement": "STRICT_FORMAT_AND_ALLOWLIST",
+    "simulated_whitelist_entry_count": 44,
+    "canonical_bridge_contracts_count": 6,
+    "wallets": [
+        {
+            "leaf_id": "leaf-solana",
+            "chain": "Solana",
+            "symbol": "SOL",
+            "simulated": False,
+            "address_is_spendable": True,
+            "target_leaf_derivation_path": "m/44'/501'/0'/0'",
+        },
+        {
+            "leaf_id": "leaf-canton",
+            "chain": "Canton",
+            "symbol": "CC",
+            "simulated": False,
+            "address_is_spendable": False,
+            "target_leaf_derivation_path": "m/44'/999999'/1'/0/0",
+        },
+    ],
+}
+
+CRYPTO_HD_RECEIPT = {
+    "leaf_id": "leaf-solana",
+    "chain": "Solana",
+    "vault_mode": "CRYPTO_HD_BIP32",
+    "simulated": False,
+    "signature_is_chain_valid": False,
+    "signature_is_cryptographic": True,
+    "signature_scheme": "ED25519",
+    "whitelist_enforcement": "STRICT_FORMAT_AND_ALLOWLIST",
+    "signer_address": "941Cj1UTqcshruE19PXwK7jcctd4r9dDpKTrNzY1B62u",
+    "destination_address": "SolanaDestination123",
+    "amount_usd": 100.0,
+    "token": "SOL",
+    "destination_whitelisted": True,
+    "signature_hex": "0xeadb6ba8c590438d0eb45dcb658810a126becdcedbfe200b116982c9745543cbdcbd74ead701f7ad137a9233b18cbffd3edd6b1da6e56ae788789f0a7fe6ea04",
     "key_zeroized_after_sign": True,
 }
 
@@ -169,6 +222,13 @@ class LoaderMatrixTest(SimulatedVaultTestBase):
         self.assertEqual(manager.vault_manifest, SIMULATED_MANIFEST)
         self.assertIsNone(manager.vault_manifest_error)
 
+    def test_valid_crypto_manifest_is_served_unchanged(self) -> None:
+        manager = self.manager_with_candidate(
+            self.json_script("valid-crypto-node", CRYPTO_HD_MANIFEST)
+        )
+        self.assertEqual(manager.vault_manifest, CRYPTO_HD_MANIFEST)
+        self.assertIsNone(manager.vault_manifest_error)
+
 
 class SignerMatrixTest(SimulatedVaultTestBase):
     def test_unavailable_binary_rejects_without_signature(self) -> None:
@@ -211,9 +271,42 @@ class SignerMatrixTest(SimulatedVaultTestBase):
                 "Solana", "SolanaDestination123", 100.0, "SOL"
             )
         self.assertEqual(result["status"], "signed")
+        self.assertEqual(result["vault_mode"], "SIMULATED")
         self.assertTrue(result["simulated"])
         self.assertFalse(result["signature_is_chain_valid"])
+        self.assertFalse(result["signature_is_cryptographic"])
+        self.assertEqual(result["signature_scheme"], "SIMULATED_HMAC_SHA256")
         self.assertEqual(result["whitelist_enforcement"], "SIMULATED")
+
+    def test_valid_crypto_receipt_is_signed(self) -> None:
+        candidate = self.json_script("signed-crypto-node", CRYPTO_HD_RECEIPT)
+        manager = self.manager_with_candidate(candidate)
+        with mock.patch.object(
+            HierarchicalFleetManager, "_rust_binary_candidates", return_value=[candidate]
+        ):
+            result = manager.sign_transfer_in_rust_enclave(
+                "Solana", "SolanaDestination123", 100.0, "SOL"
+            )
+        self.assertEqual(result["status"], "signed")
+        self.assertEqual(result["vault_mode"], "CRYPTO_HD_BIP32")
+        self.assertFalse(result["simulated"])
+        self.assertFalse(result["signature_is_chain_valid"])
+        self.assertTrue(result["signature_is_cryptographic"])
+        self.assertEqual(result["signature_scheme"], "ED25519")
+        self.assertEqual(result["whitelist_enforcement"], "STRICT_FORMAT_AND_ALLOWLIST")
+
+    def test_crypto_receipt_with_chain_valid_true_is_rejected(self) -> None:
+        bad_receipt = dict(CRYPTO_HD_RECEIPT)
+        bad_receipt["signature_is_chain_valid"] = True
+        candidate = self.json_script("bad-receipt-node", bad_receipt)
+        manager = self.manager_with_candidate(candidate)
+        with mock.patch.object(
+            HierarchicalFleetManager, "_rust_binary_candidates", return_value=[candidate]
+        ):
+            result = manager.sign_transfer_in_rust_enclave(
+                "Solana", "SolanaDestination123", 100.0, "SOL"
+            )
+        self.assertEqual(result["status"], "rejected_vault_unavailable")
 
     def test_old_contract_receipt_is_unavailable(self) -> None:
         candidate = self.json_script(
@@ -311,6 +404,31 @@ class CheckoutMutationTest(SimulatedVaultTestBase):
         self.assertEqual(result["status"], "rejected_by_rust_enclave")
         self.assertEqual(result["message"], "operator stop")
         self.assertEqual(self._snapshot(manager), before)
+
+    def test_crypto_vault_checkout_mutates_capital(self) -> None:
+        candidate = self.json_script("crypto-node", CRYPTO_HD_RECEIPT)
+        manager = self.manager_with_candidate(candidate)
+        before_total = manager.total_capital_usd
+        before_sol = manager.leaves["leaf-solana"]["allocated_capital_usd"]
+        with mock.patch.object(
+            HierarchicalFleetManager, "_rust_binary_candidates", return_value=[candidate]
+        ):
+            result = manager.checkout_funds(
+                amount_usd=100.0,
+                target_chain="Solana",
+                target_token="SOL",
+                destination_address="SolanaDestination123",
+                quote_only=False,
+            )
+        self.assertEqual(result["status"], "completed")
+        receipt = result["receipt"]
+        sim_receipt = receipt["simulated_vault_receipt"]
+        self.assertEqual(sim_receipt["vault_mode"], "CRYPTO_HD_BIP32")
+        self.assertFalse(sim_receipt["simulated"])
+        self.assertTrue(sim_receipt["signature_is_cryptographic"])
+        self.assertFalse(sim_receipt["signature_is_chain_valid"])
+        self.assertEqual(sim_receipt["whitelist_enforcement"], "STRICT_FORMAT_AND_ALLOWLIST")
+        self.assertEqual(manager.total_capital_usd, before_total - 100.0)
 
 
 class SolanaCustodyTest(SimulatedVaultTestBase):

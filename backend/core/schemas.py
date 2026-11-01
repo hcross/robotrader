@@ -213,3 +213,65 @@ class Message:
     msg_type: str
     content: Any
     timestamp: float = field(default_factory=time.time)
+
+
+@dataclass
+class SignedTransferReceipt:
+    leaf_id: str
+    chain: str
+    curve: str
+    vault_mode: str
+    simulated: bool
+    signature_is_chain_valid: bool
+    signature_is_cryptographic: bool
+    signature_scheme: str
+    whitelist_enforcement: str
+    signer_address: str
+    destination_address: str
+    amount_usd: float
+    token: str
+    destination_whitelisted: bool
+    signature_hex: str
+    key_zeroized_after_sign: bool
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class PublicWalletDescriptor:
+    leaf_id: str
+    chain: str
+    symbol: str
+    curve: str
+    simulated: bool
+    address_is_spendable: bool
+    target_slip44_coin_type: int
+    target_master_derivation_path: str
+    target_leaf_derivation_path: str
+    master_treasury_address: str
+    leaf_hot_address: str
+    key_fingerprint: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class SimulatedVaultManifest:
+    vault_version: str
+    vault_mode: str
+    execution_mode: str
+    simulated: bool
+    simulation_notice: str
+    seed_source: str
+    master_seed_fingerprint: str
+    python_private_key_access: bool
+    whitelist_enforcement: str
+    simulated_whitelist_entry_count: int
+    canonical_bridge_contracts_count: int
+    wallets: List[PublicWalletDescriptor]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+

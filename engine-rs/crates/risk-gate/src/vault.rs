@@ -176,7 +176,7 @@ pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
     sha256(&outer)
 }
 
-fn to_hex(bytes: &[u8]) -> String {
+pub fn to_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut s = String::with_capacity(bytes.len() * 2);
     for &b in bytes {
@@ -209,16 +209,16 @@ fn to_bech32_chars(bytes: &[u8], out_len: usize) -> String {
     out
 }
 
-struct ChainCryptoSpec {
-    leaf_id: &'static str,
-    chain: &'static str,
-    symbol: &'static str,
-    curve: CryptographicCurve,
-    slip44: u32,
-    addr_style: &'static str,
+pub(crate) struct ChainCryptoSpec {
+    pub(crate) leaf_id: &'static str,
+    pub(crate) chain: &'static str,
+    pub(crate) symbol: &'static str,
+    pub(crate) curve: CryptographicCurve,
+    pub(crate) slip44: u32,
+    pub(crate) addr_style: &'static str,
 }
 
-const CHAIN_CRYPTO_SPECS: &[ChainCryptoSpec] = &[
+pub(crate) const CHAIN_CRYPTO_SPECS: &[ChainCryptoSpec] = &[
     ChainCryptoSpec {
         leaf_id: "leaf-solana",
         chain: "Solana",
@@ -496,6 +496,50 @@ pub enum VaultInitError {
 
     #[error("ROBOTRADER_EXECUTION_MODE=LIVE requires a non-empty /run/secrets/robotrader_master_seed or ROBOTRADER_VAULT_MASTER_SEED")]
     MissingLiveSeed,
+
+    #[error("ROBOTRADER_VAULT_MODE='{0}' is not accepted; accepted values are SIMULATED, CRYPTO_HD_BIP32 (unset defaults to SIMULATED)")]
+    InvalidVaultMode(String),
+
+    #[error("ROBOTRADER_VAULT_MODE is not valid Unicode; accepted values are SIMULATED, CRYPTO_HD_BIP32 (unset defaults to SIMULATED)")]
+    NonUnicodeVaultMode,
+
+    #[error("Master seed has fewer than 32 bytes of entropy (minimum 64 hex characters)")]
+    InsufficientEntropy,
+
+    #[error("Deterministic test seed is not permitted outside test mode; set ROBOTRADER_VAULT_ALLOW_TEST_SEED=1 to enable")]
+    TestSeedNotAllowed,
+}
+
+/// Supported vault backend kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VaultBackendKind {
+    Simulated,
+    CryptoHdBip32,
+}
+
+/// Evaluates `ROBOTRADER_VAULT_MODE` to select the active vault backend.
+pub fn select_vault_mode() -> Result<VaultBackendKind, VaultInitError> {
+    select_vault_mode_from(std::env::var_os("ROBOTRADER_VAULT_MODE"))
+}
+
+/// Pure helper for selecting vault mode from an optional OsString.
+pub fn select_vault_mode_from(var: Option<std::ffi::OsString>) -> Result<VaultBackendKind, VaultInitError> {
+    match var {
+        None => Ok(VaultBackendKind::Simulated),
+        Some(val) => match val.into_string() {
+            Err(_) => Err(VaultInitError::NonUnicodeVaultMode),
+            Ok(s) => {
+                let trimmed = s.trim();
+                if trimmed.is_empty() || trimmed == "SIMULATED" {
+                    Ok(VaultBackendKind::Simulated)
+                } else if trimmed == "CRYPTO_HD_BIP32" {
+                    Ok(VaultBackendKind::CryptoHdBip32)
+                } else {
+                    Err(VaultInitError::InvalidVaultMode(s))
+                }
+            }
+        },
+    }
 }
 
 /// Simulated vault: deterministic pseudo-derivation and non-chain-valid audit
@@ -730,8 +774,11 @@ impl SimulatedVault {
             leaf_id: wallet.leaf_id,
             chain: wallet.chain,
             curve: wallet.curve,
+            vault_mode: "SIMULATED".to_string(),
             simulated: true,
             signature_is_chain_valid: false,
+            signature_is_cryptographic: false,
+            signature_scheme: "SIMULATED_HMAC_SHA256".to_string(),
             whitelist_enforcement: "SIMULATED".to_string(),
             signer_address: wallet.master_treasury_address,
             destination_address: destination_address.to_string(),
@@ -744,7 +791,7 @@ impl SimulatedVault {
     }
 }
 
-fn read_mode_input(name: &str) -> VaultModeInput {
+pub fn read_mode_input(name: &str) -> VaultModeInput {
     match std::env::var_os(name) {
         None => VaultModeInput::Unset,
         Some(value) => match value.into_string() {
@@ -754,7 +801,7 @@ fn read_mode_input(name: &str) -> VaultModeInput {
     }
 }
 
-fn read_seed_input(name: &str) -> SeedInput {
+pub fn read_seed_input(name: &str) -> SeedInput {
     match std::env::var_os(name) {
         None => SeedInput::Unset,
         Some(value) => match value.into_string() {
@@ -765,7 +812,7 @@ fn read_seed_input(name: &str) -> SeedInput {
 }
 
 /// Parses exactly four case-sensitive modes; every other present value fails closed.
-fn parse_execution_mode(input: VaultModeInput) -> Result<ExecutionMode, VaultInitError> {
+pub fn parse_execution_mode(input: VaultModeInput) -> Result<ExecutionMode, VaultInitError> {
     match input {
         VaultModeInput::Unset => Ok(ExecutionMode::Paper),
         VaultModeInput::NonUnicode => Err(VaultInitError::NonUnicodeExecutionMode),

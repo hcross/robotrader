@@ -1109,20 +1109,39 @@ class HierarchicalFleetManager:
 
     @staticmethod
     def _is_valid_simulated_manifest(parsed: Any) -> bool:
-        """Accept only the honest simulated contract; a stale manifest is unavailable."""
+        """Accept honest simulated or cryptographic manifest."""
         if not isinstance(parsed, dict):
             return False
-        if parsed.get("vault_mode") != "SIMULATED" or parsed.get("simulated") is not True:
-            return False
+        vault_mode = parsed.get("vault_mode")
         wallets = parsed.get("wallets")
         if not isinstance(wallets, list) or not wallets:
             return False
-        return all(
-            isinstance(wallet, dict)
-            and wallet.get("simulated") is True
-            and wallet.get("address_is_spendable") is False
-            for wallet in wallets
-        )
+
+        if vault_mode == "SIMULATED":
+            if parsed.get("simulated") is not True:
+                return False
+            return all(
+                isinstance(wallet, dict)
+                and wallet.get("simulated") is True
+                and wallet.get("address_is_spendable") is False
+                for wallet in wallets
+            )
+        elif vault_mode == "CRYPTO_HD_BIP32":
+            if parsed.get("simulated") is not False:
+                return False
+            non_bip32_leaves = {"leaf-canton", "leaf-binance-cex", "leaf-paper-sandbox"}
+            for wallet in wallets:
+                if not isinstance(wallet, dict):
+                    return False
+                leaf_id = str(wallet.get("leaf_id", ""))
+                if leaf_id in non_bip32_leaves:
+                    if wallet.get("address_is_spendable") is not False:
+                        return False
+                else:
+                    if wallet.get("address_is_spendable") is not True or wallet.get("simulated") is not False:
+                        return False
+            return True
+        return False
 
     @staticmethod
     def _is_valid_simulated_receipt(
@@ -1131,15 +1150,42 @@ class HierarchicalFleetManager:
         destination_address: str,
         amount_usd: float,
     ) -> bool:
-        """Validate the simulated receipt before any checkout mutation."""
+        """Validate simulated or cryptographic receipt before any checkout mutation."""
         if not isinstance(receipt, dict):
             return False
-        if receipt.get("simulated") is not True:
-            return False
-        if receipt.get("signature_is_chain_valid") is not False:
-            return False
-        if receipt.get("whitelist_enforcement") != "SIMULATED":
-            return False
+        vault_mode = receipt.get("vault_mode")
+        if vault_mode == "SIMULATED":
+            if receipt.get("simulated") is not True:
+                return False
+            if receipt.get("signature_is_chain_valid") is not False:
+                return False
+            if receipt.get("signature_is_cryptographic") is not False:
+                return False
+            if receipt.get("whitelist_enforcement") != "SIMULATED":
+                return False
+        elif vault_mode == "CRYPTO_HD_BIP32":
+            if receipt.get("simulated") is not False:
+                return False
+            if receipt.get("signature_is_chain_valid") is not False:
+                return False
+            if receipt.get("signature_is_cryptographic") is not True:
+                return False
+            if receipt.get("whitelist_enforcement") != "STRICT_FORMAT_AND_ALLOWLIST":
+                return False
+            scheme = receipt.get("signature_scheme")
+            if scheme not in ("ED25519", "SECP256K1_ECDSA"):
+                return False
+        else:
+            # Compatibility fallback if vault_mode is omitted but matches simulated contract
+            if (
+                receipt.get("simulated") is True
+                and receipt.get("signature_is_chain_valid") is False
+                and receipt.get("whitelist_enforcement") == "SIMULATED"
+            ):
+                pass
+            else:
+                return False
+
         if receipt.get("destination_whitelisted") is not True:
             return False
         signature = receipt.get("signature_hex")

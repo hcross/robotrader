@@ -6,7 +6,17 @@ edition.workspace = true
 [dependencies]
 robotrader-common = { path = "../common" }
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+k256 = { version = "0.13", features = ["ecdsa", "arithmetic"] }
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+sha2 = "0.10"
+hmac = "0.12"
+ripemd = "0.1"
+sha3 = "0.10"
+blake2 = "0.10"
+bs58 = { version = "0.5", features = ["check"] }
+bech32 = "0.11"
 
 # Dev-dependencies and benchmark toolchain MSRV note (DEV-R1-F01):
 # `criterion = "0.8.2"` requires Rust 1.86+ (MSRV 1.86).
