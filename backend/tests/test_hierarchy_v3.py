@@ -1193,6 +1193,87 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
 
 
 
+
+    def test_hyperliquid_rss_atom_parsing_and_catalyst_scoring(self) -> None:
+        """
+        Verifies Hyperliquid RSS/Atom parsing (Hyperliquid L1 & HLP Vault Telemetry),
+        score_hyperliquid_catalyst classification across HYPE-USDC and PURR-USDC,
+        and CURATED_FALLBACK behavior.
+        """
+        atom_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Hyperliquid L1 &amp; HLP Vault Telemetry</title>
+          <entry>
+            <title>HLP Vault APR record and HyperCore CLOB perp funding surge</title>
+            <summary>HyperEVM spot auction expansion, open interest record.</summary>
+          </entry>
+        </feed>
+        """
+        rss_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Hyperliquid L1 &amp; HLP Vault Telemetry</title>
+            <item>
+              <title>PURR spot surge on HyperEVM</title>
+              <description>HLP liquidity vault stable, HyperCore CLOB expansion.</description>
+            </item>
+          </channel>
+        </rss>
+        """
+
+        payloads = {
+            "Hyperliquid L1 & HLP Vault Telemetry": rss_xml,
+        }
+
+        feed_res = EcosystemRSSAggregator.verify_and_ingest_hyperliquid_feeds(
+            xml_payloads=payloads, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res["agent_id"], "leaf-hyperliquid")
+        self.assertEqual(feed_res["feed_mode"], "LIVE")
+        self.assertEqual(feed_res["live_count"], 1)
+        self.assertEqual(feed_res["curated_count"], 0)
+        self.assertGreaterEqual(len(feed_res["items"]), 1)
+
+        for item in feed_res["items"]:
+            self.assertEqual(item["source_kind"], "LIVE_RSS")
+            self.assertFalse(item["curated"])
+            self.assertIn("catalyst_score", item)
+            self.assertIn("impact", item)
+            self.assertIn("category", item)
+            self.assertIn("affected_assets", item)
+            for asset in item["affected_assets"]:
+                self.assertIn(asset, ["HYPE-USDC", "PURR-USDC"])
+
+        for asset in ["HYPE-USDC", "PURR-USDC"]:
+            self.assertIn(asset, feed_res["asset_catalyst_scores"])
+
+        # Atom parsing
+        payloads2 = {
+            "Hyperliquid L1 & HLP Vault Telemetry": atom_xml,
+        }
+        feed_res2 = EcosystemRSSAggregator.verify_and_ingest_hyperliquid_feeds(
+            xml_payloads=payloads2, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res2["feed_mode"], "LIVE")
+        self.assertEqual(feed_res2["live_count"], 1)
+
+        # Fallback
+        fallback_res = EcosystemRSSAggregator.verify_and_ingest_hyperliquid_feeds(
+            xml_payloads={}, try_network=False, max_items=5
+        )
+        self.assertEqual(fallback_res["feed_mode"], "CURATED_FALLBACK")
+        self.assertEqual(fallback_res["live_count"], 0)
+        self.assertGreater(fallback_res["curated_count"], 0)
+        for item in fallback_res["items"]:
+            self.assertEqual(item["source_kind"], "CURATED_FIXTURE")
+            self.assertTrue(item["curated"])
+            self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
+
+        feed = EcosystemRSSAggregator.get_feed_for_agent("leaf-hyperliquid", try_network=False)
+        self.assertIn("items", feed)
+        self.assertIn("feed_mode", feed)
+
+
 if __name__ == "__main__":
     unittest.main()
 
