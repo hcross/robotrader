@@ -14,8 +14,8 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev",
-  "pr": null,
+  "status": "merged",
+  "pr": 213,
   "areas": [],
   "stages": {
     "spec": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "in_progress",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": "2026-11-01T20:29:14Z"
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "27132546f0f45f58b91f7258a23d6bfca017e174",
+      "updated_at": "2026-11-01T20:45:11Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/50-leaf-hyperliquid-execution-custody",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T20:47:57Z",
+    "mode": "full-auto",
+    "pr": 213,
+    "head_sha": "27132546f0f45f58b91f7258a23d6bfca017e174"
+  }
 }
