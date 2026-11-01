@@ -318,11 +318,14 @@ class OrchestratorAgent(BaseWarmAgent):
             global_regime = "RANGING_CHOP"
 
         rust_pods_list = leaf_state.get("rust_pods", ["pod_carry", "pod_momentum", "pod_onchain_alpha"])
+        pod_slot_ids = {
+            p.get("slot_id") if isinstance(p, dict) else p for p in rust_pods_list
+        }
         pod_allocations: Dict[str, PodAllocation] = {}
-        weight_per_pod = round(1.0 / max(1, len(rust_pods_list)), 2)
+        weight_per_pod = round(1.0 / max(1, len(pod_slot_ids)), 2)
         all_possible_pods = ["pod_carry", "pod_momentum", "pod_onchain_alpha", "pod_sniper"]
         for p_name in all_possible_pods:
-            enabled = p_name in rust_pods_list
+            enabled = p_name in pod_slot_ids
             pod_allocations[p_name] = PodAllocation(
                 enabled=enabled,
                 capital_weight=weight_per_pod if enabled else 0.0,
