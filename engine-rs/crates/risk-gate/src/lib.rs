@@ -2,8 +2,8 @@ pub mod crypto_vault;
 pub mod vault;
 
 use robotrader_common::{
-    fee_bps_for, spread_bps_for, ApprovedOrder, OnChainTokenSafety, OrderIntent, PolicyEnvelope,
-    PortfolioState,
+    fee_bps_for, spread_bps_for, verify_policy_hmac, ApprovedOrder, OnChainTokenSafety, OrderIntent,
+    OrderType, PodId, PolicyEnvelope, PortfolioState, Side, Venue,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -38,6 +38,9 @@ fn format_signed_usd(value: f64) -> String {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Error)]
 pub enum RiskRejection {
+    #[error("Invalid policy signature")]
+    InvalidPolicySignature,
+
     #[error("Kill-switch is active: {reason}")]
     KillSwitchActive { reason: String },
 
@@ -570,6 +573,73 @@ impl HardRiskGate {
             mev_priority_tip_bps,
         })
     }
+
+    /// Validates an order intent against a detached signed policy envelope.
+    /// Short-circuits immediately with `RiskRejection::InvalidPolicySignature` if the signature is invalid.
+    pub fn validate_signed_envelope(
+        &mut self,
+        intent: &OrderIntent,
+        portfolio: &PortfolioState,
+        raw_envelope: &PolicyEnvelope,
+        signature_hex: &str,
+        secret_key: &[u8],
+        now_ms: u64,
+    ) -> Result<ApprovedOrder, RiskRejection> {
+        if !verify_policy_hmac(raw_envelope, signature_hex, secret_key) {
+            return Err(RiskRejection::InvalidPolicySignature);
+        }
+        self.validate(intent, portfolio, raw_envelope, now_ms)
+    }
+
+    /// Triggers the kill-switch and generates deterministic opposite-side reduce-only market orders
+    /// across all non-zero portfolio exposures sorted alphabetically by asset symbol.
+    pub fn trigger_kill_switch_with_flatten(
+        &mut self,
+        reason: impl Into<String>,
+        portfolio: &PortfolioState,
+        _now_ms: u64,
+    ) -> Vec<OrderIntent> {
+        let reason_str = reason.into();
+        self.kill_switch_active = true;
+        self.kill_switch_reason = Some(reason_str.clone());
+
+        let mut sorted_symbols: Vec<_> = portfolio.asset_exposures_usd.keys().collect();
+        sorted_symbols.sort();
+
+        let mut flatten_intents = Vec::new();
+        for symbol in sorted_symbols {
+            let exposure = portfolio.asset_exposures_usd[symbol];
+            if exposure.abs() <= 1e-6 {
+                continue;
+            }
+            let side = if exposure > 0.0 {
+                Side::Sell
+            } else {
+                Side::Buy
+            };
+            flatten_intents.push(OrderIntent {
+                pod_id: PodId::PodCarry,
+                symbol: symbol.clone(),
+                venue: Venue::BinanceSpot,
+                side,
+                order_type: OrderType::Market,
+                reference_price: 0.0,
+                win_probability: 1.0,
+                reward_risk_ratio: 1.0,
+                asset_volatility_pct: 0.0,
+                expected_edge_bps: 0.0,
+                max_slippage_bps: self.limits.max_slippage_ceiling_bps,
+                requested_leverage: 1.0,
+                stop_loss_pct: 0.0,
+                take_profit_pct: 0.0,
+                token_safety: None,
+                rationale: format!("Kill-switch flatten: {}", reason_str),
+                reduce_only: true,
+            });
+        }
+
+        flatten_intents
+    }
 }
 
 #[cfg(test)]
@@ -610,6 +680,7 @@ mod tests {
             take_profit_pct: 2.6,
             token_safety: None,
             rationale: "Funding APR 28% carry capture".to_string(),
+            reduce_only: false,
         }
     }
 
@@ -803,6 +874,7 @@ mod tests {
             take_profit_pct: 2.6,
             token_safety: None,
             rationale: "hurdle fixture".to_string(),
+            reduce_only: false,
         }
     }
 
@@ -2681,6 +2753,107 @@ mod tests {
                 select_vault_mode_from(Some(OsString::from("UNSUPPORTED_ENCLAVE"))).unwrap_err(),
                 VaultInitError::InvalidVaultMode("UNSUPPORTED_ENCLAVE".to_string())
             );
+        }
+
+        #[test]
+        fn test_validate_signed_envelope_success_and_rejections() {
+            use robotrader_common::compute_policy_hmac;
+
+            let mut gate = HardRiskGate::new(RiskLimits::default());
+            let portfolio = PortfolioState::new(10_000.0);
+            let env = PolicyEnvelope::safe_baseline(1_000_000);
+            let secret = b"my-test-secret-key-2026";
+            let valid_sig = compute_policy_hmac(&env, secret);
+
+            // 1. Valid signature passes
+            let approved = gate
+                .validate_signed_envelope(&sample_intent(), &portfolio, &env, &valid_sig, secret, 1_000_500)
+                .expect("Valid signed envelope should pass");
+            assert_eq!(approved.intent.symbol, "SOL-USDT");
+
+            // 2. Modified envelope fails with InvalidPolicySignature
+            let mut tampered_env = env.clone();
+            tampered_env.ttl_seconds += 100;
+            let tampered_res = gate.validate_signed_envelope(
+                &sample_intent(),
+                &portfolio,
+                &tampered_env,
+                &valid_sig,
+                secret,
+                1_000_500,
+            );
+            assert!(matches!(tampered_res, Err(RiskRejection::InvalidPolicySignature)));
+
+            // 3. Corrupted hex string fails with InvalidPolicySignature
+            let corrupt_sig = format!("{}dead", &valid_sig[..60]);
+            let corrupt_res = gate.validate_signed_envelope(
+                &sample_intent(),
+                &portfolio,
+                &env,
+                &corrupt_sig,
+                secret,
+                1_000_500,
+            );
+            assert!(matches!(corrupt_res, Err(RiskRejection::InvalidPolicySignature)));
+
+            // 4. Backward-compatible unsigned validate() still works
+            let unsigned_res = gate.validate(&sample_intent(), &portfolio, &env, 1_000_500);
+            assert!(unsigned_res.is_ok());
+        }
+
+        #[test]
+        fn test_kill_switch_flatten_and_subsequent_rejection() {
+            let mut gate = HardRiskGate::new(RiskLimits::default());
+            let mut portfolio = PortfolioState::new(10_000.0);
+
+            // Active positions with deliberate insertion order: SOL-USDT (long), BTC-USDT (short), AVAX-USDT (zero)
+            portfolio.asset_exposures_usd.insert("SOL-USDT".to_string(), 1500.0);
+            portfolio.asset_exposures_usd.insert("BTC-USDT".to_string(), -500.0);
+            portfolio.asset_exposures_usd.insert("AVAX-USDT".to_string(), 0.0);
+
+            let intents = gate.trigger_kill_switch_with_flatten("Emergency market dump", &portfolio, 1_000_000);
+
+            // Verified kill switch active
+            assert!(gate.kill_switch_active);
+            assert_eq!(gate.kill_switch_reason.as_deref(), Some("Emergency market dump"));
+
+            // Only non-zero exposures emitted, sorted strictly alphabetically: BTC-USDT then SOL-USDT
+            assert_eq!(intents.len(), 2);
+
+            // BTC-USDT was negative exposure (-500.0) -> Buy order
+            assert_eq!(intents[0].symbol, "BTC-USDT");
+            assert_eq!(intents[0].side, Side::Buy);
+            assert_eq!(intents[0].order_type, OrderType::Market);
+            assert!(intents[0].reduce_only);
+            assert!(intents[0].rationale.contains("Kill-switch flatten: Emergency market dump"));
+
+            // SOL-USDT was positive exposure (1500.0) -> Sell order
+            assert_eq!(intents[1].symbol, "SOL-USDT");
+            assert_eq!(intents[1].side, Side::Sell);
+            assert_eq!(intents[1].order_type, OrderType::Market);
+            assert!(intents[1].reduce_only);
+            assert!(intents[1].rationale.contains("Kill-switch flatten: Emergency market dump"));
+
+            // Subsequent validate call fails with KillSwitchActive
+            let env = PolicyEnvelope::safe_baseline(1_000_000);
+            let res = gate.validate(&sample_intent(), &portfolio, &env, 1_000_500);
+            assert!(matches!(res, Err(RiskRejection::KillSwitchActive { .. })));
+
+            // Subsequent validate_signed_envelope call fails with KillSwitchActive
+            let secret = b"dev-key";
+            let sig = robotrader_common::compute_policy_hmac(&env, secret);
+            let signed_res = gate.validate_signed_envelope(&sample_intent(), &portfolio, &env, &sig, secret, 1_000_500);
+            assert!(matches!(signed_res, Err(RiskRejection::KillSwitchActive { .. })));
+
+            // Reset kill switch
+            gate.reset_kill_switch();
+            assert!(!gate.kill_switch_active);
+
+            // Trigger on empty portfolio -> returns empty vector
+            let empty_portfolio = PortfolioState::new(10_000.0);
+            let empty_intents = gate.trigger_kill_switch_with_flatten("Zero positions", &empty_portfolio, 1_000_000);
+            assert!(empty_intents.is_empty());
+            assert!(gate.kill_switch_active);
         }
 
     }

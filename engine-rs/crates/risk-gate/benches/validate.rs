@@ -42,6 +42,7 @@ fn intent(order_type: OrderType) -> OrderIntent {
         take_profit_pct: 2.6,
         token_safety: None,
         rationale: "benchmark fixture".to_string(),
+        reduce_only: false,
     }
 }
 

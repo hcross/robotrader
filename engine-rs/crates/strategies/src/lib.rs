@@ -89,6 +89,7 @@ impl StrategyPod for CarryPod {
                 annualized_funding_apr * 100.0,
                 basis_bps
             ),
+            reduce_only: false,
         }]
     }
 
@@ -240,6 +241,7 @@ impl StrategyPod for MomentumPod {
                         obi, breakout_zscore, catalyst_boost
                     ),
                 },
+                reduce_only: false,
             }];
         }
 
@@ -285,6 +287,7 @@ impl StrategyPod for MomentumPod {
                         obi, breakout_zscore
                     ),
                 },
+                reduce_only: false,
             }];
         }
 
@@ -360,6 +363,7 @@ impl StrategyPod for OnChainAlphaPod {
                 buy_volume_usd / 1000.0,
                 whale_wallet_winrate * 100.0
             ),
+            reduce_only: false,
         }]
     }
 
@@ -425,6 +429,7 @@ impl StrategyPod for DexSniperPod {
                 "Atomic DEX pool launch: LP ${:.0}k, clean deployer",
                 initial_liquidity_usd / 1000.0
             ),
+            reduce_only: false,
         }]
     }
 

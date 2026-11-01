@@ -2,7 +2,7 @@ use robotrader_backtest::{
     benchmark_market_stream_for_leaf, simulation_market_stream_for_leaf, BacktestEngine,
     EventDrivenBacktestEngine,
 };
-use robotrader_common::PolicyEnvelope;
+use robotrader_common::{compute_policy_hmac, verify_policy_hmac, PolicyEnvelope};
 use robotrader_risk_gate::{
     read_mode_input, read_seed_input, select_vault_mode, CryptoVaultBootstrap,
     CryptographicVault, HardRiskGate, RiskLimits, SimulatedVault, VaultBackendKind,
@@ -70,6 +70,8 @@ fn main() {
     let mut validate_refill = false;
     let mut validate_refill_json: Option<String> = None;
     let mut simulate_fills = false;
+    let mut compute_policy_hmac_key: Option<String> = None;
+    let mut verify_policy_hmac_args: Option<(String, String)> = None;
 
     for i in 0..args.len() {
         if (args[i] == "--leaf-id" || args[i] == "--leaf") && i + 1 < args.len() {
@@ -83,6 +85,10 @@ fn main() {
             dump_pod_catalog = true;
         } else if args[i] == "--contract-roundtrip" {
             contract_roundtrip = true;
+        } else if args[i] == "--compute-policy-hmac" && i + 1 < args.len() {
+            compute_policy_hmac_key = Some(args[i + 1].clone());
+        } else if args[i] == "--verify-policy-hmac" && i + 2 < args.len() {
+            verify_policy_hmac_args = Some((args[i + 1].clone(), args[i + 2].clone()));
         } else if args[i] == "--vault-manifest" {
             dump_vault_manifest = true;
         } else if args[i] == "--sign-transfer" {
@@ -195,6 +201,47 @@ fn main() {
             }
             Err(err) => {
                 eprintln!("contract roundtrip decode failed: {err}");
+                std::process::exit(2);
+            }
+        }
+    }
+
+    if let Some(key) = compute_policy_hmac_key {
+        let mut raw_input = String::new();
+        std::io::stdin()
+            .read_to_string(&mut raw_input)
+            .expect("Failed to read stdin");
+        match serde_json::from_str::<PolicyEnvelope>(&raw_input) {
+            Ok(parsed) => {
+                let digest = compute_policy_hmac(&parsed, key.as_bytes());
+                println!("{digest}");
+                return;
+            }
+            Err(err) => {
+                eprintln!("failed to decode policy envelope for HMAC computation: {err}");
+                std::process::exit(2);
+            }
+        }
+    }
+
+    if let Some((key, sig)) = verify_policy_hmac_args {
+        let mut raw_input = String::new();
+        std::io::stdin()
+            .read_to_string(&mut raw_input)
+            .expect("Failed to read stdin");
+        match serde_json::from_str::<PolicyEnvelope>(&raw_input) {
+            Ok(parsed) => {
+                let valid = verify_policy_hmac(&parsed, &sig, key.as_bytes());
+                if valid {
+                    println!("VALID");
+                    return;
+                } else {
+                    eprintln!("signature verification failed");
+                    std::process::exit(1);
+                }
+            }
+            Err(err) => {
+                eprintln!("failed to decode policy envelope for HMAC verification: {err}");
                 std::process::exit(2);
             }
         }

@@ -869,6 +869,7 @@ mod tests {
 
         let order = ApprovedOrder {
             intent: robotrader_common::OrderIntent {
+                reduce_only: false,
                 pod_id: PodId::PodMomentum,
                 symbol: "SOL-USDT".to_string(),
                 venue: Venue::BinanceSpot,
@@ -927,6 +928,7 @@ mod tests {
 
         let order = ApprovedOrder {
             intent: robotrader_common::OrderIntent {
+                reduce_only: false,
                 pod_id: PodId::PodMomentum,
                 symbol: "SOL-USDT".to_string(),
                 venue: Venue::BinanceSpot,
@@ -985,6 +987,7 @@ mod tests {
 
         let order = ApprovedOrder {
             intent: robotrader_common::OrderIntent {
+                reduce_only: false,
                 pod_id: PodId::PodCarry,
                 symbol: "SOL-USDT".to_string(),
                 venue: Venue::BinanceSpot,
