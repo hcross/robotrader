@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "plan",
+  "status": "dev",
   "pr": null,
   "areas": [],
   "stages": {
@@ -27,12 +27,12 @@
       "updated_at": "2026-11-01T11:47:07Z"
     },
     "plan": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-plan-reviewer",
+      "last_sha": "785176c23862002c05928b193313f02d0c4c12b4",
+      "updated_at": "2026-11-01T11:57:21Z"
     },
     "dev": {
       "status": "pending",
