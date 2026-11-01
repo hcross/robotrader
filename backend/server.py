@@ -332,6 +332,11 @@ def trigger_openrouter_refill(req: OpenRouterRefillRequest) -> Dict[str, Any]:
     )
 
 
+@app.post("/api/v1/openrouter/reconcile")
+def reconcile_openrouter_credits() -> Dict[str, Any]:
+    return orchestrator.cost_guard.reconcile_openrouter_credits()
+
+
 @app.get("/api/v1/llm/calls")
 def list_llm_calls(
     offset: int = 0,
