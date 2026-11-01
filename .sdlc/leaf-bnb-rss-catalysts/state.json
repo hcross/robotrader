@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "merge-ready",
+  "status": "merged",
   "pr": 205,
   "areas": [],
   "stages": {
@@ -36,14 +36,21 @@
     },
     "dev": {
       "status": "approved",
-      "rounds": 1,
+      "rounds": 2,
       "last_verdict": "APPROVE",
       "last_reviewer": "sdlc-dev-reviewer",
-      "last_sha": "472f82157ce614de3dd8ca99405efd790d284060",
-      "updated_at": "2026-11-01T18:18:57Z"
+      "last_sha": "42f4b8875c73e683835c01552f46c214ca4743ea",
+      "updated_at": "2026-11-01T19:10:49Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/53-leaf-bnb-rss-catalysts",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T19:14:16Z",
+    "mode": "full-auto",
+    "pr": 205,
+    "head_sha": "42f4b8875c73e683835c01552f46c214ca4743ea"
+  }
 }
