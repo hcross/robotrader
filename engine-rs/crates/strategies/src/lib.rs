@@ -1346,7 +1346,7 @@ mod tests {
         let pool_event = MarketEvent::OnchainPoolLaunch {
             timestamp_ms: 1000,
             symbol: "AAVE-ETH".to_string(),
-            pool_address: "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9".to_string(),
+            token_address: "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9".to_string(),
             initial_liquidity_usd: 50000.0,
             creator_rug_count: 0,
             price_usd: 150.0,
