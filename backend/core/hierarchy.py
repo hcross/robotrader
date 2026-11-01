@@ -1798,7 +1798,7 @@ class HierarchicalFleetManager:
                 "wallet_vault": wallet_vault,
                 "last_price_usd": float(TOKEN_PRICES_USD.get(spec["symbol"], 1.0)),
                 "ta_metrics": dict(spec.get("ta_specific_metrics", {})),
-                "base_interval_sec": 900 if (alloc_usd > 0 or lid == "leaf-xrp") else 3600,
+                "base_interval_sec": 900 if (alloc_usd > 0 or lid in ("leaf-xrp", "leaf-bnb")) else 3600,
                 "target_annual_return_pct": 35.0 if posture == "AGGRESSIVE" else (18.0 if posture == "BALANCED" else 8.0),
                 "max_drawdown_limit_pct": 4.0 if posture == "AGGRESSIVE" else 2.5,
                 "last_reflection_ms": now_ms,
@@ -1846,7 +1846,7 @@ class HierarchicalFleetManager:
 
         for lid, leaf in self.leaves.items():
             wing = str(leaf["mempalace_wing"])
-            if wing not in existing_wings and (leaf["enabled"] or lid in ("leaf-bitcoin", "leaf-ethereum", "leaf-sui", "leaf-hyperliquid")):
+            if wing not in existing_wings and (leaf["enabled"] or lid in ("leaf-bitcoin", "leaf-ethereum", "leaf-sui", "leaf-hyperliquid", "leaf-bnb")):
                 ta = leaf["ta_specific_metrics"]
                 self.palace.add_drawer(
                     PalaceDrawer(

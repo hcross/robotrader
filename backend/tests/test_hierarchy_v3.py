@@ -461,6 +461,55 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         signed_bundle = SignedPolicyBundle.from_dict(res["signed_policy_bundle"])
         self.assertTrue(verify_policy_hmac(signed_bundle.policy, signed_bundle.signature, "robotrader-dev-hmac-key"))
 
+    def test_bnb_warm_path_reflection_and_policy_compilation(self) -> None:
+        """
+        Verifies:
+        - `orchestrator.run_leaf_agent_reflection("leaf-bnb", trigger_source="UNIT_TEST")` writes a drawer to `wing == "leaf_bnb"` with `next_wakeup_sec == 900` and `thesis_continuity in ("INITIAL", "INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED")`.
+        - `res["policy_envelope"]["asset_overrides"]` keys are strictly `{"BNB-USDT", "CAKE-BNB"}` (zero non-BNB symbols) with all 11 `AssetOverride` fields populated and `BNB-USDT` support/resistance/invalidation calibrated around `~598.0`.
+        - `verify_policy_hmac(SignedPolicyBundle.from_dict(res["signed_policy_bundle"]))` returns `True`.
+        """
+        cg = self.orchestrator.cost_guard
+        cg.auto_refill_enabled = False
+        cg.record_usage({"agent": "test", "cost": cg.daily_budget_usd, "tokens": 0})
+        self.assertTrue(cg.budget_exhausted)
+
+        res = self.orchestrator.run_leaf_agent_reflection("leaf-bnb", trigger_source="UNIT_TEST")
+        self.assertEqual(res["status"], "completed")
+        self.assertEqual(res["leaf_id"], "leaf-bnb")
+        self.assertEqual(res["wing"], "leaf_bnb")
+        self.assertEqual(res["drawer"]["next_wakeup_sec"], 900)
+        self.assertIn(res["drawer"]["thesis_continuity"], ("INITIAL", "INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED"))
+
+        envelope_dict = res["policy_envelope"]
+        self.assertEqual(envelope_dict["ttl_seconds"], 900)
+        overrides = envelope_dict["asset_overrides"]
+        self.assertEqual(set(overrides.keys()), {"BNB-USDT", "CAKE-BNB"})
+
+        expected_11_keys = {
+            "catalyst_score",
+            "bias",
+            "max_leverage",
+            "support_zone_usd",
+            "resistance_zone_usd",
+            "invalidation_price_usd",
+            "entry_obi_threshold",
+            "max_rsi_long",
+            "min_rsi_short",
+            "take_profit_bps",
+            "stop_loss_bps",
+        }
+        for sym, override in overrides.items():
+            self.assertEqual(set(override.keys()), expected_11_keys)
+
+        bnb_override = overrides["BNB-USDT"]
+        self.assertAlmostEqual(bnb_override["support_zone_usd"], 598.0 * 0.98, places=2)
+        self.assertAlmostEqual(bnb_override["resistance_zone_usd"], 598.0 * 1.05, places=2)
+        self.assertAlmostEqual(bnb_override["invalidation_price_usd"], 598.0 * 0.97, places=2)
+
+        from backend.core.schemas import SignedPolicyBundle, verify_policy_hmac
+        signed_bundle = SignedPolicyBundle.from_dict(res["signed_policy_bundle"])
+        self.assertTrue(verify_policy_hmac(signed_bundle.policy, signed_bundle.signature, "robotrader-dev-hmac-key"))
+
     def test_cross_wing_mempalace_and_master_leaf_reflections(self) -> None:
         """
         Verifies that leaf agents write to their isolated wing (`wing=leaf_bitcoin`)
