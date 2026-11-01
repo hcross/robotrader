@@ -597,6 +597,73 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
             self.assertTrue(item["curated"])
             self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
 
+    def test_bitcoin_leaf_ta_metrics_computation_and_fallback(self) -> None:
+        """
+        Verifies TechnicalAnalysisTool.compute_bitcoin_ta_metrics across BTC-USD, wBTC-BTC, sBTC-BTC:
+        1. Returns ta_metrics_source == "LIVE_COMPUTED" and all 8 required Bitcoin metrics
+           (mempool_fee_sat_vb, hash_ribbon_state, etf_netflow_24h_usd_m, miner_reserve_delta_btc,
+            kumo_regime, golden_pocket_fib_618, rsi_14, obi_l2) computed from real OHLCV + L2 + telemetry.
+        2. Gracefully falls back (ta_metrics_source == "CATALOG_FIXTURE") when candle/telemetry input is empty.
+        """
+        from backend.tools.ta_tools import TechnicalAnalysisTool
+
+        sample_candles = [
+            [1700000000000 + i * 900000, 80000.0 + i * 10, 80100.0 + i * 10, 79900.0 + i * 10, 80050.0 + i * 10, 150.0]
+            for i in range(25)
+        ]
+        sample_bids = [[80040.0, 10.0], [80030.0, 15.0]]
+        sample_asks = [[80060.0, 5.0], [80070.0, 8.0]]
+        sample_telemetry = {
+            "mempool_fee_sat_vb": 12.4,
+            "hash_ribbon_state": "EXPANSION_BULLISH",
+            "etf_netflow_24h_usd_m": 450.0,
+            "miner_reserve_delta_btc": 210.5,
+        }
+
+        for sym in ["BTC-USD", "wBTC-BTC", "sBTC-BTC"]:
+            res = TechnicalAnalysisTool.compute_bitcoin_ta_metrics(
+                candles=sample_candles,
+                bids=sample_bids,
+                asks=sample_asks,
+                onchain_telemetry=sample_telemetry,
+                symbol=sym,
+            )
+            self.assertEqual(res["symbol"], sym)
+            self.assertEqual(res["ta_metrics_source"], "LIVE_COMPUTED")
+            self.assertEqual(res["mempool_fee_sat_vb"], 12.4)
+            self.assertEqual(res["hash_ribbon_state"], "EXPANSION_BULLISH")
+            self.assertEqual(res["etf_netflow_24h_usd_m"], 450.0)
+            self.assertEqual(res["miner_reserve_delta_btc"], 210.5)
+            self.assertIn("kumo_regime", res)
+            self.assertIn("golden_pocket_fib_618", res)
+            self.assertIn("rsi_14", res)
+            self.assertIn("obi_l2", res)
+            self.assertIn("Bitcoin L1 Native", res["venues"])
+            self.assertIn("ThorChain Native Pool", res["venues"])
+            self.assertIn("Lightning Liquidity", res["venues"])
+
+        ingest_res = TechnicalAnalysisTool.ingest_bitcoin_market_snapshot(
+            candles=sample_candles,
+            bids=sample_bids,
+            asks=sample_asks,
+            onchain_telemetry=sample_telemetry,
+            symbol="BTC-USD",
+        )
+        self.assertEqual(ingest_res["ta_metrics_source"], "LIVE_COMPUTED")
+
+        fallback_res = TechnicalAnalysisTool.compute_bitcoin_ta_metrics(
+            candles=[],
+            bids=None,
+            asks=None,
+            onchain_telemetry=None,
+            symbol="BTC-USD",
+        )
+        self.assertEqual(fallback_res["ta_metrics_source"], "CATALOG_FIXTURE")
+        self.assertIn("mempool_fee_sat_vb", fallback_res)
+        self.assertIn("hash_ribbon_state", fallback_res)
+        self.assertIn("etf_netflow_24h_usd_m", fallback_res)
+        self.assertIn("miner_reserve_delta_btc", fallback_res)
+
 
 if __name__ == "__main__":
     unittest.main()
