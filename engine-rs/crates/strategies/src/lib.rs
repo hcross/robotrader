@@ -652,42 +652,6 @@ pub fn verify_xrp_token_safety(symbol: &str, safety: &OnChainTokenSafety) -> boo
     xrp_token_safety_impl(symbol, safety)
 }
 
-pub fn verify_xrp_wrapper_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
-    xrp_token_safety_impl(symbol, safety)
-}
-
-pub fn verify_xrp_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
-    xrp_token_safety_impl(symbol, safety)
-}
-
-pub fn verify_xrpl_token_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
-    xrp_token_safety_impl(symbol, safety)
-}
-
-pub fn verify_xrpl_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
-    xrp_token_safety_impl(symbol, safety)
-}
-
-pub fn verify_xrp_clob_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
-    xrp_token_safety_impl(symbol, safety)
-}
-
-pub fn verify_xrp_amm_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
-    xrp_token_safety_impl(symbol, safety)
-}
-
-pub fn verify_xrp_rlusd_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
-    xrp_token_safety_impl(symbol, safety)
-}
-
-pub fn verify_rlusd_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
-    xrp_token_safety_impl(symbol, safety)
-}
-
-pub fn verify_xls30_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
-    xrp_token_safety_impl(symbol, safety)
-}
-
 pub const CANONICAL_LEAF_IDS: &[&str] = &[
     "leaf-solana",
     "leaf-bitcoin",
