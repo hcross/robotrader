@@ -3,6 +3,12 @@ use robotrader_common::{
 };
 use serde::{Deserialize, Serialize};
 
+pub mod fill_sim;
+pub use fill_sim::{
+    extract_available_liquidity, extract_obi, EventDrivenFillSimulator, FillStatus, RestingOrder,
+    SimulatedFill,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ExecutionMode {
@@ -77,7 +83,7 @@ impl SmartExecutionRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use robotrader_common::{fee_bps_for, spread_bps_for, OrderIntent, PodId};
+    use robotrader_common::{fee_bps_for, spread_bps_for, MarketEvent, OrderIntent, PodId};
 
     const ALL_VENUES: [Venue; 5] = [
         Venue::BinanceSpot,
@@ -167,5 +173,198 @@ mod tests {
 
         let charged_bps = report.fee_usd / report.notional_usd * 10_000.0;
         assert!((charged_bps - 3.6).abs() < 1e-9, "charged {charged_bps} bps");
+    }
+
+    #[test]
+    fn test_maker_order_fills_on_crossing_price_tick() {
+        let mut sim = EventDrivenFillSimulator::new();
+        let order = approved_order(Venue::BinancePerp, OrderType::PostOnlyMaker, 0);
+        let entry_event = MarketEvent::OrderbookTick {
+            timestamp_ms: 1_000,
+            symbol: "SOL-USDT".to_string(),
+            mid_price: 150.0,
+            bid_volume_top5: 5_000.0,
+            ask_volume_top5: 5_000.0,
+            cvd_delta: 0.0,
+            atr_pct: 1.5,
+            breakout_zscore: 0.0,
+            rsi_14: None,
+        };
+
+        // Submitting maker order returns None and places it into resting queue
+        let immediate = sim.submit_order(order, &entry_event);
+        assert!(immediate.is_none());
+        assert_eq!(sim.resting_orders.len(), 1);
+
+        // Subsequent tick with matching ask liquidity touches resting price (150.0) with neutral OBI
+        let match_event = MarketEvent::OrderbookTick {
+            timestamp_ms: 2_000,
+            symbol: "SOL-USDT".to_string(),
+            mid_price: 149.9,
+            bid_volume_top5: 5_000.0,
+            ask_volume_top5: 5_000.0,
+            cvd_delta: 0.0,
+            atr_pct: 1.5,
+            breakout_zscore: 0.0,
+            rsi_14: None,
+        };
+
+        let fills = sim.process_market_event(&match_event);
+        assert_eq!(fills.len(), 1);
+        let fill = &fills[0];
+        assert_eq!(fill.status, FillStatus::Filled);
+        assert_eq!(fill.fill_price, 150.0);
+        assert_eq!(fill.filled_quantity, 10_000.0 / 150.0);
+        // Maker fee for BinancePerp is 1.8 bps
+        assert_eq!(fill.fee_usd, 10_000.0 * (1.8 / 10_000.0));
+        assert_eq!(sim.resting_orders.len(), 0);
+    }
+
+    #[test]
+    fn test_maker_queue_starvation_blocks_fill_under_adverse_imbalance() {
+        let mut sim = EventDrivenFillSimulator::new();
+        let order = approved_order(Venue::BinancePerp, OrderType::PostOnlyMaker, 0);
+        let entry_event = MarketEvent::OrderbookTick {
+            timestamp_ms: 1_000,
+            symbol: "SOL-USDT".to_string(),
+            mid_price: 150.0,
+            bid_volume_top5: 5_000.0,
+            ask_volume_top5: 5_000.0,
+            cvd_delta: 0.0,
+            atr_pct: 1.5,
+            breakout_zscore: 0.0,
+            rsi_14: None,
+        };
+
+        sim.submit_order(order, &entry_event);
+
+        // Price crosses (149.8 <= 150.0), but severe sell imbalance (OBI = (100 - 900) / 1000 = -0.80 < -0.70)
+        let starved_event = MarketEvent::OrderbookTick {
+            timestamp_ms: 2_000,
+            symbol: "SOL-USDT".to_string(),
+            mid_price: 149.8,
+            bid_volume_top5: 100.0,
+            ask_volume_top5: 900.0,
+            cvd_delta: -50_000.0,
+            atr_pct: 1.5,
+            breakout_zscore: -2.0,
+            rsi_14: None,
+        };
+
+        let fills = sim.process_market_event(&starved_event);
+        // Starved: no fill produced, remains in resting queue
+        assert_eq!(fills.len(), 0);
+        assert_eq!(sim.resting_orders.len(), 1);
+    }
+
+    #[test]
+    fn test_maker_order_expires_unfilled_during_adverse_divergence_with_zero_fee() {
+        let mut sim = EventDrivenFillSimulator::new();
+        let order = approved_order(Venue::BinancePerp, OrderType::PostOnlyMaker, 0);
+        let entry_event = MarketEvent::OrderbookTick {
+            timestamp_ms: 1_000,
+            symbol: "SOL-USDT".to_string(),
+            mid_price: 150.0,
+            bid_volume_top5: 5_000.0,
+            ask_volume_top5: 5_000.0,
+            cvd_delta: 0.0,
+            atr_pct: 1.5,
+            breakout_zscore: 0.0,
+            rsi_14: None,
+        };
+
+        sim.submit_order(order, &entry_event);
+
+        // Market price diverges upwards by > 50 bps (150.0 * 1.006 = 150.9)
+        let divergent_event = MarketEvent::OrderbookTick {
+            timestamp_ms: 2_000,
+            symbol: "SOL-USDT".to_string(),
+            mid_price: 151.0,
+            bid_volume_top5: 5_000.0,
+            ask_volume_top5: 5_000.0,
+            cvd_delta: 20_000.0,
+            atr_pct: 1.5,
+            breakout_zscore: 1.8,
+            rsi_14: None,
+        };
+
+        let fills = sim.process_market_event(&divergent_event);
+        assert_eq!(fills.len(), 1);
+        let fill = &fills[0];
+        assert_eq!(fill.status, FillStatus::UnfilledExpired);
+        assert_eq!(fill.filled_quantity, 0.0);
+        assert_eq!(fill.notional_usd, 0.0);
+        assert_eq!(fill.fee_usd, 0.0);
+        assert_eq!(sim.resting_orders.len(), 0);
+    }
+
+    #[test]
+    fn test_limit_order_fills_with_adverse_selection_when_market_trades_through() {
+        let mut sim = EventDrivenFillSimulator::new();
+        let order = approved_order(Venue::BinanceSpot, OrderType::Limit, 0);
+        let entry_event = MarketEvent::OrderbookTick {
+            timestamp_ms: 1_000,
+            symbol: "SOL-USDT".to_string(),
+            mid_price: 150.0,
+            bid_volume_top5: 5_000.0,
+            ask_volume_top5: 5_000.0,
+            cvd_delta: 0.0,
+            atr_pct: 1.5,
+            breakout_zscore: 0.0,
+            rsi_14: None,
+        };
+
+        sim.submit_order(order, &entry_event);
+
+        // Market trades through limit price (149.0 < 150.0)
+        let trade_through_event = MarketEvent::OrderbookTick {
+            timestamp_ms: 2_000,
+            symbol: "SOL-USDT".to_string(),
+            mid_price: 149.0,
+            bid_volume_top5: 5_000.0,
+            ask_volume_top5: 5_000.0,
+            cvd_delta: -10_000.0,
+            atr_pct: 1.5,
+            breakout_zscore: -1.0,
+            rsi_14: None,
+        };
+
+        let fills = sim.process_market_event(&trade_through_event);
+        assert_eq!(fills.len(), 1);
+        let fill = &fills[0];
+        assert_eq!(fill.status, FillStatus::Filled);
+        // Limit adverse selection for Buy is +2.0 bps over limit price
+        let expected_fill_px = 150.0 * (1.0 + 2.0 / 10_000.0);
+        assert!((fill.fill_price - expected_fill_px).abs() < 1e-9);
+        assert_eq!(fill.fee_usd, 10_000.0 * (5.0 / 10_000.0));
+    }
+
+    #[test]
+    fn test_taker_order_executes_with_spread_and_depth_impact() {
+        let sim = EventDrivenFillSimulator::new();
+        let order = approved_order(Venue::BinancePerp, OrderType::Market, 0);
+        // Available liquidity = (200 + 200) * 0.5 * 150 = $30,000.
+        // Order notional = $10,000.
+        // Depth impact = 5.0 * (10_000 / 30_000) = 1.6667 bps (capped at max_slippage_bps = 2.0 bps)
+        // Canonical market spread = 8.0 bps
+        // Total slippage = 8.0 + 1.6667 = 9.6667 bps
+        let event = MarketEvent::OrderbookTick {
+            timestamp_ms: 1_000,
+            symbol: "SOL-USDT".to_string(),
+            mid_price: 150.0,
+            bid_volume_top5: 200.0,
+            ask_volume_top5: 200.0,
+            cvd_delta: 0.0,
+            atr_pct: 1.5,
+            breakout_zscore: 0.0,
+            rsi_14: None,
+        };
+
+        let fill = sim.execute_taker(&order, &event);
+        assert_eq!(fill.status, FillStatus::Filled);
+        let expected_slippage_bps = 8.0 + (5.0 * (10_000.0 / 30_000.0));
+        assert!((fill.slippage_bps - expected_slippage_bps).abs() < 1e-9);
+        let expected_fill_price = 150.0 * (1.0 + expected_slippage_bps / 10_000.0);
+        assert!((fill.fill_price - expected_fill_price).abs() < 1e-9);
     }
 }
