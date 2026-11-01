@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-bitcoin-rss-catalysts",
+  "title": "feat(leaf-bitcoin/rss-catalysts): live RSS/Atom feed verification & catalyst scoring for Bitcoin",
+  "issue": 29,
+  "lane": "M",
+  "lane_reason": "Scoped Bitcoin RSS/Atom feed verification and catalyst scoring in backend/tools/rss_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/29-leaf-bitcoin-rss-catalysts",
+  "worktree": ".worktrees/29-leaf-bitcoin-rss-catalysts",
+  "base_branch": "master",
+  "base_sha": "7118fd106945a5615ce4aa428dd7cb0d61577a92",
+  "created_at": "2026-11-01T14:48:23Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 183,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "64d15b25a9b9fc3a53d6a989d8f04a1442d53d24",
+      "updated_at": "2026-11-01T14:55:56Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/29-leaf-bitcoin-rss-catalysts",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T14:56:03Z",
+    "mode": "full-auto",
+    "pr": 183,
+    "head_sha": "64d15b25a9b9fc3a53d6a989d8f04a1442d53d24"
+  }
+}
