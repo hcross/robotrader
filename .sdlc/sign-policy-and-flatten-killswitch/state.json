@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "dev",
+  "status": "merged",
   "pr": 179,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": "2026-11-01T12:15:20Z"
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "d680cebce41c5a250ae7e37aa64e04aa288023be",
       "updated_at": null
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/8-sign-policy-and-flatten-killswitch",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T13:20:29Z",
+    "mode": "full-auto",
+    "pr": 179,
+    "head_sha": "d680cebce41c5a250ae7e37aa64e04aa288023be"
+  }
 }
