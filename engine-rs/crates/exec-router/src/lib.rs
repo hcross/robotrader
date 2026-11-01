@@ -176,6 +176,79 @@ impl EthereumVenueAdapter {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SuiBridgeQuote {
+    pub venues: Vec<String>,
+    pub supported_tokens: Vec<String>,
+    pub bridge_protocol: String,
+    pub base_fee_usd: f64,
+    pub variable_bps: f64,
+    pub one_way_fee_usd: f64,
+    pub round_trip_cost_bps: f64,
+    pub hurdle_rate_bps: f64,
+    pub finality_sec: u64,
+}
+
+pub struct SuiVenueAdapter;
+
+impl SuiVenueAdapter {
+    pub const VENUES: [&'static str; 3] = [
+        "DeepBook v3 CLOB",
+        "Cetus CLMM",
+        "Navi Protocol",
+    ];
+    pub const SUPPORTED_TOKENS: [&'static str; 3] = ["SUI", "USDC", "USDT"];
+    pub const BRIDGE_PROTOCOL: &'static str = "Wormhole / Sui Native Bridge";
+    pub const BASE_FEE_USD: f64 = 0.45;
+    pub const VARIABLE_BPS: f64 = 5.0;
+    pub const FINALITY_SEC: u64 = 1;
+
+    pub fn quote_bridge(notional_usd: f64) -> SuiBridgeQuote {
+        let one_way_fee_usd = Self::BASE_FEE_USD + notional_usd * (Self::VARIABLE_BPS / 10_000.0);
+        let one_way_bps = if notional_usd > 0.0 {
+            (one_way_fee_usd / notional_usd) * 10_000.0
+        } else {
+            Self::VARIABLE_BPS
+        };
+        let round_trip_cost_bps = one_way_bps * 2.0;
+        let hurdle_rate_bps = round_trip_cost_bps * 2.5;
+
+        SuiBridgeQuote {
+            venues: Self::VENUES.iter().map(|s| s.to_string()).collect(),
+            supported_tokens: Self::SUPPORTED_TOKENS.iter().map(|s| s.to_string()).collect(),
+            bridge_protocol: Self::BRIDGE_PROTOCOL.to_string(),
+            base_fee_usd: Self::BASE_FEE_USD,
+            variable_bps: Self::VARIABLE_BPS,
+            one_way_fee_usd,
+            round_trip_cost_bps,
+            hurdle_rate_bps,
+            finality_sec: Self::FINALITY_SEC,
+        }
+    }
+
+    pub fn validate_settlement_destination(dest: &str) -> bool {
+        if dest.starts_with("bridge:wormhole:") || dest.starts_with("bridge:sui:") {
+            let prefix_len = if dest.starts_with("bridge:wormhole:") {
+                "bridge:wormhole:".len()
+            } else {
+                "bridge:sui:".len()
+            };
+            return dest.len() > prefix_len;
+        }
+
+        // Sui address: "0x" followed by exactly 64 hex characters
+        if dest.starts_with("0x") || dest.starts_with("0X") {
+            let hex_part = &dest[2..];
+            if hex_part.len() != 64 {
+                return false;
+            }
+            return hex_part.chars().all(|c| c.is_ascii_hexdigit());
+        }
+
+        false
+    }
+}
+
 pub struct SmartExecutionRouter {
     pub mode: ExecutionMode,
 }
@@ -248,6 +321,13 @@ impl SmartExecutionRouter {
             if sym != "ETH-USDC" && sym != "stETH-ETH" && sym != "UNI-ETH" && sym != "AAVE-ETH" {
                 return Err(format!(
                     "Leaf leaf-ethereum violates symbol isolation: symbol {sym} not allowed"
+                ));
+            }
+        } else if leaf_id == "leaf-sui" {
+            let sym = &order.intent.symbol;
+            if sym != "SUI-USDC" && sym != "DEEP-SUI" && sym != "CETUS-SUI" {
+                return Err(format!(
+                    "Leaf leaf-sui violates symbol isolation: symbol {sym} not allowed"
                 ));
             }
         }
@@ -472,6 +552,45 @@ mod tests {
 
         order.intent.symbol = "BTC-USD".to_string();
         let res_err = router.execute_for_leaf("leaf-ethereum", &order, 1000);
+        assert!(res_err.is_err());
+    }
+
+    #[test]
+    fn test_sui_venue_adapter_bridge_quote_and_custody_destination() {
+        let quote = SuiVenueAdapter::quote_bridge(10_000.0);
+        assert_eq!(quote.venues.len(), 3);
+        assert!(quote.venues.contains(&"DeepBook v3 CLOB".to_string()));
+        assert!(quote.venues.contains(&"Cetus CLMM".to_string()));
+        assert!(quote.venues.contains(&"Navi Protocol".to_string()));
+        assert_eq!(quote.bridge_protocol, "Wormhole / Sui Native Bridge");
+        assert_eq!(quote.base_fee_usd, 0.45);
+        assert_eq!(quote.variable_bps, 5.0);
+        assert!((quote.one_way_fee_usd - (0.45 + 10_000.0 * 5.0 / 10_000.0)).abs() < 1e-9);
+        assert!(quote.hurdle_rate_bps > quote.round_trip_cost_bps);
+        assert_eq!(quote.finality_sec, 1);
+
+        // Test destination validation
+        assert!(SuiVenueAdapter::validate_settlement_destination(&format!("0x{}", "a".repeat(64))));
+        assert!(SuiVenueAdapter::validate_settlement_destination(&format!("0X{}", "A".repeat(64))));
+        assert!(SuiVenueAdapter::validate_settlement_destination("bridge:wormhole:0x1234..."));
+        assert!(SuiVenueAdapter::validate_settlement_destination("bridge:sui:destination"));
+        assert!(!SuiVenueAdapter::validate_settlement_destination("0xShort"));
+        assert!(!SuiVenueAdapter::validate_settlement_destination("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"));
+    }
+
+    #[test]
+    fn test_smart_execution_router_execute_for_leaf_sui_isolation() {
+        let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
+        let mut order = approved_order(Venue::BinanceSpot, OrderType::Limit, 0);
+
+        for sym in ["SUI-USDC", "DEEP-SUI", "CETUS-SUI"] {
+            order.intent.symbol = sym.to_string();
+            let res = router.execute_for_leaf("leaf-sui", &order, 1000);
+            assert!(res.is_ok(), "expected ok for {sym}");
+        }
+
+        order.intent.symbol = "ETH-USDC".to_string();
+        let res_err = router.execute_for_leaf("leaf-sui", &order, 1000);
         assert!(res_err.is_err());
     }
 }
