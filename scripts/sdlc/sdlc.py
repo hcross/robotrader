@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from datetime import date
@@ -357,6 +358,29 @@ def next_action(state: dict) -> tuple[str, str, int, str]:
     return "human", status, 0, "unknown state"
 
 
+def _invariants_from_config() -> str:
+    """Extract the hard-invariant bullets from `openspec/config.yaml`.
+
+    Single source of truth: the brief must not hold a second, drifting copy of
+    the platform invariants.
+    """
+    cfg = Path(common.REPO_ROOT) / "openspec" / "config.yaml"
+    try:
+        text = cfg.read_text(encoding="utf-8")
+    except OSError:
+        return "- See `openspec/config.yaml` (unreadable from this worktree)."
+    if "Hard invariants" not in text:
+        return "- See `openspec/config.yaml`."
+    block = text.split("Hard invariants", 1)[1]
+    block = block.split("Repository conventions", 1)[0]
+    bullets = [
+        f"- {line.strip()[2:]}"
+        for line in block.splitlines()
+        if line.strip().startswith("- ")
+    ]
+    return "\n".join(bullets) if bullets else "- See `openspec/config.yaml`."
+
+
 def build_brief(state: dict, role: str, stage: str, round_no: int, reason: str) -> str:
     stage_artifact = {
         "spec": "openspec/changes/<id>/proposal.md + specs/** + tasks.md (Lane S)",
@@ -381,8 +405,21 @@ def build_brief(state: dict, role: str, stage: str, round_no: int, reason: str) 
 - Reviewed SHA: run `git rev-parse HEAD` in the worktree and record it in the verdict.
 - Reason: {reason}
 
+## Context pack (pre-digested — do not re-read the whole protocol)
+
+Hard invariants (a violation is a blocker, whatever the feature) — derived from `openspec/config.yaml`:
+{_invariants_from_config()}
+
+Canonical commands:
+- `cd engine-rs && cargo test`
+- `PYTHONPATH=. python3 -m unittest discover -s backend/tests -v`
+- `cd frontend && npm run build`
+
+Shared-file insertion rule (three-way merge hygiene):
+- `backend/tools/ta_tools.py`, `backend/tools/rss_tools.py`, `backend/agents/orchestrator.py` and `backend/tests/test_hierarchy_v3.py` receive one block per leaf. Append your leaf's block immediately after the last existing leaf block of the same kind, never inside another leaf's block, and keep exactly one blank line between blocks. Do not reformat or reorder existing blocks.
+
 Read first, in this order:
-1. `sdlc/PROTOCOL.md`
+1. `sdlc/PROTOCOL.md` — skim; the context pack above already carries the rules you must apply
 2. `openspec/config.yaml`
 3. `{checklist}`
 4. The issue logbook: `gh issue view {state['issue']} --json title,body,labels,comments`
@@ -466,6 +503,173 @@ def cmd_partial(args: argparse.Namespace) -> int:
     return 0
 
 
+def _is_ancestor(old: str, new: str, worktree: Path) -> bool:
+    proc = common.run(
+        ["git", "-C", str(worktree), "merge-base", "--is-ancestor", old, new],
+        check=False,
+    )
+    return proc.returncode == 0
+
+
+def _change_patch_ids(worktree: Path, base: str, head: str, change_id: str) -> set[str]:
+    """Patch ids of the commits that belong to this change.
+
+    `git patch-id` hashes the changed lines, not the surrounding context or the
+    line numbers, so it stays stable across a rebase or a merge while changing
+    the moment the content itself changes. Filtering on the `[change-id]`
+    convention excludes the commits master brought in through the rebase.
+    """
+    log = common.run(
+        ["git", "-C", str(worktree), "log", "--format=%H%x09%s", f"{base}..{head}"],
+        check=False,
+    )
+    if log.returncode != 0:
+        return set()
+    ids: set[str] = set()
+    for line in log.stdout.splitlines():
+        if "\t" not in line:
+            continue
+        sha, subject = line.split("\t", 1)
+        if f"[{change_id}]" not in subject:
+            continue
+        diff = common.run(
+            ["git", "-C", str(worktree), "show", "--no-color", "--format=", sha],
+            check=False,
+        )
+        if diff.returncode != 0:
+            return set()
+        proc = subprocess.run(
+            ["git", "patch-id", "--stable"],
+            input=diff.stdout,
+            text=True,
+            capture_output=True,
+        )
+        for pid_line in proc.stdout.splitlines():
+            fields = pid_line.split()
+            if fields:
+                ids.add(fields[0])
+    return ids
+
+
+def _mechanical_rebase_ok(
+    old: str, new: str, worktree: Path, base_sha: str, change_id: str
+) -> bool:
+    """True when `new` carries exactly the change `old` carried.
+
+    Two shapes qualify: master was merged into the branch (`old` is an
+    ancestor of `new`), or the branch was rebased and every commit belonging to
+    the change kept the same patch id. A rebase that changed content produces a
+    different patch id and is refused.
+    """
+    if _is_ancestor(old, new, worktree):
+        return True
+    if not base_sha:
+        return False
+    old_ids = _change_patch_ids(worktree, base_sha, old, change_id)
+    if not old_ids:
+        return False
+    new_base_proc = common.run(
+        ["git", "-C", str(worktree), "merge-base", new, "origin/master"], check=False
+    )
+    new_base = new_base_proc.stdout.strip() if new_base_proc.returncode == 0 else ""
+    if not new_base:
+        return False
+    new_ids = _change_patch_ids(worktree, new_base, new, change_id)
+    return new_ids == old_ids
+
+
+def _record_mechanical_refresh(
+    args: argparse.Namespace,
+    state: dict,
+    stage: str,
+    new_sha: str,
+    summary: str,
+) -> int:
+    """Re-anchor the reviewed SHA after a mechanical rebase, without a new round.
+
+    A rebase that only resolves conflicts leaves the reviewed content unchanged:
+    the commit identity moves, the substance does not. Consuming a review round
+    for it would exhaust the three-round budget on bookkeeping, so this path
+    records the move explicitly instead. It refuses when the previously reviewed
+    SHA is not an ancestor of the new head, which would mean content changed.
+    """
+    data = state["stages"][stage]
+    previous = data.get("last_sha") or ""
+    if not previous:
+        common.die("no reviewed SHA recorded for this stage; nothing to refresh")
+    worktree = Path(state.get("worktree_abs") or state["worktree"])
+    if not _mechanical_rebase_ok(
+        previous, new_sha, worktree, state.get("base_sha", ""), state["change_id"]
+    ):
+        common.die(
+            f"reviewed SHA {previous[:7]} does not carry the same change as {new_sha[:7]}: "
+            "the patches differ, so this is not a mechanical rebase — open a new review round"
+        )
+    data["last_sha"] = new_sha
+    data["updated_at"] = common.now_iso()
+    common.save_state(args.change, state)
+    append_event(
+        state,
+        stage=stage,
+        round_no=data["rounds"],
+        actor=getattr(args, "actor", None) or "sdlc-conductor",
+        verdict=data.get("last_verdict"),
+        summary=summary,
+    )
+    print(json.dumps(
+        {
+            "change_id": args.change,
+            "stage": stage,
+            "round": data["rounds"],
+            "previous_sha": previous,
+            "reviewed_sha": new_sha,
+            "mechanical": True,
+        },
+        indent=2,
+    ))
+    return 0
+
+
+def _record_mechanical_verdict(
+    args: argparse.Namespace, state: dict, stage: str, verdict: dict
+) -> int:
+    if verdict.get("verdict") != "APPROVE":
+        common.die("--mechanical only re-anchors an APPROVE verdict")
+    if args.round != state["stages"][stage]["rounds"]:
+        common.die(
+            f"--mechanical re-confirms round {state['stages'][stage]['rounds']}, got {args.round}"
+        )
+    return _record_mechanical_refresh(
+        args,
+        state,
+        stage,
+        verdict["reviewed_sha"],
+        f"**mechanical rebase** — verdict re-anchored to `{verdict['reviewed_sha'][:7]}` "
+        f"(round {args.round} re-confirmed, no new round consumed).",
+    )
+
+
+def cmd_refresh_sha(args: argparse.Namespace) -> int:
+    """Refresh the reviewed SHA of a stage after a mechanical rebase."""
+    if not args.reason or not args.reason.strip():
+        common.die("refresh-sha requires --reason")
+    state = common.load_state(args.change)
+    stage = args.stage
+    if stage not in state["stages"] or state["stages"][stage]["status"] == "skipped":
+        common.die(f"stage {stage!r} is not active for lane {state['lane']}")
+    worktree = Path(state.get("worktree_abs") or state["worktree"])
+    new_sha = args.sha or common.run(
+        ["git", "-C", str(worktree), "rev-parse", "HEAD"]
+    ).stdout.strip()
+    return _record_mechanical_refresh(
+        args,
+        state,
+        stage,
+        new_sha,
+        f"**mechanical rebase** — reviewed SHA refreshed to `{new_sha[:7]}`: {args.reason.strip()}",
+    )
+
+
 def cmd_verdict(args: argparse.Namespace) -> int:
     cfg = common.load_config()
     max_rounds = common.cfg_int(cfg, "SDLC_MAX_ROUNDS")
@@ -497,6 +701,9 @@ def cmd_verdict(args: argparse.Namespace) -> int:
         common.die("verdict rejected by verdict-lint.py")
 
     verdict = common.read_json_block(common.read_text(verdict_file))
+    if getattr(args, "mechanical", False):
+        return _record_mechanical_verdict(args, state, stage, verdict)
+
     expected_round = state["stages"][stage]["rounds"] + 1
     if args.round != expected_round:
         common.die(f"round {args.round} is not the next round (expected {expected_round})")
@@ -1096,7 +1303,23 @@ def main(argv: list[str]) -> int:
     p.add_argument("stage", choices=["spec", "plan", "dev"])
     p.add_argument("round", type=int)
     p.add_argument("file")
+    p.add_argument(
+        "--mechanical",
+        action="store_true",
+        help="re-anchor an APPROVE verdict to a rebased head without consuming a round",
+    )
     p.set_defaults(func=cmd_verdict)
+
+    p = sub.add_parser(
+        "refresh-sha",
+        help="refresh the reviewed SHA after a mechanical rebase (no new round)",
+    )
+    p.add_argument("change")
+    p.add_argument("stage", choices=["spec", "plan", "dev"])
+    p.add_argument("--sha", help="new head SHA (default: worktree HEAD)")
+    p.add_argument("--reason", required=True, help="what was rebased and why nothing changed")
+    p.add_argument("--actor")
+    p.set_defaults(func=cmd_refresh_sha)
 
     p = sub.add_parser("pr", help="link the change to its PR")
     p.add_argument("change")

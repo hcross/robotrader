@@ -290,6 +290,35 @@ At round 3, the reviewer must not request changes. It must either:
 
 The conductor then opens a human decision, not a round 4.
 
+### 7.5 Mechanical rebases
+
+Every leaf change appends to the same shared files (`backend/tools/ta_tools.py`,
+`backend/tools/rss_tools.py`, `backend/agents/orchestrator.py`,
+`backend/tests/test_hierarchy_v3.py`). When a sibling PR merges first, the
+pending branch conflicts and must be rebased. The rebase rewrites the branch
+SHA, and the gate compares the PR head with the reviewed SHA.
+
+When the conflict resolution changes no content — every commit carrying the
+change id in its subject keeps the same patch id — the reviewed SHA is
+refreshed instead of spending a review round:
+
+```bash
+scripts/sdlc/sdlc.sh refresh-sha <change-id> dev \
+  --reason "rebased onto master after <PR>; leaf blocks byte-identical"
+```
+
+The tool compares `git patch-id` for the commits whose subject carries
+`[<change-id>]`, before and after the rebase. A rebase that smuggled a content
+change produces different patch ids and is refused; that case needs a new round.
+A reviewer that re-checks only the delta may instead re-confirm its verdict:
+
+```bash
+scripts/sdlc/sdlc.sh verdict <change-id> dev <round> <verdict-file> --mechanical
+```
+
+Both paths record an event in the issue logbook and leave the round counter
+untouched. Neither substitutes for the merge verifier.
+
 ---
 
 ## 8. Author revision protocol
