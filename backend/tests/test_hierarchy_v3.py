@@ -1918,6 +1918,83 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertIn("items", feed)
         self.assertIn("feed_mode", feed)
 
+    def test_tron_rss_atom_parsing_and_catalyst_scoring(self) -> None:
+        """
+        Verifies TRON RSS/Atom parsing (TRON DAO & USDT TRC-20 Treasury),
+        score_tron_catalyst classification across TRX-USDT and SUN-TRX,
+        and CURATED_FALLBACK behavior.
+        """
+        atom_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>TRON DAO &amp; USDT TRC-20 Treasury</title>
+          <entry>
+            <title>SunSwap v3 record volume and TRX USDT TRC-20 treasury inflow</title>
+            <summary>JustLend DAO supply APR rise, energy staking rental yield, quarterly burn.</summary>
+          </entry>
+        </feed>
+        """
+        rss_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>TRON DAO &amp; USDT TRC-20 Treasury</title>
+            <item>
+              <title>JustLend DAO lending growth and TRON energy staking</title>
+              <description>SunSwap v3 low-fee swap stable, USDT TRC-20 treasury inflow.</description>
+            </item>
+          </channel>
+        </rss>
+        """
+
+        payloads = {
+            "TRON DAO & USDT TRC-20 Treasury": rss_xml,
+        }
+
+        feed_res = EcosystemRSSAggregator.verify_and_ingest_tron_feeds(
+            xml_payloads=payloads, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res["agent_id"], "leaf-tron")
+        self.assertEqual(feed_res["feed_mode"], "LIVE")
+        self.assertEqual(feed_res["live_count"], 1)
+        self.assertEqual(feed_res["curated_count"], 0)
+        self.assertGreaterEqual(len(feed_res["items"]), 1)
+
+        for item in feed_res["items"]:
+            self.assertEqual(item["source_kind"], "LIVE_RSS")
+            self.assertFalse(item["curated"])
+            self.assertIn("catalyst_score", item)
+            self.assertIn("impact", item)
+            self.assertIn("category", item)
+            self.assertIn("affected_assets", item)
+            for asset in item["affected_assets"]:
+                self.assertIn(asset, ["TRX-USDT", "SUN-TRX"])
+
+        for asset in ["TRX-USDT", "SUN-TRX"]:
+            self.assertIn(asset, feed_res["asset_catalyst_scores"])
+
+        payloads2 = {
+            "TRON DAO & USDT TRC-20 Treasury": atom_xml,
+        }
+        feed_res2 = EcosystemRSSAggregator.verify_and_ingest_tron_feeds(
+            xml_payloads=payloads2, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res2["feed_mode"], "LIVE")
+        self.assertEqual(feed_res2["live_count"], 1)
+
+        fallback_res = EcosystemRSSAggregator.verify_and_ingest_tron_feeds(
+            xml_payloads={}, try_network=False, max_items=5
+        )
+        self.assertEqual(fallback_res["feed_mode"], "CURATED_FALLBACK")
+        self.assertEqual(fallback_res["live_count"], 0)
+        self.assertGreater(fallback_res["curated_count"], 0)
+        for item in fallback_res["items"]:
+            self.assertEqual(item["source_kind"], "CURATED_FIXTURE")
+            self.assertTrue(item["curated"])
+            self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
+
+        feed = EcosystemRSSAggregator.get_feed_for_agent("leaf-tron", try_network=False)
+        self.assertIn("items", feed)
+        self.assertIn("feed_mode", feed)
+
     def test_xrp_warm_path_reflection_and_policy_compilation(self) -> None:
         cg = self.orchestrator.cost_guard
         cg.auto_refill_enabled = False
