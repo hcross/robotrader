@@ -457,6 +457,12 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertAlmostEqual(hype_override["resistance_zone_usd"], 23.6 * 1.05, places=2)
         self.assertAlmostEqual(hype_override["invalidation_price_usd"], 23.6 * 0.97, places=2)
 
+        pod_allocs = envelope_dict["pod_allocations"]
+        for slot in ("pod_carry", "pod_momentum", "pod_onchain_alpha"):
+            self.assertTrue(pod_allocs[slot]["enabled"], f"{slot} should be enabled")
+            self.assertGreater(pod_allocs[slot]["capital_weight"], 0.0, f"{slot} weight should be non-zero")
+        self.assertFalse(pod_allocs["pod_sniper"]["enabled"])
+
         from backend.core.schemas import SignedPolicyBundle, verify_policy_hmac
         signed_bundle = SignedPolicyBundle.from_dict(res["signed_policy_bundle"])
         self.assertTrue(verify_policy_hmac(signed_bundle.policy, signed_bundle.signature, "robotrader-dev-hmac-key"))
