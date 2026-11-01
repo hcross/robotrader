@@ -664,6 +664,74 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertIn("etf_netflow_24h_usd_m", fallback_res)
         self.assertIn("miner_reserve_delta_btc", fallback_res)
 
+    def test_bitcoin_rss_atom_parsing_and_catalyst_scoring(self) -> None:
+        """
+        Verifies:
+        1. Atom XML (<feed xmlns="http://www.w3.org/2005/Atom"><entry>...</entry></feed>) from Bitcoin Optech
+           and RSS 2.0 XML (<rss><channel><item>...</item></channel></rss>) from Mempool & Hashrate Intelligence
+           parse with source_kind == "LIVE_RSS" and feed_mode == "LIVE".
+        2. score_bitcoin_catalyst and verify_and_ingest_bitcoin_feeds compute deterministic catalyst_score,
+           impact, category, and affected_assets strictly within ["BTC-USD", "wBTC-BTC", "sBTC-BTC"].
+        3. Graceful fallback to CURATED_FIXTURE (feed_mode == "CURATED_FALLBACK") when XML payloads fail or network is unreachable.
+        """
+        atom_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Bitcoin Optech Newsletter</title>
+          <entry>
+            <title>Optech #300: Major Taproot upgrade and wBTC bridge expansion</title>
+            <summary>Substantial surge in spot ETF inflows and mempool fee efficiency.</summary>
+          </entry>
+        </feed>
+        """
+        rss_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Mempool &amp; Hashrate Intelligence</title>
+            <item>
+              <title>Hash Ribbon expansion and sBTC bridge stability</title>
+              <description>Miner reserves stable, block congestion low at 5 sat/vB.</description>
+            </item>
+          </channel>
+        </rss>
+        """
+
+        payloads = {
+            "Bitcoin Optech Newsletter": atom_xml,
+            "Mempool & Hashrate Intelligence": rss_xml,
+        }
+
+        feed_res = EcosystemRSSAggregator.verify_and_ingest_bitcoin_feeds(
+            xml_payloads=payloads, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res["agent_id"], "leaf-bitcoin")
+        self.assertEqual(feed_res["feed_mode"], "LIVE")
+        self.assertEqual(feed_res["live_count"], 2)
+        self.assertEqual(feed_res["curated_count"], 0)
+        self.assertGreaterEqual(len(feed_res["items"]), 2)
+
+        for item in feed_res["items"]:
+            self.assertEqual(item["source_kind"], "LIVE_RSS")
+            self.assertFalse(item["curated"])
+            self.assertIn("catalyst_score", item)
+            self.assertIn("impact", item)
+            self.assertIn("category", item)
+            self.assertIn("affected_assets", item)
+            for asset in item["affected_assets"]:
+                self.assertIn(asset, ["BTC-USD", "wBTC-BTC", "sBTC-BTC"])
+
+        # Test fallback when payloads are empty and network is disabled
+        fallback_res = EcosystemRSSAggregator.verify_and_ingest_bitcoin_feeds(
+            xml_payloads={}, try_network=False, max_items=5
+        )
+        self.assertEqual(fallback_res["feed_mode"], "CURATED_FALLBACK")
+        self.assertEqual(fallback_res["live_count"], 0)
+        self.assertGreater(fallback_res["curated_count"], 0)
+        for item in fallback_res["items"]:
+            self.assertEqual(item["source_kind"], "CURATED_FIXTURE")
+            self.assertTrue(item["curated"])
+            self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
+
+
 
 if __name__ == "__main__":
     unittest.main()
