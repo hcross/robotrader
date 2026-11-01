@@ -21,7 +21,7 @@ flowchart LR
 
 | Gate | Result | Evidence |
 |---|---|---|
-| DEV | APPROVE (round 2) | `.sdlc/leaf-ton-rss-catalysts/reviews/dev-r2.md` @ `3ba55c8368897d4045a306263e946e1cbdee26e8` |
+| DEV | APPROVE (round 3) | `.sdlc/leaf-ton-rss-catalysts/reviews/dev-r3.md` @ `f0a698152245ecd846a79de69eadb218db66fbb2` |
 | CI | green | `gh pr checks` output |
 | Tests | pass | command + summary |
 | Lints | pass | command + summary |
