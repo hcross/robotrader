@@ -518,6 +518,8 @@ pub fn leaf_exclusive_assets(leaf_id: &str) -> &'static [&'static str] {
         &["ETH-USDC", "stETH-ETH", "UNI-ETH", "AAVE-ETH"]
     } else if leaf_id == "leaf-sui" {
         &["SUI-USDC", "DEEP-SUI", "CETUS-SUI"]
+    } else if leaf_id == "leaf-hyperliquid" {
+        &["HYPE-USDC", "PURR-USDC"]
     } else {
         &[]
     }
@@ -560,6 +562,75 @@ pub fn verify_sui_token_safety(symbol: &str, safety: &OnChainTokenSafety) -> boo
         && safety.tx_simulation_success
         && safety.lp_locked_pct >= 80.0
         && safety.top10_holder_pct <= 50.0
+}
+
+fn hyperliquid_token_safety_impl(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    let allowed = leaf_exclusive_assets("leaf-hyperliquid");
+    if !allowed.contains(&symbol) {
+        return false;
+    }
+    safety.supply_mint_immutable
+        && safety.transfer_freeze_disabled
+        && safety.no_honeypot_or_transfer_tax
+        && safety.tx_simulation_success
+        && safety.lp_locked_pct >= 80.0
+        && safety.top10_holder_pct <= 50.0
+}
+
+pub fn verify_hyperliquid_token_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hyperliquid_wrapper_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hyperliquid_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hyperliquid_hyperevm_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hyperliquid_spot_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hyperliquid_clob_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hyperliquid_perp_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hype_token_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hype_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hyperliquid_erc20_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hyperliquid_move_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hyperliquid_hype_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hyperliquid_vault_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
+}
+
+pub fn verify_hyperliquid_ev_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    hyperliquid_token_safety_impl(symbol, safety)
 }
 
 pub const CANONICAL_LEAF_IDS: &[&str] = &[
@@ -1567,6 +1638,128 @@ mod tests {
             ..clean_safety
         };
         assert!(!verify_sui_token_safety("DEEP-SUI", &compromised_safety));
+    }
+
+    #[test]
+    fn test_leaf_hyperliquid_hot_path_pods_asset_isolation_and_hype_safety() {
+        let mut pods = strategy_pods_for_leaf("leaf-hyperliquid");
+        assert_eq!(pods.len(), 4);
+
+        let envelope = PolicyEnvelope::safe_baseline(1000);
+
+        let funding_event = MarketEvent::FundingSnapshot {
+            timestamp_ms: 1000,
+            symbol: "HYPE-USDC".to_string(),
+            spot_price: 23.6,
+            perp_price: 23.8,
+            annualized_funding_apr: 0.25,
+        };
+        let ob_event = MarketEvent::OrderbookTick {
+            timestamp_ms: 1000,
+            symbol: "PURR-USDC".to_string(),
+            mid_price: 0.42,
+            bid_volume_top5: 20.0,
+            ask_volume_top5: 10.0,
+            cvd_delta: 5.0,
+            atr_pct: 1.8,
+            breakout_zscore: 2.1,
+            rsi_14: Some(60.0),
+        };
+        let smart_event = MarketEvent::OnchainSmartMoneySwap {
+            timestamp_ms: 1000,
+            symbol: "HYPE-USDC".to_string(),
+            token_address: "0x...hype".to_string(),
+            price_usd: 23.6,
+            whale_wallet_winrate: 0.72,
+            buy_volume_usd: 40000.0,
+            safety: OnChainTokenSafety {
+                supply_mint_immutable: true,
+                transfer_freeze_disabled: true,
+                no_honeypot_or_transfer_tax: true,
+                lp_locked_pct: 95.0,
+                top10_holder_pct: 25.0,
+                tx_simulation_success: true,
+            },
+        };
+        let pool_event = MarketEvent::OnchainPoolLaunch {
+            timestamp_ms: 1000,
+            symbol: "PURR-USDC".to_string(),
+            token_address: "0x...purr_pool".to_string(),
+            initial_liquidity_usd: 50000.0,
+            creator_rug_count: 0,
+            price_usd: 0.42,
+            safety: OnChainTokenSafety {
+                supply_mint_immutable: true,
+                transfer_freeze_disabled: true,
+                no_honeypot_or_transfer_tax: true,
+                lp_locked_pct: 90.0,
+                top10_holder_pct: 30.0,
+                tx_simulation_success: true,
+            },
+        };
+
+        let mut intent_count = 0;
+        for pod in &mut pods {
+            let intents = pod.on_market_event(&funding_event, &envelope);
+            if !intents.is_empty() {
+                intent_count += 1;
+                assert!(intents[0].rationale.contains("[hype_hlp_funding_carry @"));
+            }
+            let ob_intents = pod.on_market_event(&ob_event, &envelope);
+            if !ob_intents.is_empty() {
+                intent_count += 1;
+                assert!(ob_intents[0].rationale.contains("[hype_clob_obi_scalper @"));
+            }
+            let smart_intents = pod.on_market_event(&smart_event, &envelope);
+            if !smart_intents.is_empty() {
+                intent_count += 1;
+                assert!(smart_intents[0].rationale.contains("[hype_vault_whale_tracker @"));
+            }
+            let pool_intents = pod.on_market_event(&pool_event, &envelope);
+            if !pool_intents.is_empty() {
+                intent_count += 1;
+                assert!(pool_intents[0].rationale.contains("[hype_hyperevm_sniper @"));
+            }
+        }
+        assert!(intent_count > 0, "Expected at least one intent from leaf-hyperliquid pods");
+
+        let sol_event = MarketEvent::FundingSnapshot {
+            symbol: "SOL-USDT".to_string(),
+            spot_price: 150.0,
+            perp_price: 151.0,
+            annualized_funding_apr: 0.30,
+            timestamp_ms: 1000,
+        };
+        let eth_event = MarketEvent::FundingSnapshot {
+            symbol: "ETH-USDC".to_string(),
+            spot_price: 3000.0,
+            perp_price: 3010.0,
+            annualized_funding_apr: 0.20,
+            timestamp_ms: 1000,
+        };
+
+        for pod in &mut pods {
+            assert!(pod.on_market_event(&sol_event, &envelope).is_empty());
+            assert!(pod.on_market_event(&eth_event, &envelope).is_empty());
+        }
+
+        let clean_safety = OnChainTokenSafety {
+            supply_mint_immutable: true,
+            transfer_freeze_disabled: true,
+            no_honeypot_or_transfer_tax: true,
+            tx_simulation_success: true,
+            lp_locked_pct: 90.0,
+            top10_holder_pct: 35.0,
+        };
+        assert!(verify_hyperliquid_token_safety("HYPE-USDC", &clean_safety));
+        assert!(verify_hyperliquid_token_safety("PURR-USDC", &clean_safety));
+        assert!(!verify_hyperliquid_token_safety("SOL-USDT", &clean_safety));
+
+        let compromised_safety = OnChainTokenSafety {
+            supply_mint_immutable: false,
+            ..clean_safety
+        };
+        assert!(!verify_hyperliquid_token_safety("PURR-USDC", &compromised_safety));
     }
 }
 
