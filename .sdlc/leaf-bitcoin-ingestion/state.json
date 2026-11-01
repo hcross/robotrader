@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-bitcoin-ingestion",
+  "title": "feat(leaf-bitcoin/ingestion): live market data & on-chain TA telemetry pipeline for Bitcoin (BTC)",
+  "issue": 28,
+  "lane": "M",
+  "lane_reason": "Scoped telemetry & TA ingestion pipeline for leaf-bitcoin in backend/tools/ta_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/28-leaf-bitcoin-ingestion",
+  "worktree": ".worktrees/28-leaf-bitcoin-ingestion",
+  "base_branch": "master",
+  "base_sha": "290f37aa93b4157efd02ac42ac22f196ec6ca0f7",
+  "created_at": "2026-11-01T14:40:52Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 182,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "73048e4d9a4e035997eecc61df2871fac9388875",
+      "updated_at": "2026-11-01T14:47:49Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/28-leaf-bitcoin-ingestion",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T14:48:11Z",
+    "mode": "full-auto",
+    "pr": 182,
+    "head_sha": "73048e4d9a4e035997eecc61df2871fac9388875"
+  }
+}
