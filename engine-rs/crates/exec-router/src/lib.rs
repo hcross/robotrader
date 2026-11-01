@@ -118,6 +118,7 @@ mod tests {
                 take_profit_pct: 2.6,
                 token_safety: None,
                 rationale: "parity fixture".to_string(),
+                reduce_only: false,
             },
             approved_notional_usd: 10_000.0,
             approved_quantity: 10_000.0 / 150.0,

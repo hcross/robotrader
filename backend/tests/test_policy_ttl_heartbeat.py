@@ -16,8 +16,12 @@ import unittest
 from typing import Any, Callable, Dict, List, Optional
 from unittest import mock
 
-from backend.core.schemas import SAFE_BASELINE_TTL_SECONDS, PolicyEnvelope
-from backend.core.state_store import HybridStateStore
+from backend.core.schemas import SAFE_BASELINE_TTL_SECONDS, PolicyEnvelope, compute_policy_hmac
+from backend.core.state_store import (
+    DEFAULT_POLICY_HMAC_KEY,
+    DEFAULT_POLICY_KEY_ID,
+    HybridStateStore,
+)
 import backend.tools.exchange_tools
 import backend.tools.solana_tools
 
@@ -91,15 +95,31 @@ class FakeRedis:
     """Injected replacement for ``_redis_cmd``; records every SET payload."""
 
     def __init__(self, payload: Optional[str] = None) -> None:
-        self.payload = payload
+        self.store: Dict[str, str] = {}
+        if payload is not None:
+            self.store["robotrader:v2:state"] = payload
         self.writes: List[str] = []
+
+    @property
+    def payload(self) -> Optional[str]:
+        return self.store.get("robotrader:v2:state")
+
+    @payload.setter
+    def payload(self, val: Optional[str]) -> None:
+        if val is not None:
+            self.store["robotrader:v2:state"] = val
+        else:
+            self.store.pop("robotrader:v2:state", None)
 
     def __call__(self, redis_url: str, *args: str) -> Optional[str]:
         if args and args[0] == "GET":
-            return self.payload
+            key = args[1] if len(args) >= 2 else "robotrader:v2:state"
+            return self.store.get(key)
         if len(args) >= 3 and args[0] == "SET":
-            self.payload = args[2]
-            self.writes.append(args[2])
+            key = args[1]
+            val = args[2]
+            self.store[key] = val
+            self.writes.append(val)
             return "OK"
         return None
 
@@ -138,7 +158,12 @@ class PolicyTtlTestBase(unittest.TestCase):
             return store.run_live_testnet_tick()
 
     def persisted_payload(self, policy: PolicyEnvelope, kill_switch_active: bool = False) -> Dict[str, Any]:
-        return {"policy": policy.to_dict(), "kill_switch_active": kill_switch_active}
+        return {
+            "policy": policy.to_dict(),
+            "policy_signature": compute_policy_hmac(policy, DEFAULT_POLICY_HMAC_KEY),
+            "policy_key_id": DEFAULT_POLICY_KEY_ID,
+            "kill_switch_active": kill_switch_active,
+        }
 
     def restore(
         self,

@@ -15,7 +15,32 @@ from . import provenance
 from .errors import RustBinaryNotFoundError
 from .hierarchy import ATTRIBUTED_LIVE_LEAF_IDS, HierarchicalFleetManager
 from .memory_palace import PalaceDrawer, StrategyMemoryPalace
-from .schemas import AssetOverride, CatalystSignal, PolicyEnvelope
+from .schemas import (
+    AssetOverride,
+    CatalystSignal,
+    PolicyEnvelope,
+    SignedPolicyBundle,
+    compute_policy_hmac,
+    verify_policy_hmac,
+)
+
+DEFAULT_POLICY_HMAC_KEY = "robotrader-dev-hmac-key"
+DEFAULT_POLICY_KEY_ID = "default"
+REDIS_ACTIVE_POLICY_KEY = "robotrader:policy:active"
+
+
+def _resolve_policy_hmac_key() -> str:
+    val = os.getenv("ROBOTRADER_POLICY_HMAC_KEY")
+    if val is None or not val.strip():
+        return DEFAULT_POLICY_HMAC_KEY
+    return val.strip()
+
+
+def _resolve_policy_key_id() -> str:
+    val = os.getenv("ROBOTRADER_POLICY_KEY_ID")
+    if val is None or not val.strip():
+        return DEFAULT_POLICY_KEY_ID
+    return val.strip()
 
 TESTNET_SOURCE_DETAIL = (
     "binance spot testnet + solana devnet wallet and order telemetry, refreshed by the live worker"
@@ -89,6 +114,25 @@ def _redis_cmd(redis_url: str, *args: str) -> Optional[str]:
     return None
 
 
+class MinimalRedisClient:
+    """Minimal zero-dependency RESP client for communicating with Redis."""
+
+    def __init__(self, redis_url: Optional[str] = None) -> None:
+        self.redis_url = redis_url
+
+    def execute(self, *args: str) -> Optional[str]:
+        if not self.redis_url:
+            return None
+        return _redis_cmd(self.redis_url, *args)
+
+    def set_with_ex(self, key: str, value: str, ttl_seconds: int) -> bool:
+        """Executes SET <key> <value> EX <ttl_seconds> over RESP."""
+        if not self.redis_url:
+            return False
+        res = self.execute("SET", key, value, "EX", str(max(1, int(ttl_seconds))))
+        return res == "OK"
+
+
 def resolve_robotrader_binary(engine_dir: Path) -> Path:
     """Select the ``robotrader-node`` binary with debug-first precedence.
 
@@ -118,7 +162,10 @@ class HybridStateStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._redis_url: Optional[str] = os.getenv("REDIS_URL")
+        self._redis_client: Optional[MinimalRedisClient] = None
         self._policy: PolicyEnvelope = PolicyEnvelope.default_active()
+        self.policy_signature: str = compute_policy_hmac(self._policy, _resolve_policy_hmac_key())
+        self.policy_key_id: str = _resolve_policy_key_id()
         self.kill_switch_active: bool = False
         self.kill_switch_reason: Optional[str] = None
         self.recent_catalysts: List[CatalystSignal] = [
@@ -192,6 +239,20 @@ class HybridStateStore:
 
         self._load_persisted_state()
 
+    @property
+    def policy_hmac_key(self) -> str:
+        return _resolve_policy_hmac_key()
+
+    @property
+    def active_key_id(self) -> str:
+        return _resolve_policy_key_id()
+
+    @property
+    def redis_client(self) -> MinimalRedisClient:
+        if self._redis_client is None or self._redis_client.redis_url != self._redis_url:
+            self._redis_client = MinimalRedisClient(self._redis_url)
+        return self._redis_client
+
     @staticmethod
     def _is_solana_ecosystem_symbol(symbol: str) -> bool:
         s = str(symbol or "").upper()
@@ -237,6 +298,8 @@ class HybridStateStore:
                 raw_policy = data["policy"]
                 if not isinstance(raw_policy, dict):
                     self._policy = PolicyEnvelope.safe_baseline(restore_now_ms)
+                    self.policy_signature = compute_policy_hmac(self._policy, _resolve_policy_hmac_key())
+                    self.policy_key_id = _resolve_policy_key_id()
                 else:
                     raw_issued_at = raw_policy.get("issued_at_ms")
                     if (
@@ -246,26 +309,40 @@ class HybridStateStore:
                         or raw_issued_at <= 0
                     ):
                         self._policy = PolicyEnvelope.safe_baseline(restore_now_ms)
+                        self.policy_signature = compute_policy_hmac(self._policy, _resolve_policy_hmac_key())
+                        self.policy_key_id = _resolve_policy_key_id()
                     else:
                         try:
                             pol = PolicyEnvelope.from_dict(raw_policy)
-                            # Ensure non-Solana asset overrides are stripped from leaf-solana policy
-                            pol.asset_overrides = {
-                                k: v
-                                for k, v in pol.asset_overrides.items()
-                                if self._is_solana_ecosystem_symbol(k)
-                            }
-                            for default_k, default_v in PolicyEnvelope.default_active().asset_overrides.items():
-                                pol.asset_overrides.setdefault(default_k, default_v)
-                            # An envelope past its own TTL is never restamped as fresh.
-                            self._policy = (
-                                PolicyEnvelope.safe_baseline(restore_now_ms)
-                                if pol.is_expired(restore_now_ms)
-                                else pol
-                            )
+                            raw_sig = data.get("policy_signature")
+                            raw_key_id = data.get("policy_key_id")
+                            key = _resolve_policy_hmac_key()
+                            if (
+                                not raw_sig
+                                or not isinstance(raw_sig, str)
+                                or not verify_policy_hmac(pol, raw_sig, key)
+                            ):
+                                print(
+                                    f"[HybridStateStore] Security violation: missing or invalid policy signature, failing closed to safe baseline"
+                                )
+                                self._policy = PolicyEnvelope.safe_baseline(restore_now_ms)
+                                self.policy_signature = compute_policy_hmac(self._policy, key)
+                                self.policy_key_id = _resolve_policy_key_id()
+                            elif pol.is_expired(restore_now_ms):
+                                self._policy = PolicyEnvelope.safe_baseline(restore_now_ms)
+                                self.policy_signature = compute_policy_hmac(self._policy, key)
+                                self.policy_key_id = _resolve_policy_key_id()
+                            else:
+                                self._policy = pol
+                                self.policy_signature = raw_sig
+                                self.policy_key_id = str(raw_key_id or _resolve_policy_key_id())
                         except Exception as parse_exc:
-                            print(f"[HybridStateStore] Malformed policy payload, failing closed to safe baseline: {parse_exc}")
+                            print(
+                                f"[HybridStateStore] Malformed policy payload, failing closed to safe baseline: {parse_exc}"
+                            )
                             self._policy = PolicyEnvelope.safe_baseline(restore_now_ms)
+                            self.policy_signature = compute_policy_hmac(self._policy, _resolve_policy_hmac_key())
+                            self.policy_key_id = _resolve_policy_key_id()
             self.kill_switch_active = bool(data.get("kill_switch_active", False))
             self.kill_switch_reason = data.get("kill_switch_reason")
             raw_execs = list(data.get("live_executions", []))[:200]
@@ -323,10 +400,15 @@ class HybridStateStore:
     def _persist_state(self) -> None:
         if not self._redis_url:
             return
+        # 1. Persist state snapshot to robotrader:v2:state
         try:
+            self.policy_signature = compute_policy_hmac(self._policy, _resolve_policy_hmac_key())
+            self.policy_key_id = _resolve_policy_key_id()
             payload = json.dumps(
                 {
                     "policy": self._policy.to_dict(),
+                    "policy_signature": self.policy_signature,
+                    "policy_key_id": self.policy_key_id,
                     "kill_switch_active": self.kill_switch_active,
                     "kill_switch_reason": self.kill_switch_reason,
                     "live_executions": self.live_executions[:200],
@@ -347,8 +429,21 @@ class HybridStateStore:
                 }
             )
             _redis_cmd(self._redis_url, "SET", self.REDIS_STATE_KEY, payload)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[HybridStateStore] Redis snapshot persistence warning: {exc}")
+
+        # 2. Concurrently publish SignedPolicyBundle to robotrader:policy:active with EX TTL
+        try:
+            bundle = SignedPolicyBundle(
+                policy=self._policy,
+                signature=self.policy_signature,
+                key_id=self.policy_key_id,
+            )
+            bundle_json = json.dumps(bundle.to_dict(), separators=(",", ":"))
+            ttl = max(1, int(self._policy.ttl_seconds))
+            self.redis_client.set_with_ex(REDIS_ACTIVE_POLICY_KEY, bundle_json, ttl)
+        except Exception as exc:
+            print(f"[HybridStateStore] Redis active policy publication warning: {exc}")
 
     @staticmethod
     def _synthetic_ohlcv_candles(sym: str, base_price: float) -> List[List[float]]:
@@ -495,6 +590,8 @@ class HybridStateStore:
     def set_policy(self, policy: PolicyEnvelope) -> None:
         with self._lock:
             self._policy = policy
+            self.policy_signature = compute_policy_hmac(policy, _resolve_policy_hmac_key())
+            self.policy_key_id = _resolve_policy_key_id()
             self._persist_state()
 
     def get_effective_policy(self, now_ms: Optional[int] = None) -> PolicyEnvelope:
@@ -514,11 +611,35 @@ class HybridStateStore:
         with self._lock:
             self.kill_switch_active = active
             self.kill_switch_reason = reason if active else None
+            flatten_intents = []
+            if active:
+                for symbol in sorted(self.testnet_positions.keys()):
+                    pos = self.testnet_positions[symbol]
+                    if isinstance(pos, dict):
+                        qty = float(pos.get("qty", pos.get("amount", pos.get("exposure", 0.0))))
+                    elif isinstance(pos, (int, float)):
+                        qty = float(pos)
+                    else:
+                        qty = 0.0
+
+                    if abs(qty) > 1e-6:
+                        side = "SELL" if qty > 0 else "BUY"
+                        flatten_intents.append(
+                            {
+                                "symbol": symbol,
+                                "side": side,
+                                "order_type": "MARKET",
+                                "qty": abs(qty),
+                                "reduce_only": True,
+                                "rationale": f"Kill-switch flatten: {reason or 'Manual operator trigger'}",
+                            }
+                        )
             self._persist_state()
         return {
             "kill_switch_active": self.kill_switch_active,
             "kill_switch_reason": self.kill_switch_reason,
             "effective_policy": self.get_effective_policy().to_dict(),
+            "kill_switch_flatten_intents": flatten_intents,
         }
 
     @staticmethod

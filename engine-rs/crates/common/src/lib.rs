@@ -2,8 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod cost;
+pub mod crypto;
 
 pub use cost::{fee_bps_for, spread_bps_for};
+pub use crypto::*;
 
 /// Shared policy contract file, resolved at compile time so `safe_baseline()`
 /// stays allocation-free on the `HardRiskGate` fallback path.
@@ -367,6 +369,14 @@ impl PolicyEnvelope {
     }
 }
 
+/// Detached policy container bundling the policy envelope, its 64-character hex signature, and key identifier.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignedPolicyBundle {
+    pub policy: PolicyEnvelope,
+    pub signature: String,
+    pub key_id: String,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -485,6 +495,8 @@ pub struct OrderIntent {
     #[serde(alias = "solana_safety")]
     pub token_safety: Option<OnChainTokenSafety>,
     pub rationale: String,
+    #[serde(default)]
+    pub reduce_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -639,5 +651,108 @@ mod tests {
             decoded.last_order_ts_ms.get("pod_carry:SOL-USDT"),
             Some(&1792180000123)
         );
+    fn test_rfc4231_hmac_sha256_vector() {
+        let key = b"Jefe";
+        let data = b"what do ya want for nothing?";
+        let expected = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843";
+        let hmac_bytes = hmac_sha256(key, data);
+        let mut hex = String::new();
+        for b in hmac_bytes {
+            use std::fmt::Write;
+            write!(&mut hex, "{:02x}", b).unwrap();
+        }
+        assert_eq!(hex, expected);
+    }
+
+    #[test]
+    fn test_policy_hmac_authentic_verification() {
+        let env = PolicyEnvelope::safe_baseline(1_700_000_000_000);
+        let key = b"secret-test-key-2026";
+        let sig = compute_policy_hmac(&env, key);
+        assert_eq!(sig.len(), 64);
+        assert!(verify_policy_hmac(&env, &sig, key));
+    }
+
+    #[test]
+    fn test_policy_hmac_fails_on_field_mutation() {
+        let env = PolicyEnvelope::safe_baseline(1_700_000_000_000);
+        let key = b"secret-test-key-2026";
+        let sig = compute_policy_hmac(&env, key);
+
+        // Mutate issued_at_ms
+        let mut mutated = env.clone();
+        mutated.issued_at_ms += 1;
+        assert!(!verify_policy_hmac(&mutated, &sig, key));
+
+        // Mutate global_regime
+        let mut mutated = env.clone();
+        mutated.global_regime = GlobalRegime::RiskOnHighVol;
+        assert!(!verify_policy_hmac(&mutated, &sig, key));
+
+        // Mutate ttl_seconds
+        let mut mutated = env.clone();
+        mutated.ttl_seconds += 10;
+        assert!(!verify_policy_hmac(&mutated, &sig, key));
+
+        // Mutate pod_allocations
+        let mut mutated = env.clone();
+        if let Some(alloc) = mutated.pod_allocations.get_mut("pod_carry") {
+            alloc.capital_weight = 0.99;
+        }
+        assert!(!verify_policy_hmac(&mutated, &sig, key));
+
+        // Mutate envelope_id
+        let mut mutated = env.clone();
+        mutated.envelope_id = "hacked_envelope".to_string();
+        assert!(!verify_policy_hmac(&mutated, &sig, key));
+    }
+
+    #[test]
+    fn test_policy_hmac_fails_on_mismatched_key() {
+        let env = PolicyEnvelope::safe_baseline(1_700_000_000_000);
+        let key = b"secret-test-key-2026";
+        let wrong_key = b"wrong-test-key-9999";
+        let sig = compute_policy_hmac(&env, key);
+        assert!(!verify_policy_hmac(&env, &sig, wrong_key));
+    }
+
+    #[test]
+    fn test_policy_hmac_fails_on_malformed_signature() {
+        let env = PolicyEnvelope::safe_baseline(1_700_000_000_000);
+        let key = b"secret-test-key-2026";
+
+        // Empty string
+        assert!(!verify_policy_hmac(&env, "", key));
+
+        // Truncated (less than 64 chars)
+        assert!(!verify_policy_hmac(&env, "abcdef123456", key));
+
+        // Too long (65 chars)
+        let too_long = "a".repeat(65);
+        assert!(!verify_policy_hmac(&env, &too_long, key));
+
+        // Non-hex characters
+        let non_hex = format!("{}zz", &"0".repeat(62));
+        assert!(!verify_policy_hmac(&env, &non_hex, key));
+    }
+
+    #[test]
+    fn test_signed_policy_bundle_roundtrip() {
+        let env = PolicyEnvelope::safe_baseline(1_700_000_000_000);
+        let key = b"dev-key";
+        let sig = compute_policy_hmac(&env, key);
+        let bundle = SignedPolicyBundle {
+            policy: env.clone(),
+            signature: sig.clone(),
+            key_id: "default".to_string(),
+        };
+
+        let serialized = serde_json::to_string(&bundle).expect("serialize bundle");
+        let deserialized: SignedPolicyBundle =
+            serde_json::from_str(&serialized).expect("deserialize bundle");
+
+        assert_eq!(deserialized.key_id, "default");
+        assert_eq!(deserialized.signature, sig);
+        assert!(verify_policy_hmac(&deserialized.policy, &deserialized.signature, key));
     }
 }

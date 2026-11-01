@@ -138,10 +138,10 @@ The warm-path LLM translates abstract market theses into concrete numerical rule
 - **Testnet/Devnet Telemetry**: Read-only Solana balance from a configured public address (`custody: NONE`); Solana Devnet actions are simulated, unsigned, and not broadcast. Measured PnL comes only from Binance Spot Testnet orders; simulated rows are excluded.
 - **ZeroTier Remote Ready**: Automatic dynamic host resolution allowing seamless access from remote LAN IPs (e.g. `http://<zerotier-ip>:5173`).
 
-### 8. IPC & State Bus: Single-Key State Snapshot & In-Memory Fallback
-- **Redis 7 State Snapshot**: Manages shared state between the Python control plane and the runtime via a single-key JSON state snapshot (`robotrader:v2:state`), with in-memory fallback when Redis is absent.
-- **Application-Level TTL Enforcement**: Policy envelope validity is evaluated explicitly on state restore and access (`issued_at_ms + ttl_seconds * 1000`). Corrupted, non-numeric, or expired policy state fails closed to `safe_baseline_fallback` (carry-only mode).
-- **Roadmap Architecture**: Redis Streams for streaming event replay, Pub/Sub channels for live telemetry, native key-level `EX` expiration, and cryptographic policy signing are documented as future roadmap milestones.
+### 8. IPC & State Bus: Single-Key State Snapshot, Active Policy EX Expiration & In-Memory Fallback
+- **Redis 7 State Snapshot**: Manages shared state between the Python control plane and the runtime via a single-key JSON state snapshot (`robotrader:v2:state`), with in-memory fallback when Redis is absent. Concurrently publishes the active signed policy bundle to `robotrader:policy:active` with native per-key `EX` TTL expiration.
+- **Application-Level TTL & Signature Enforcement**: Policy envelope validity is evaluated explicitly on state restore and access (`issued_at_ms + ttl_seconds * 1000`) and verified with detached canonical HMAC-SHA256 signatures. Missing, tampered, non-numeric, or expired policy state fails closed to `safe_baseline_fallback` (carry-only mode).
+- **Roadmap Architecture**: High-frequency event streaming via Redis Streams and Pub/Sub channels for live telemetry remain documented as future roadmap milestones.
 
 ---
 

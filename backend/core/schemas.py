@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 # The safe-baseline TTL is declared once in `contracts/policy_contract.conf` and
 # resolved here at import, mirroring the Rust `include_str!` const scan.
@@ -190,6 +193,60 @@ class PolicyEnvelope:
                     max_leverage=2.0,
                 ),
             },
+        )
+
+
+def canonical_policy_json(envelope: PolicyEnvelope) -> str:
+    """Canonical JSON serialization sorting all mapping keys recursively and omitting whitespace."""
+    return json.dumps(envelope.to_dict(), sort_keys=True, separators=(",", ":"))
+
+
+def compute_policy_hmac(envelope: PolicyEnvelope, secret_key: Union[str, bytes]) -> str:
+    """Computes the 64-character lowercase hexadecimal HMAC-SHA256 digest of a PolicyEnvelope."""
+    key_bytes = secret_key.encode("utf-8") if isinstance(secret_key, str) else bytes(secret_key)
+    payload_bytes = canonical_policy_json(envelope).encode("utf-8")
+    return hmac.new(key_bytes, payload_bytes, hashlib.sha256).hexdigest().lower()
+
+
+def verify_policy_hmac(
+    envelope: PolicyEnvelope,
+    signature_hex: str,
+    secret_key: Union[str, bytes],
+) -> bool:
+    """Verifies the HMAC-SHA256 signature of a PolicyEnvelope using constant-time comparison."""
+    if not isinstance(signature_hex, str) or len(signature_hex) != 64:
+        return False
+    if not all(c in "0123456789abcdefABCDEF" for c in signature_hex):
+        return False
+    expected = compute_policy_hmac(envelope, secret_key)
+    return hmac.compare_digest(expected, signature_hex.lower())
+
+
+@dataclass
+class SignedPolicyBundle:
+    policy: PolicyEnvelope
+    signature: str
+    key_id: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "policy": self.policy.to_dict(),
+            "signature": self.signature,
+            "key_id": self.key_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> SignedPolicyBundle:
+        raw_policy = data.get("policy", {})
+        policy = (
+            raw_policy
+            if isinstance(raw_policy, PolicyEnvelope)
+            else PolicyEnvelope.from_dict(raw_policy)
+        )
+        return cls(
+            policy=policy,
+            signature=str(data.get("signature", "")),
+            key_id=str(data.get("key_id", "")),
         )
 
 

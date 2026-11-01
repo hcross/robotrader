@@ -14,25 +14,25 @@
   "human_gates": [
     "merge"
   ],
-  "status": "spec-review",
+  "status": "dev",
   "pr": null,
   "areas": [],
   "stages": {
     "spec": {
-      "status": "changes_requested",
-      "rounds": 1,
-      "last_verdict": "CHANGES_REQUESTED",
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
       "last_reviewer": "sdlc-spec-reviewer",
-      "last_sha": "568a760ba00641b69637e3a8c08d8b1d0321afaa",
-      "updated_at": "2026-11-01T11:53:15Z"
+      "last_sha": "eb6346ccda3ab5024be7e6a2db79ebb8fdee4e1f",
+      "updated_at": "2026-11-01T12:01:07Z"
     },
     "plan": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-plan-reviewer",
+      "last_sha": "5d5d3c11836fe2ec359ee73691cb7e4dfc0a8b21",
+      "updated_at": "2026-11-01T12:15:20Z"
     },
     "dev": {
       "status": "pending",
