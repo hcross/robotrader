@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "triage",
+  "status": "merged",
   "pr": 207,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "46a023245eb1c946ab5311d581643ceac1ba1fa0",
+      "updated_at": "2026-11-01T18:18:55Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/44-leaf-sui-execution-custody",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T18:20:35Z",
+    "mode": "full-auto",
+    "pr": 207,
+    "head_sha": "46a023245eb1c946ab5311d581643ceac1ba1fa0"
+  }
 }
