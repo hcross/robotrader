@@ -14,8 +14,8 @@
   "human_gates": [
     "merge"
   ],
-  "status": "triage",
-  "pr": null,
+  "status": "merged",
+  "pr": 195,
   "areas": [],
   "stages": {
     "spec": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "e42eccbc55c6a9665131c3d5f4a8912e699cab7b",
+      "updated_at": "2026-11-01T17:04:58Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/46-leaf-hyperliquid-ingestion",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T17:06:24Z",
+    "mode": "full-auto",
+    "pr": 195,
+    "head_sha": "e42eccbc55c6a9665131c3d5f4a8912e699cab7b"
+  }
 }
