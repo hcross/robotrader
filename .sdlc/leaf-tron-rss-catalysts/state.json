@@ -14,8 +14,8 @@
   "human_gates": [
     "merge"
   ],
-  "status": "triage",
-  "pr": null,
+  "status": "merged",
+  "pr": 220,
   "areas": [],
   "stages": {
     "spec": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "d73a3316b122689758f1b62a24c4abc60ff0f472",
+      "updated_at": "2026-11-01T21:52:04Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/71-leaf-tron-rss-catalysts",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T21:54:27Z",
+    "mode": "full-auto",
+    "pr": 220,
+    "head_sha": "d73a3316b122689758f1b62a24c4abc60ff0f472"
+  }
 }
