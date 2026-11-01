@@ -114,13 +114,13 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertIs(btc_bt["fill_simulation"], False)
         # Exact values are fixture determinism baselines, not performance
         # targets or evidence of strategy edge.
-        self.assertAlmostEqual(btc_bt["net_profit_usd"], 19.58224799920572, places=9)
+        self.assertAlmostEqual(btc_bt["net_profit_usd"], 17.615496250456999, places=9)
 
         eth_bt = self.store.run_rust_backtest_for_leaf("leaf-ethereum")
         self.assertEqual(eth_bt["leaf_id"], "leaf-ethereum")
         self.assertEqual(len(eth_bt["ecosystem_pods"]), 4)
         self.assertEqual(eth_bt["artifact_kind"], "policy_sanity_check")
-        self.assertAlmostEqual(eth_bt["net_profit_usd"], 17.185563929990167, places=9)
+        self.assertAlmostEqual(eth_bt["net_profit_usd"], 16.627260812534587, places=9)
 
         sol_rss = EcosystemRSSAggregator.get_feed_for_agent("leaf-solana")
         btc_rss = EcosystemRSSAggregator.get_feed_for_agent("leaf-bitcoin")

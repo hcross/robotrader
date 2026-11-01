@@ -13,6 +13,7 @@ thiserror.workspace = true
 # Running the hot-path benchmark requires Rust 1.86+:
 # `cargo bench --manifest-path engine-rs/Cargo.toml -p robotrader-risk-gate`
 [dev-dependencies]
+serde_json.workspace = true
 # Test-only parity edge (PLAN-R1-F06): these tests compare the gate's cost
 # terms with the execution router. This is a dev-dependency, so it does not
 # enter the release graph and creates no cycle (`exec-router` depends only on

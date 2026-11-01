@@ -323,6 +323,7 @@ dependencies = [
  "robotrader-common",
  "robotrader-exec-router",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 

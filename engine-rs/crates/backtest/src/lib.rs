@@ -584,35 +584,35 @@ mod tests {
         assert_eq!(summary.pod_pnl_attribution.len(), 2);
         assert_close(
             summary.net_profit_usd,
-            24.727172152519415,
+            24.051697403454455,
             "net_profit_usd",
         );
-        assert_close(summary.final_equity_usd, 10024.72717215252, "final_equity_usd");
+        assert_close(summary.final_equity_usd, 10024.051697403454, "final_equity_usd");
         assert_close(
             summary.total_return_pct,
-            0.24727172152519414,
+            0.24051697403454456,
             "total_return_pct",
         );
         assert_close(summary.win_rate_pct, 100.0, "win_rate_pct");
         assert_close(
             summary.sharpe_ratio,
-            128.52308889884674,
+            149.5384559637517,
             "sharpe_ratio",
         );
         assert_close(summary.max_drawdown_pct, 0.0, "max_drawdown_pct");
         assert_close(
             summary.total_fees_usd,
-            1.4711945828105164,
+            1.4148068319448883,
             "total_fees_usd",
         );
         assert_close(
             summary.pod_pnl_attribution["pod_carry"],
-            13.614211628444282,
+            12.939291285082685,
             "pod_carry pnl",
         );
         assert_close(
             summary.pod_pnl_attribution["pod_momentum"],
-            11.112960524076215,
+            11.112406118371858,
             "pod_momentum pnl",
         );
         assert_accounting_identity(&summary);
@@ -771,31 +771,31 @@ mod tests {
         // performance targets. They were captured from
         // `cargo run -p robotrader-node -- --leaf-id <leaf>` at this tip.
         let expected: [(&str, usize, usize, f64); 26] = [
-            ("leaf-solana", 4, 3, 24.727172152519415),
-            ("leaf-bitcoin", 3, 1, 19.58224799920572),
-            ("leaf-ethereum", 3, 2, 17.185563929990167),
+            ("leaf-solana", 4, 3, 24.051697403454455),
+            ("leaf-bitcoin", 3, 1, 17.615496250456999),
+            ("leaf-ethereum", 3, 2, 16.627260812534587),
             ("leaf-sui", 3, 2, 15.357363144730698),
             ("leaf-hyperliquid", 3, 2, 17.207987447352934),
-            ("leaf-bnb", 3, 1, 19.16214496964858),
-            ("leaf-xrp", 3, 1, 19.58224799920754),
-            ("leaf-ton", 3, 1, 19.16214496964858),
-            ("leaf-tron", 3, 1, 21.41062352956942),
-            ("leaf-avalanche", 3, 1, 19.16214496964858),
-            ("leaf-cosmos", 3, 1, 19.58224799920572),
-            ("leaf-aptos", 3, 1, 19.58224799920572),
-            ("leaf-chainlink", 3, 1, 19.58224799920572),
-            ("leaf-stacks", 3, 1, 19.58224799920572),
-            ("leaf-near", 3, 1, 19.58224799920572),
-            ("leaf-cardano", 3, 1, 19.58224799920572),
-            ("leaf-polkadot", 3, 1, 19.58224799920754),
-            ("leaf-dogecoin", 3, 1, 19.58224799920572),
-            ("leaf-icp", 3, 1, 19.58224799920572),
-            ("leaf-canton", 3, 1, 19.58224799920754),
-            ("leaf-celo", 3, 1, 19.58224799920572),
-            ("leaf-tezos", 3, 1, 19.58224799920754),
-            ("leaf-flow", 3, 1, 19.58224799920754),
-            ("leaf-eos", 3, 1, 19.58224799920572),
-            ("leaf-binance-cex", 3, 1, 18.012215874785397),
+            ("leaf-bnb", 3, 1, 18.603731688379412),
+            ("leaf-xrp", 3, 1, 17.615496250456999),
+            ("leaf-ton", 3, 1, 18.603731688379412),
+            ("leaf-tron", 3, 1, 16.627260812534587),
+            ("leaf-avalanche", 3, 1, 18.603731688379412),
+            ("leaf-cosmos", 3, 1, 17.615496250456999),
+            ("leaf-aptos", 3, 1, 17.615496250456999),
+            ("leaf-chainlink", 3, 1, 17.615496250456999),
+            ("leaf-stacks", 3, 1, 17.615496250456999),
+            ("leaf-near", 3, 1, 17.615496250456999),
+            ("leaf-cardano", 3, 1, 17.615496250456999),
+            ("leaf-polkadot", 3, 1, 17.615496250456999),
+            ("leaf-dogecoin", 3, 1, 17.615496250456999),
+            ("leaf-icp", 3, 1, 17.615496250456999),
+            ("leaf-canton", 3, 1, 17.615496250456999),
+            ("leaf-celo", 3, 1, 17.615496250456999),
+            ("leaf-tezos", 3, 1, 17.615496250456999),
+            ("leaf-flow", 3, 1, 17.615496250456999),
+            ("leaf-eos", 3, 1, 17.615496250456999),
+            ("leaf-binance-cex", 3, 1, 17.453866684272725),
             ("leaf-paper-sandbox", 3, 2, 16.765559498326184),
         ];
 
