@@ -774,6 +774,87 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
             self.assertTrue(item["curated"])
             self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
 
+    def test_ethereum_leaf_ta_metrics_computation_and_fallback(self) -> None:
+        """
+        Verifies TechnicalAnalysisTool.compute_ethereum_ta_metrics and ingest_ethereum_market_snapshot
+        across all 4 exclusive Ethereum assets (`ETH-USDC`, `stETH-ETH`, `UNI-ETH`, `AAVE-ETH`),
+        verifying `LIVE_COMPUTED` vs `CATALOG_FIXTURE` fallback and `ValueError` on non-Ethereum symbols/venues.
+        """
+        from backend.tools.ta_tools import TechnicalAnalysisTool
+
+        sample_candles = [
+            [1700000000000 + i * 900000, 2300.0 + i * 5, 2310.0 + i * 5, 2290.0 + i * 5, 2305.0 + i * 5, 500.0]
+            for i in range(25)
+        ]
+        sample_bids = [[2304.0, 50.0], [2303.0, 75.0]]
+        sample_asks = [[2306.0, 40.0], [2307.0, 60.0]]
+        sample_telemetry = {
+            "eip1559_base_fee_gwei": 3.5,
+            "blob_fee_gwei": 0.05,
+            "steth_peg_ratio": 0.9999,
+            "restaking_apr_pct": 4.10,
+        }
+
+        for sym in TechnicalAnalysisTool.ETHEREUM_EXCLUSIVE_ASSETS:
+            for venue in TechnicalAnalysisTool.ETHEREUM_VENUES:
+                res = TechnicalAnalysisTool.compute_ethereum_ta_metrics(
+                    candles=sample_candles,
+                    bids=sample_bids,
+                    asks=sample_asks,
+                    onchain_telemetry=sample_telemetry,
+                    symbol=sym,
+                    venue=venue,
+                )
+                self.assertEqual(res["symbol"], sym)
+                self.assertEqual(res["venue"], venue)
+                self.assertEqual(res["ta_metrics_source"], "LIVE_COMPUTED")
+                self.assertEqual(res["eip1559_base_fee_gwei"], 3.5)
+                self.assertEqual(res["blob_fee_gwei"], 0.05)
+                self.assertEqual(res["steth_peg_ratio"], 0.9999)
+                self.assertEqual(res["restaking_apr_pct"], 4.10)
+                self.assertIn("kumo_regime", res)
+                self.assertIn("golden_pocket_fib_618", res)
+                self.assertIn("rsi_14", res)
+                self.assertIn("obi_l2", res)
+
+        # Test market snapshot ingestion helper
+        market_feeds = {
+            "ETH-USDC": {
+                "candles": sample_candles,
+                "bids": sample_bids,
+                "asks": sample_asks,
+            }
+        }
+        ingest_res = TechnicalAnalysisTool.ingest_ethereum_market_snapshot(
+            market_feeds=market_feeds,
+            onchain_telemetry=sample_telemetry,
+            venue="Uniswap v4",
+        )
+        self.assertEqual(ingest_res["ta_metrics_source"], "LIVE_COMPUTED")
+        self.assertEqual(ingest_res["symbol"], "ETH-USDC")
+
+        # Test fallback when candles are empty
+        fallback_res = TechnicalAnalysisTool.compute_ethereum_ta_metrics(
+            candles=[],
+            bids=None,
+            asks=None,
+            onchain_telemetry=None,
+            symbol="ETH-USDC",
+            venue="Uniswap v4",
+        )
+        self.assertEqual(fallback_res["ta_metrics_source"], "CATALOG_FIXTURE")
+        self.assertIn("eip1559_base_fee_gwei", fallback_res)
+        self.assertIn("blob_fee_gwei", fallback_res)
+        self.assertIn("steth_peg_ratio", fallback_res)
+        self.assertIn("restaking_apr_pct", fallback_res)
+
+        # Test ValueError on invalid symbol or venue
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_ethereum_ta_metrics(symbol="BTC-USD", venue="Uniswap v4")
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_ethereum_ta_metrics(symbol="ETH-USDC", venue="InvalidVenue")
+
 
 
 if __name__ == "__main__":
