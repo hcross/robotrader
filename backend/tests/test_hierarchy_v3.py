@@ -1121,6 +1121,77 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         with self.assertRaises(ValueError):
             TechnicalAnalysisTool.compute_sui_ta_metrics(symbol="SUI-USDC", venue="InvalidVenue")
 
+    def test_hyperliquid_leaf_ta_metrics_computation_and_fallback(self) -> None:
+        """
+        Verifies TechnicalAnalysisTool.compute_hyperliquid_ta_metrics and ingest_hyperliquid_market_snapshot.
+        """
+        from backend.tools.ta_tools import TechnicalAnalysisTool
+
+        sample_candles = [
+            [1700000000000 + i * 900000, 24.0 + i * 0.5, 24.5 + i * 0.5, 23.5 + i * 0.5, 24.2 + i * 0.5, 1000.0]
+            for i in range(25)
+        ]
+        sample_bids = [[24.1, 100.0], [24.0, 150.0]]
+        sample_asks = [[24.3, 80.0], [24.4, 120.0]]
+        sample_telemetry = {
+            "hlp_apr_pct": 21.0,
+            "clob_open_interest_usd_b": 4.2,
+        }
+
+        for sym in TechnicalAnalysisTool.HYPERLIQUID_EXCLUSIVE_ASSETS:
+            for venue in TechnicalAnalysisTool.HYPERLIQUID_VENUES:
+                res = TechnicalAnalysisTool.compute_hyperliquid_ta_metrics(
+                    candles=sample_candles,
+                    bids=sample_bids,
+                    asks=sample_asks,
+                    onchain_telemetry=sample_telemetry,
+                    symbol=sym,
+                    venue=venue,
+                )
+                self.assertEqual(res["symbol"], sym)
+                self.assertEqual(res["venue"], venue)
+                self.assertEqual(res["ta_metrics_source"], "LIVE_COMPUTED")
+                self.assertEqual(res["hlp_apr_pct"], 21.0)
+                self.assertEqual(res["clob_open_interest_usd_b"], 4.2)
+                self.assertIn("kumo_regime", res)
+                self.assertIn("golden_pocket_fib_618", res)
+                self.assertIn("rsi_14", res)
+                self.assertIn("obi_l2", res)
+
+        market_feeds = {
+            "HYPE-USDC": {
+                "candles": sample_candles,
+                "bids": sample_bids,
+                "asks": sample_asks,
+            }
+        }
+        ingest_res = TechnicalAnalysisTool.ingest_hyperliquid_market_snapshot(
+            market_feeds=market_feeds,
+            onchain_telemetry=sample_telemetry,
+            venue="HyperCore L1 CLOB",
+        )
+        self.assertEqual(ingest_res["ta_metrics_source"], "LIVE_COMPUTED")
+        self.assertEqual(ingest_res["symbol"], "HYPE-USDC")
+
+        fallback_res = TechnicalAnalysisTool.compute_hyperliquid_ta_metrics(
+            candles=[],
+            bids=None,
+            asks=None,
+            onchain_telemetry=None,
+            symbol="HYPE-USDC",
+            venue="HyperCore L1 CLOB",
+        )
+        self.assertEqual(fallback_res["ta_metrics_source"], "CATALOG_FIXTURE")
+        self.assertIn("hlp_apr_pct", fallback_res)
+        self.assertIn("clob_open_interest_usd_b", fallback_res)
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_hyperliquid_ta_metrics(symbol="BTC-USD", venue="HyperCore L1 CLOB")
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_hyperliquid_ta_metrics(symbol="HYPE-USDC", venue="InvalidVenue")
+
+
 
 if __name__ == "__main__":
     unittest.main()
