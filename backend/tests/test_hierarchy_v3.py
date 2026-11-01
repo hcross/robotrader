@@ -1799,6 +1799,48 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertIn("items", feed)
         self.assertIn("feed_mode", feed)
 
+    def test_xrp_warm_path_reflection_and_policy_compilation(self) -> None:
+        cg = self.orchestrator.cost_guard
+        cg.auto_refill_enabled = False
+        cg.record_usage({"agent": "test", "cost": cg.daily_budget_usd, "tokens": 0})
+        self.assertTrue(cg.budget_exhausted)
+
+        res = self.orchestrator.run_leaf_agent_reflection("leaf-xrp", trigger_source="UNIT_TEST")
+        self.assertEqual(res["status"], "completed")
+        self.assertEqual(res["wing"], "leaf_xrp")
+        self.assertEqual(res["drawer"]["next_wakeup_sec"], 900)
+        self.assertIn(res["drawer"]["thesis_continuity"], ("INITIAL", "INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED"))
+
+        envelope_dict = res["policy_envelope"]
+        self.assertEqual(envelope_dict["ttl_seconds"], 900)
+        overrides = envelope_dict["asset_overrides"]
+        self.assertEqual(set(overrides.keys()), {"XRP-RLUSD", "XRP-USDT"})
+
+        expected_11_keys = {
+            "catalyst_score",
+            "bias",
+            "max_leverage",
+            "support_zone_usd",
+            "resistance_zone_usd",
+            "invalidation_price_usd",
+            "entry_obi_threshold",
+            "max_rsi_long",
+            "min_rsi_short",
+            "take_profit_bps",
+            "stop_loss_bps",
+        }
+        for sym, override in overrides.items():
+            self.assertEqual(set(override.keys()), expected_11_keys)
+
+        xrp_override = overrides["XRP-RLUSD"]
+        self.assertAlmostEqual(xrp_override["support_zone_usd"], 2.31 * 0.98, places=2)
+        self.assertAlmostEqual(xrp_override["resistance_zone_usd"], 2.31 * 1.05, places=2)
+        self.assertAlmostEqual(xrp_override["invalidation_price_usd"], 2.31 * 0.97, places=2)
+
+        from backend.core.schemas import SignedPolicyBundle, verify_policy_hmac
+        signed_bundle = SignedPolicyBundle.from_dict(res["signed_policy_bundle"])
+        self.assertTrue(verify_policy_hmac(signed_bundle.policy, signed_bundle.signature, "robotrader-dev-hmac-key"))
+
 if __name__ == "__main__":
     unittest.main()
     unittest.main()
