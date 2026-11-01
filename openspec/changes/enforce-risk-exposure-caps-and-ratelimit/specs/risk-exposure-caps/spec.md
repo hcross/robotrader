@@ -4,19 +4,19 @@
 
 ### Requirement: Asset exposure cap enforcement
 
-`HardRiskGate::validate` MUST enforce a maximum asset exposure ceiling on all non-stablecoin asset orders. The gate MUST compute the prospective asset exposure as the sum of existing exposure `portfolio.asset_exposures_usd` for `intent.symbol` and the order's approved notional `approved_notional_usd`. If the prospective asset exposure exceeds `portfolio.current_equity_usd * self.limits.max_asset_exposure_pct`, `validate` MUST reject the intent with `RiskRejection::AssetExposureExceeded { asset, current_usd, requested_usd, max_usd }`. The default value of `max_asset_exposure_pct` in `RiskLimits` MUST be `0.15` (15% of equity).
+`HardRiskGate::validate` MUST enforce a maximum asset exposure ceiling on all non-stablecoin asset orders. The gate MUST compute the prospective asset exposure using absolute values as `existing_asset_usd + approved_notional_usd`, where `existing_asset_usd = portfolio.asset_exposures_usd.get(&intent.symbol).copied().unwrap_or(0.0).abs()`. If the prospective asset exposure exceeds `portfolio.current_equity_usd * self.limits.max_asset_exposure_pct`, `validate` MUST reject the intent with `RiskRejection::AssetExposureExceeded { symbol: intent.symbol.clone(), current_usd: existing_asset_usd, requested_usd: approved_notional_usd, max_usd: portfolio.current_equity_usd * self.limits.max_asset_exposure_pct }`.
 
 #### Scenario: Order exceeding asset exposure cap is rejected
 
 - **WHEN** an order with notional `1_600.0` USD on symbol `SOL-USDT` is validated against equity of `10_000.0` USD with zero prior exposure and `max_asset_exposure_pct = 0.15`
 - **THEN** `validate` returns `RiskRejection::AssetExposureExceeded`
-- **THEN** the rejection reports `current_usd = 0.0`, `requested_usd = 1600.0`, and `max_usd = 1500.0`
+- **THEN** the rejection reports `symbol = "SOL-USDT"`, `current_usd = 0.0`, `requested_usd = 1600.0`, and `max_usd = 1500.0`
 
-#### Scenario: Existing asset exposure accumulates with new order
+#### Scenario: Existing short asset exposure accumulates via absolute value with new order
 
-- **WHEN** an order with notional `600.0` USD on symbol `SOL-USDT` is validated against equity of `10_000.0` USD with existing exposure of `1_000.0` USD on `SOL-USDT` and `max_asset_exposure_pct = 0.15`
-- **THEN** `validate` returns `RiskRejection::AssetExposureExceeded`
-- **THEN** the rejection reports `current_usd = 1000.0`, `requested_usd = 600.0`, and `max_usd = 1500.0`
+- **WHEN** an asset holds existing short exposure of `-1_000.0` USD on `SOL-USDT` and an order requests notional `600.0` USD against `10_000.0` USD equity with `max_asset_exposure_pct = 0.15`
+- **THEN** the gate evaluates existing exposure as `1_000.0` USD via absolute value and prospective exposure as `1_600.0` USD
+- **THEN** `validate` returns `RiskRejection::AssetExposureExceeded` with `symbol = "SOL-USDT"`, `current_usd = 1000.0`, `requested_usd = 600.0`, and `max_usd = 1500.0`
 
 #### Scenario: Order within asset exposure cap is approved
 
@@ -25,19 +25,19 @@
 
 ### Requirement: Pod exposure cap enforcement
 
-`HardRiskGate::validate` MUST enforce a maximum capital exposure ceiling for each strategy pod. The gate MUST compute the prospective pod exposure as the sum of existing exposure `portfolio.pod_exposures_usd` for `intent.pod_id` and the order's approved notional `approved_notional_usd`. If the prospective pod exposure exceeds `portfolio.current_equity_usd * self.limits.max_pod_exposure_pct`, `validate` MUST reject the intent with `RiskRejection::PodExposureExceeded { pod_id, current_usd, requested_usd, max_usd }`. The default value of `max_pod_exposure_pct` in `RiskLimits` MUST be `0.40` (40% of equity).
+`HardRiskGate::validate` MUST enforce a maximum capital exposure ceiling for each strategy pod. The gate MUST compute the prospective pod exposure using absolute values as `existing_pod_usd + approved_notional_usd`, where `existing_pod_usd = portfolio.pod_exposures_usd.get(pod_key).copied().unwrap_or(0.0).abs()`. If the prospective pod exposure exceeds `portfolio.current_equity_usd * self.limits.max_pod_exposure_pct`, `validate` MUST reject the intent with `RiskRejection::PodExposureExceeded { pod_id: pod_key.to_string(), current_usd: existing_pod_usd, requested_usd: approved_notional_usd, max_usd: portfolio.current_equity_usd * self.limits.max_pod_exposure_pct }`.
 
 #### Scenario: Order exceeding pod exposure cap is rejected
 
 - **WHEN** a `PodCarry` intent with approved notional `4_200.0` USD is validated against equity of `10_000.0` USD with zero prior exposure and `max_pod_exposure_pct = 0.40`
 - **THEN** `validate` returns `RiskRejection::PodExposureExceeded`
-- **THEN** the rejection reports `current_usd = 0.0`, `requested_usd = 4200.0`, and `max_usd = 4000.0`
+- **THEN** the rejection reports `pod_id = "pod_carry"`, `current_usd = 0.0`, `requested_usd = 4200.0`, and `max_usd = 4000.0`
 
 #### Scenario: Prior pod exposure prevents subsequent order exceeding cap
 
 - **WHEN** a `PodMomentum` intent with approved notional `1_500.0` USD is validated against equity of `10_000.0` USD with existing exposure of `3_000.0` USD in `pod_momentum` and `max_pod_exposure_pct = 0.40`
 - **THEN** `validate` returns `RiskRejection::PodExposureExceeded`
-- **THEN** the rejection reports `current_usd = 3000.0`, `requested_usd = 1500.0`, and `max_usd = 4000.0`
+- **THEN** the rejection reports `pod_id = "pod_momentum"`, `current_usd = 3000.0`, `requested_usd = 1500.0`, and `max_usd = 4000.0`
 
 #### Scenario: Order within pod exposure cap is approved
 
@@ -46,7 +46,7 @@
 
 ### Requirement: Gross portfolio exposure cap enforcement
 
-`HardRiskGate::validate` MUST enforce a maximum aggregate gross exposure ceiling across all assets and positions. The gate MUST compute the prospective gross exposure as the sum of current portfolio gross exposure and the order's approved notional `approved_notional_usd`. If `portfolio.gross_exposure_usd` is zero or omitted, the current gross exposure MUST be computed as the sum of absolute values in `portfolio.asset_exposures_usd`. If the prospective gross exposure exceeds `portfolio.current_equity_usd * self.limits.max_gross_exposure_pct`, `validate` MUST reject the intent with `RiskRejection::GrossExposureExceeded { current_gross_usd, requested_usd, max_gross_usd }`. The default value of `max_gross_exposure_pct` in `RiskLimits` MUST be `1.50` (150% of equity).
+`HardRiskGate::validate` MUST enforce a maximum aggregate gross exposure ceiling across all assets and positions. The gate MUST compute the prospective gross exposure as `current_gross_usd + approved_notional_usd`. If `portfolio.gross_exposure_usd > 0.0`, `current_gross_usd` MUST be `portfolio.gross_exposure_usd`; otherwise, `current_gross_usd` MUST be computed as the sum of absolute values in `portfolio.asset_exposures_usd.values().map(|v| v.abs()).sum()`. If the prospective gross exposure exceeds `portfolio.current_equity_usd * self.limits.max_gross_exposure_pct`, `validate` MUST reject the intent with `RiskRejection::GrossExposureExceeded { current_gross_usd, requested_usd: approved_notional_usd, max_gross_usd: portfolio.current_equity_usd * self.limits.max_gross_exposure_pct }`.
 
 #### Scenario: Order exceeding gross portfolio exposure cap is rejected
 
@@ -56,7 +56,7 @@
 
 #### Scenario: Short and long positions both contribute to gross exposure
 
-- **WHEN** a portfolio has `+6_000.0` USD in BTC and `-8_000.0` USD in ETH, yielding `14_000.0` USD gross exposure, and an intent requests `1_500.0` USD with equity `10_000.0` USD and `max_gross_exposure_pct = 1.50`
+- **WHEN** a portfolio has `+6_000.0` USD in BTC and `-8_000.0` USD in ETH, yielding `14_000.0` USD gross exposure via sum of absolute values, and an intent requests `1_500.0` USD with equity `10_000.0` USD and `max_gross_exposure_pct = 1.50`
 - **THEN** `validate` evaluates prospective gross exposure as `15_500.0` USD
 - **THEN** `validate` returns `RiskRejection::GrossExposureExceeded`
 
@@ -67,7 +67,7 @@
 
 ### Requirement: Single-position hard cap decoupling from leverage
 
-`HardRiskGate::compute_kelly_notional` SHALL clamp the desired position notional against a hard ceiling equal to `portfolio.current_equity_usd * self.limits.max_single_position_pct`. The single-position hard cap calculation MUST NOT multiply equity by `clamped_leverage`. When an intent requests leverage greater than 1.0, the maximum permitted notional for the single trade MUST remain strictly bounded by `max_single_position_pct * equity`. In addition, if accumulated asset exposure plus the new order notional exceeds `max_single_position_pct * equity`, the order MUST NOT bypass single-position concentration limits.
+`HardRiskGate::compute_kelly_notional` SHALL clamp the desired position notional against a hard ceiling equal to `portfolio.current_equity_usd * self.limits.max_single_position_pct`. The single-position hard cap calculation MUST NOT multiply equity by `clamped_leverage`. When an intent requests leverage greater than 1.0, the maximum permitted notional for the single trade MUST remain strictly bounded by `max_single_position_pct * equity`.
 
 #### Scenario: High leverage does not multiply single position notional cap
 
@@ -80,14 +80,14 @@
 - **WHEN** an intent with large Kelly sizing fraction requests `3.0x` leverage against `10_000.0` USD equity
 - **THEN** `compute_kelly_notional` returns exactly `1_500.0` USD
 
-#### Scenario: Repeated orders on same symbol cannot exceed single position limit
+#### Scenario: Fractional Kelly sizing clamps notional to single position cap
 
-- **WHEN** an asset already holds `1_200.0` USD exposure against `10_000.0` USD equity with `max_single_position_pct = 0.15` and a new order requests `400.0` USD
-- **THEN** `validate` rejects the order because the accumulated asset notional would reach `1_600.0` USD exceeding the `1_500.0` USD ceiling
+- **WHEN** `compute_kelly_notional` calculates a desired notional of `2_200.0` USD for an intent with `10_000.0` USD equity and `max_single_position_pct = 0.15`
+- **THEN** the returned notional is clamped to `1_500.0` USD
 
 ### Requirement: Per-pod-symbol order rate-limit cooldown
 
-`HardRiskGate::validate` MUST enforce a minimum time cooldown `min_order_cooldown_ms` between consecutive orders for the same `(pod_id, symbol)` pair. When `min_order_cooldown_ms > 0`, the gate MUST check `portfolio.last_order_ts_ms` for key `"{pod_id}:{symbol}"`. If an order was previously recorded at `last_ts` and `now_ms < last_ts + min_order_cooldown_ms`, `validate` MUST reject the intent with `RiskRejection::OrderRateLimited { pod_id, symbol, elapsed_ms, min_cooldown_ms }`. When `min_order_cooldown_ms == 0` or no prior order timestamp exists, the rate limit gate MUST pass.
+`HardRiskGate::validate` MUST enforce a minimum time cooldown `self.limits.min_order_cooldown_ms` between consecutive orders for the same `(pod_id, symbol)` pair. When `self.limits.min_order_cooldown_ms > 0`, the gate MUST check `portfolio.last_order_ts_ms` for key `"{pod_id}:{symbol}"`. If an order was previously recorded at `last_ts` and `now_ms < last_ts + self.limits.min_order_cooldown_ms`, `validate` MUST reject the intent with `RiskRejection::OrderRateLimited { pod_id: intent.pod_id.as_str().to_string(), symbol: intent.symbol.clone(), elapsed_ms: now_ms.saturating_sub(last_ts), min_cooldown_ms: self.limits.min_order_cooldown_ms }`. When `self.limits.min_order_cooldown_ms == 0` or no prior order timestamp exists, the rate limit gate MUST pass.
 
 #### Scenario: Order within cooldown period is rejected
 
@@ -112,23 +112,48 @@
 
 ### Requirement: Bounded MEV priority tip
 
-`HardRiskGate::validate` MUST compute `mev_priority_tip_bps` bounded by `self.limits.max_mev_tip_bps` and the effective slippage ceiling. The tip calculation MUST NOT allow an arbitrarily large `expected_edge_bps` to scale the priority tip beyond `max_mev_tip_bps`. The tip MUST be computed as `((intent.expected_edge_bps * 0.10) as u32).clamp(2, tip_ceiling)`, where `tip_ceiling = self.limits.max_mev_tip_bps.min(effective_slippage_cap)`. The default value of `max_mev_tip_bps` in `RiskLimits` MUST be `25`.
+`HardRiskGate::validate` MUST compute `mev_priority_tip_bps` bounded by `self.limits.max_mev_tip_bps` and the effective slippage ceiling. To prevent panic in Rust std when `tip_ceiling < 2`, the gate MUST define `tip_ceiling = self.limits.max_mev_tip_bps.min(effective_slippage_cap)` and `tip_floor = 2u32.min(tip_ceiling)`, computing `mev_priority_tip_bps = ((intent.expected_edge_bps * 0.10) as u32).clamp(tip_floor, tip_ceiling)`. When `tip_ceiling < 2`, `tip_floor` MUST equal `tip_ceiling`, guaranteeing safe clamp evaluation without panicking. The tip calculation MUST NOT allow an arbitrarily large `expected_edge_bps` to scale the priority tip beyond `tip_ceiling`.
 
 #### Scenario: Large expected edge cannot exceed max MEV tip cap
 
-- **WHEN** an intent declares `expected_edge_bps = 500.0` with `max_mev_tip_bps = 25` and `max_slippage_bps = 150`
-- **THEN** `mev_priority_tip_bps` in `ApprovedOrder` equals `25`
-- **THEN** the tip does not evaluate to `50` bps
+- **WHEN** an intent declares `expected_edge_bps = 500.0` with `max_mev_tip_bps = 50` and `max_slippage_bps = 150`
+- **THEN** `mev_priority_tip_bps` in `ApprovedOrder` equals `50`
+- **THEN** the tip does not evaluate to `50` bps beyond the ceiling
 
 #### Scenario: MEV tip respects tighter slippage ceiling
 
-- **WHEN** an intent declares `expected_edge_bps = 200.0` with `max_mev_tip_bps = 25` and effective slippage cap is `15` bps
+- **WHEN** an intent declares `expected_edge_bps = 200.0` with `max_mev_tip_bps = 50` and effective slippage cap is `15` bps
 - **THEN** `mev_priority_tip_bps` in `ApprovedOrder` equals `15`
+
+#### Scenario: Tight slippage ceiling below 2 clamps safely without panicking
+
+- **WHEN** an intent has effective slippage cap of `1` bps and `max_mev_tip_bps = 50`
+- **THEN** the gate derives `tip_ceiling = 1` and `tip_floor = 1`
+- **THEN** `mev_priority_tip_bps` evaluates to `1` without panicking in `u32::clamp`
 
 #### Scenario: Moderate edge derives proportional tip within bounds
 
-- **WHEN** an intent declares `expected_edge_bps = 80.0` with `max_mev_tip_bps = 25` and effective slippage cap is `50` bps
+- **WHEN** an intent declares `expected_edge_bps = 80.0` with `max_mev_tip_bps = 50` and effective slippage cap is `50` bps
 - **THEN** `mev_priority_tip_bps` in `ApprovedOrder` equals `8`
+
+### Requirement: Explicit RiskLimits configuration fields and default values
+
+`RiskLimits` in `robotrader_risk_gate` MUST declare the following fields with their specified types: `max_asset_exposure_pct: f64`, `max_pod_exposure_pct: f64`, `max_gross_exposure_pct: f64`, `min_order_cooldown_ms: u64`, and `max_mev_tip_bps: u32`. `RiskLimits::default()` MUST initialize these fields to `max_asset_exposure_pct = 0.15`, `max_pod_exposure_pct = 0.40`, `max_gross_exposure_pct = 1.50`, `min_order_cooldown_ms = 0`, and `max_mev_tip_bps = 50`. Each field MUST use `#[serde(default)]` so that deserializing legacy configurations that omit these fields automatically populates them with their default values.
+
+#### Scenario: RiskLimits default values match specification
+
+- **WHEN** `RiskLimits::default()` is constructed
+- **THEN** `max_asset_exposure_pct` equals `0.15`
+- **THEN** `max_pod_exposure_pct` equals `0.40`
+- **THEN** `max_gross_exposure_pct` equals `1.50`
+- **THEN** `min_order_cooldown_ms` equals `0`
+- **THEN** `max_mev_tip_bps` equals `50`
+
+#### Scenario: Deserializing legacy RiskLimits JSON populates defaults
+
+- **WHEN** a JSON representation of `RiskLimits` omitting `max_asset_exposure_pct`, `max_pod_exposure_pct`, `max_gross_exposure_pct`, `min_order_cooldown_ms`, and `max_mev_tip_bps` is deserialized
+- **THEN** deserialization succeeds
+- **THEN** all omitted fields evaluate to their respective default values
 
 ### Requirement: PortfolioState schema synchronization and backward compatibility
 

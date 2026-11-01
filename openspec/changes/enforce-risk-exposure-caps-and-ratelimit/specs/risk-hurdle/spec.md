@@ -4,7 +4,7 @@
 
 ### Requirement: Safety gates precede the edge hurdle
 
-`HardRiskGate::validate` MUST evaluate its gates in this canonical order: active kill switch, daily drawdown circuit breaker, effective-envelope resolution and pod enablement, per-`(pod_id, symbol)` order rate-limit cooldown, slippage ceiling, on-chain token safety when `intent.token_safety` is present, execution-cost edge hurdle, leverage clamp, fractional-Kelly sizing and zero-position rejection, aggregate exposure caps (single position, asset exposure, pod exposure, gross exposure), and bounded MEV priority tip attachment. The edge hurdle MUST NOT preempt the slippage ceiling, token-safety check, or rate-limit cooldown check.
+`HardRiskGate::validate` MUST evaluate its gates in this canonical order: active kill switch, daily drawdown circuit breaker, effective-envelope resolution and pod enablement, per-`(pod_id, symbol)` order rate-limit cooldown, slippage ceiling, on-chain token safety when `intent.token_safety` is present, execution-cost edge hurdle, leverage clamp, fractional-Kelly sizing (clamped by single-position cap `max_single_position_pct * equity`) and zero-position rejection, aggregate exposure caps (asset exposure -> pod exposure -> gross exposure), and bounded MEV priority tip attachment. The edge hurdle MUST NOT preempt the slippage ceiling, token-safety check, or rate-limit cooldown check.
 
 #### Scenario: The SCAM-SOL fixture is rejected as a rug, not by the hurdle
 
