@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "triage",
+  "status": "merged",
   "pr": 217,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "b05e9cb013622569a141be599bc9ddaee6532f6d",
+      "updated_at": "2026-11-01T21:40:08Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/70-leaf-tron-ingestion",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T21:42:30Z",
+    "mode": "full-auto",
+    "pr": 217,
+    "head_sha": "b05e9cb013622569a141be599bc9ddaee6532f6d"
+  }
 }
