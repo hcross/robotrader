@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-ethereum-ingestion",
+  "title": "feat(leaf-ethereum/ingestion): live market data & on-chain TA telemetry pipeline for Ethereum (ETH)",
+  "issue": 34,
+  "lane": "M",
+  "lane_reason": "Scoped telemetry & TA ingestion pipeline for leaf-ethereum in backend/tools/ta_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/34-leaf-ethereum-ingestion",
+  "worktree": ".worktrees/34-leaf-ethereum-ingestion",
+  "base_branch": "master",
+  "base_sha": "cc8cef6cfe18bbff1c43ec9a8de619b921df5370",
+  "created_at": "2026-11-01T15:20:27Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 187,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "cf35ce5928ef2fb09b924811f770d7dd7c1e8fd1",
+      "updated_at": "2026-11-01T15:24:32Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/34-leaf-ethereum-ingestion",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T15:24:40Z",
+    "mode": "full-auto",
+    "pr": 187,
+    "head_sha": "cf35ce5928ef2fb09b924811f770d7dd7c1e8fd1"
+  }
+}
