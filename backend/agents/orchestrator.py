@@ -344,18 +344,48 @@ class OrchestratorAgent(BaseWarmAgent):
                 bias_str = "LONG_BIAS"
             
             cat_score = float(leaf_state.get("catalyst_score", 0.85))
+            # Ethereum-specific calibration when leaf_id == "leaf-ethereum"
+            if leaf_id == "leaf-ethereum":
+                base_fee = float(ta_metrics.get("eip1559_base_fee_gwei", 4.2))
+                restake_apr = float(ta_metrics.get("restaking_apr_pct", 3.65))
+                cat_score = round(min(0.99, max(0.50, 0.80 + (restake_apr / 100.0) - (base_fee / 100.0))), 4)
+
             max_lev = float(leaf_state.get("max_leverage", 2.0))
             
-            last_p = float(ta_metrics.get("last_price", 80000.0 if "BTC" in sym else 150.0))
-            fib_618 = float(ta_metrics.get("golden_pocket_fib_618", round(last_p * 0.992, 2)))
-            support_z = float(ta_metrics.get("support_usd", round(fib_618 * 0.98, 2)))
-            resistance_z = float(ta_metrics.get("resistance_usd", round(last_p * 1.05, 2)))
-            invalidation_p = float(ta_metrics.get("invalidation_price_usd", round(fib_618 * 0.97, 2)))
+            if leaf_id == "leaf-ethereum":
+                if sym == "stETH-ETH":
+                    peg = float(ta_metrics.get("steth_peg_ratio", 0.9997))
+                    support_z = round(peg * 0.9985, 4)
+                    resistance_z = round(peg * 1.0005, 4)
+                    invalidation_p = round(peg * 0.9950, 4)
+                    last_p = peg
+                elif sym in ("UNI-ETH", "AAVE-ETH"):
+                    ratio = 0.0038 if sym == "UNI-ETH" else 0.065
+                    support_z = round(ratio * 0.98, 4)
+                    resistance_z = round(ratio * 1.05, 4)
+                    invalidation_p = round(ratio * 0.97, 4)
+                    last_p = ratio
+                else:  # ETH-USDC
+                    last_p = float(ta_metrics.get("last_price", ta_metrics.get("golden_pocket_fib_618", 2368.0)))
+                    fib_618 = float(ta_metrics.get("golden_pocket_fib_618", round(last_p * 0.992, 2)))
+                    support_z = float(ta_metrics.get("support_usd", round(fib_618 * 0.98, 2)))
+                    resistance_z = float(ta_metrics.get("resistance_usd", round(last_p * 1.05, 2)))
+                    invalidation_p = float(ta_metrics.get("invalidation_price_usd", round(fib_618 * 0.97, 2)))
+            else:
+                last_p = float(ta_metrics.get("last_price", 80000.0 if "BTC" in sym else 150.0))
+                fib_618 = float(ta_metrics.get("golden_pocket_fib_618", round(last_p * 0.992, 2)))
+                support_z = float(ta_metrics.get("support_usd", round(fib_618 * 0.98, 2)))
+                resistance_z = float(ta_metrics.get("resistance_usd", round(last_p * 1.05, 2)))
+                invalidation_p = float(ta_metrics.get("invalidation_price_usd", round(fib_618 * 0.97, 2)))
 
             obi_thresh = max(0.02, min(0.50, float(llm_r.get("entry_obi_threshold", 0.08))))
             max_rsi = max(55.0, min(85.0, float(llm_r.get("max_rsi_long", 70.0))))
             min_rsi = max(15.0, min(45.0, float(llm_r.get("min_rsi_short", 30.0))))
             tp_bps = max(15.0, min(200.0, float(llm_r.get("take_profit_bps", 45.0))))
+            if leaf_id == "leaf-ethereum":
+                restake_apr = float(ta_metrics.get("restaking_apr_pct", 3.65))
+                tp_bps = round(min(200.0, max(15.0, 45.0 + restake_apr * 2.0)), 2)
+
             sl_bps = max(10.0, min(150.0, float(llm_r.get("stop_loss_bps", 28.0))))
 
             asset_overrides[sym] = AssetOverride(
@@ -1055,7 +1085,7 @@ class OrchestratorAgent(BaseWarmAgent):
                 }
 
             base_interval_sec = leaf.get("base_interval_sec", 180)
-            default_interval = 900 if leaf_id == "leaf-bitcoin" else int(base_interval_sec)
+            default_interval = 900 if leaf_id in ("leaf-bitcoin", "leaf-ethereum") else int(base_interval_sec)
             raw_wakeup = int(parsed.get("next_wakeup_sec", default_interval))
             next_sec = max(60, min(1800, raw_wakeup))
             call_cost = self.cost_guard.compute_call_cost(used_model, p_tok, c_tok)
