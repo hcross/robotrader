@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "merge-ready",
+  "status": "merged",
   "pr": 197,
   "areas": [],
   "stages": {
@@ -36,14 +36,21 @@
     },
     "dev": {
       "status": "approved",
-      "rounds": 1,
+      "rounds": 2,
       "last_verdict": "APPROVE",
       "last_reviewer": "sdlc-dev-reviewer",
-      "last_sha": "3e679b1b391e37b8a314f995f4b950a4788b9211",
-      "updated_at": "2026-11-01T17:29:07Z"
+      "last_sha": "f9fbcbd6ccad2edbb3b8ad425a462d25e4a236ce",
+      "updated_at": "2026-11-01T17:52:23Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/52-leaf-bnb-ingestion",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-01T17:53:40Z",
+    "mode": "full-auto",
+    "pr": 197,
+    "head_sha": "f9fbcbd6ccad2edbb3b8ad425a462d25e4a236ce"
+  }
 }
