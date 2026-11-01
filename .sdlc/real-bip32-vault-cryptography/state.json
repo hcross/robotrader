@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "real-bip32-vault-cryptography",
+  "title": "feat(vault): real BIP-32/SLIP-0010 key derivation, ed25519/secp256k1 signing, and chain address validation",
+  "issue": 2,
+  "lane": "L",
+  "lane_reason": "Adds real cryptographic key derivation, signing, verification, and chain address validation in vault.rs while preserving SIMULATED mode compatibility (Issue #2 complete closure)",
+  "lane_change": null,
+  "branch": "sdlc/2-real-bip32-vault-cryptography",
+  "worktree": ".worktrees/2-real-bip32-vault-cryptography",
+  "base_branch": "master",
+  "base_sha": "0e1caef28e15f5978180c26a58050bfbcbb9f581",
+  "created_at": "2026-11-01T11:47:47Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "plan",
+  "pr": null,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-spec-reviewer",
+      "last_sha": "14382f5a348039afaf4c644e4e8094905c3311c0",
+      "updated_at": "2026-11-01T12:12:27Z"
+    },
+    "plan": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/2-real-bip32-vault-cryptography",
+  "partial_issue": false
+}

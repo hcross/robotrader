@@ -3,7 +3,10 @@ use robotrader_backtest::{
     EventDrivenBacktestEngine,
 };
 use robotrader_common::PolicyEnvelope;
-use robotrader_risk_gate::{HardRiskGate, RiskLimits, SimulatedVault};
+use robotrader_risk_gate::{
+    read_mode_input, read_seed_input, select_vault_mode, CryptoVaultBootstrap,
+    CryptographicVault, HardRiskGate, RiskLimits, SimulatedVault, VaultBackendKind,
+};
 use robotrader_strategies::{ecosystem_pod_specs, is_canonical_leaf_id, CANONICAL_LEAF_IDS};
 use serde::Deserialize;
 use std::env;
@@ -63,6 +66,7 @@ fn main() {
     let mut token = "USDC".to_string();
     let mut kill_switch = false;
     let mut vault_secret_file: Option<PathBuf> = None;
+    let mut vault_allowlist_file: Option<PathBuf> = None;
     let mut validate_refill = false;
     let mut validate_refill_json: Option<String> = None;
     let mut simulate_fills = false;
@@ -94,6 +98,8 @@ fn main() {
         } else if args[i] == "--vault-secret-file" && i + 1 < args.len() {
             // Test-only override; production uses the default secret mount path.
             vault_secret_file = Some(PathBuf::from(args[i + 1].clone()));
+        } else if args[i] == "--vault-allowlist-file" && i + 1 < args.len() {
+            vault_allowlist_file = Some(PathBuf::from(args[i + 1].clone()));
         } else if args[i] == "--validate-refill" {
             validate_refill = true;
             if i + 1 < args.len() && !args[i + 1].starts_with("--") {
@@ -195,57 +201,152 @@ fn main() {
     }
 
     if dump_vault_manifest {
-        let vault = match vault_secret_file {
-            Some(path) => SimulatedVault::from_env_with_secret_file(path),
-            None => SimulatedVault::from_env(),
-        };
-        let vault = match vault {
-            Ok(vault) => vault,
+        let mode = match select_vault_mode() {
+            Ok(m) => m,
             Err(err) => {
                 eprintln!("{err}");
                 std::process::exit(2);
             }
         };
-        let manifest = vault.export_public_manifest();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&manifest).expect("Failed to serialize vault manifest")
-        );
+
+        match mode {
+            VaultBackendKind::Simulated => {
+                let vault = match vault_secret_file {
+                    Some(path) => SimulatedVault::from_env_with_secret_file(path),
+                    None => SimulatedVault::from_env(),
+                };
+                let vault = match vault {
+                    Ok(vault) => vault,
+                    Err(err) => {
+                        eprintln!("{err}");
+                        std::process::exit(2);
+                    }
+                };
+                let manifest = vault.export_public_manifest();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&manifest).expect("Failed to serialize vault manifest")
+                );
+            }
+            VaultBackendKind::CryptoHdBip32 => {
+                let secret_path = vault_secret_file.unwrap_or_else(|| PathBuf::from(robotrader_risk_gate::vault::DEFAULT_SECRET_FILE));
+                let allow_test_seed = std::env::var("ROBOTRADER_VAULT_ALLOW_TEST_SEED").as_deref() == Ok("1");
+                let env_seed = if std::env::var_os("ROBOTRADER_VAULT_MASTER_SEED_HEX").is_some() {
+                    read_seed_input("ROBOTRADER_VAULT_MASTER_SEED_HEX")
+                } else {
+                    read_seed_input("ROBOTRADER_VAULT_MASTER_SEED")
+                };
+                let vault = match CryptographicVault::load(CryptoVaultBootstrap {
+                    execution_mode: read_mode_input("ROBOTRADER_EXECUTION_MODE"),
+                    secret_file: secret_path,
+                    env_seed,
+                    allow_test_seed,
+                    allowlist_file: vault_allowlist_file.clone(),
+                }) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        eprintln!("{err}");
+                        std::process::exit(2);
+                    }
+                };
+                let manifest = vault.export_public_manifest();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&manifest).expect("Failed to serialize vault manifest")
+                );
+            }
+        }
         return;
     }
 
     if sign_transfer {
-        let vault = match vault_secret_file {
-            Some(path) => SimulatedVault::from_env_with_secret_file(path),
-            None => SimulatedVault::from_env(),
-        };
-        let vault = match vault {
-            Ok(vault) => vault,
+        let mode = match select_vault_mode() {
+            Ok(m) => m,
             Err(err) => {
                 eprintln!("{err}");
                 std::process::exit(2);
             }
         };
-        match vault.validate_and_sign_transfer(
-            kill_switch,
-            &leaf_id,
-            &dest_address,
-            amount_usd,
-            &token,
-        ) {
-            Ok(receipt) => {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&receipt).expect("Failed to serialize receipt")
-                );
+
+        match mode {
+            VaultBackendKind::Simulated => {
+                let vault = match vault_secret_file {
+                    Some(path) => SimulatedVault::from_env_with_secret_file(path),
+                    None => SimulatedVault::from_env(),
+                };
+                let vault = match vault {
+                    Ok(vault) => vault,
+                    Err(err) => {
+                        eprintln!("{err}");
+                        std::process::exit(2);
+                    }
+                };
+                match vault.validate_and_sign_transfer(
+                    kill_switch,
+                    &leaf_id,
+                    &dest_address,
+                    amount_usd,
+                    &token,
+                ) {
+                    Ok(receipt) => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&receipt).expect("Failed to serialize receipt")
+                        );
+                    }
+                    Err(err) => {
+                        let err_json = serde_json::json!({
+                            "status": "rejected_by_rust_enclave",
+                            "error": err.to_string(),
+                        });
+                        println!("{}", serde_json::to_string_pretty(&err_json).unwrap());
+                        std::process::exit(1);
+                    }
+                }
             }
-            Err(err) => {
-                let err_json = serde_json::json!({
-                    "status": "rejected_by_rust_enclave",
-                    "error": err.to_string(),
-                });
-                println!("{}", serde_json::to_string_pretty(&err_json).unwrap());
-                std::process::exit(1);
+            VaultBackendKind::CryptoHdBip32 => {
+                let secret_path = vault_secret_file.unwrap_or_else(|| PathBuf::from(robotrader_risk_gate::vault::DEFAULT_SECRET_FILE));
+                let allow_test_seed = std::env::var("ROBOTRADER_VAULT_ALLOW_TEST_SEED").as_deref() == Ok("1");
+                let env_seed = if std::env::var_os("ROBOTRADER_VAULT_MASTER_SEED_HEX").is_some() {
+                    read_seed_input("ROBOTRADER_VAULT_MASTER_SEED_HEX")
+                } else {
+                    read_seed_input("ROBOTRADER_VAULT_MASTER_SEED")
+                };
+                let vault = match CryptographicVault::load(CryptoVaultBootstrap {
+                    execution_mode: read_mode_input("ROBOTRADER_EXECUTION_MODE"),
+                    secret_file: secret_path,
+                    env_seed,
+                    allow_test_seed,
+                    allowlist_file: vault_allowlist_file.clone(),
+                }) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        eprintln!("{err}");
+                        std::process::exit(2);
+                    }
+                };
+                match vault.validate_and_sign_transfer(
+                    kill_switch,
+                    &leaf_id,
+                    &dest_address,
+                    amount_usd,
+                    &token,
+                ) {
+                    Ok(receipt) => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&receipt).expect("Failed to serialize receipt")
+                        );
+                    }
+                    Err(err) => {
+                        let err_json = serde_json::json!({
+                            "status": "rejected_by_rust_enclave",
+                            "error": err.to_string(),
+                        });
+                        println!("{}", serde_json::to_string_pretty(&err_json).unwrap());
+                        std::process::exit(1);
+                    }
+                }
             }
         }
         return;
