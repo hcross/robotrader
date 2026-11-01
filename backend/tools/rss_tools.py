@@ -1217,10 +1217,10 @@ class EcosystemRSSAggregator:
         """
         combined = f"{title} {summary}".lower()
 
-        if any(w in combined for w in ["ston.fi", "stonfi", "ston", "dex", "liquidity pool", "tvl", "swap"]):
-            category = "TON_STONFI_DEX"
-        elif any(w in combined for w in ["dedust", "de dust", "dedust.io"]):
+        if any(w in combined for w in ["dedust", "de dust", "dedust.io"]):
             category = "TON_DEDUST_DEX"
+        elif any(w in combined for w in ["ston.fi", "stonfi", "ston", "dex", "liquidity pool", "tvl", "swap"]):
+            category = "TON_STONFI_DEX"
         elif any(w in combined for w in ["usdt", "stablecoin", "usdt-ton", "ton-usdt"]):
             category = "TON_USDT_STABLECOIN"
         elif any(w in combined for w in ["telegram", "mini app", "miniapp", "tap", "tap-to-earn", "notcoin", "not"]):
