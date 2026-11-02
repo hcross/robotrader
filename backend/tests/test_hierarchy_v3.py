@@ -2158,6 +2158,77 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         with self.assertRaises(ValueError):
             TechnicalAnalysisTool.compute_tron_ta_metrics(symbol="TRX-USDT", venue="InvalidVenue")
 
+    def test_cosmos_leaf_ta_metrics_computation_and_fallback(self) -> None:
+        """
+        Verifies TechnicalAnalysisTool.compute_cosmos_ta_metrics and ingest_cosmos_market_snapshot.
+        """
+        from backend.tools.ta_tools import TechnicalAnalysisTool
+
+        sample_candles = [
+            [1700000000000 + i * 900000, 0.12 + i * 0.001, 0.122 + i * 0.001, 0.118 + i * 0.001, 0.121 + i * 0.001, 1000.0]
+            for i in range(25)
+        ]
+        sample_bids = [[0.1205, 100.0], [0.12, 150.0]]
+        sample_asks = [[0.1215, 80.0], [0.122, 120.0]]
+        sample_telemetry = {
+            "ibc_24h_volume_usd_m": 195.5,
+            "atom_staking_apr_pct": 14.1,
+        }
+
+        for sym in TechnicalAnalysisTool.COSMOS_EXCLUSIVE_ASSETS:
+            for venue in TechnicalAnalysisTool.COSMOS_VENUES:
+                res = TechnicalAnalysisTool.compute_cosmos_ta_metrics(
+                    candles=sample_candles,
+                    bids=sample_bids,
+                    asks=sample_asks,
+                    onchain_telemetry=sample_telemetry,
+                    symbol=sym,
+                    venue=venue,
+                )
+                self.assertEqual(res["symbol"], sym)
+                self.assertEqual(res["venue"], venue)
+                self.assertEqual(res["ta_metrics_source"], "LIVE_COMPUTED")
+                self.assertEqual(res["ibc_24h_volume_usd_m"], 195.5)
+                self.assertEqual(res["atom_staking_apr_pct"], 14.1)
+                self.assertIn("kumo_regime", res)
+                self.assertIn("golden_pocket_fib_618", res)
+                self.assertIn("rsi_14", res)
+                self.assertIn("obi_l2", res)
+
+        market_feeds = {
+            "ATOM-USDC": {
+                "candles": sample_candles,
+                "bids": sample_bids,
+                "asks": sample_asks,
+            }
+        }
+        ingest_res = TechnicalAnalysisTool.ingest_cosmos_market_snapshot(
+            market_feeds=market_feeds,
+            onchain_telemetry=sample_telemetry,
+            venue="Osmosis Supercharged Pools",
+        )
+        self.assertEqual(ingest_res["ta_metrics_source"], "LIVE_COMPUTED")
+        self.assertEqual(ingest_res["symbol"], "ATOM-USDC")
+
+        fallback_res = TechnicalAnalysisTool.compute_cosmos_ta_metrics(
+            candles=[],
+            bids=None,
+            asks=None,
+            onchain_telemetry=None,
+            symbol="ATOM-USDC",
+            venue="Osmosis Supercharged Pools",
+        )
+        self.assertEqual(fallback_res["ta_metrics_source"], "CATALOG_FIXTURE")
+        self.assertIn("ibc_24h_volume_usd_m", fallback_res)
+        self.assertIn("atom_staking_apr_pct", fallback_res)
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_cosmos_ta_metrics(symbol="BTC-USD", venue="Osmosis Supercharged Pools")
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_cosmos_ta_metrics(symbol="ATOM-USDC", venue="InvalidVenue")
+
+
     def test_avalanche_rss_atom_parsing_and_catalyst_scoring(self) -> None:
         """
         Verifies Avalanche RSS/Atom parsing (Avalanche Subnets & Liquidity Book),
