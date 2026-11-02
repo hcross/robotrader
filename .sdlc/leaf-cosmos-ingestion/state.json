@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-cosmos-ingestion",
+  "title": "feat(leaf-cosmos/ingestion): live market data & on-chain TA telemetry pipeline for Cosmos (ATOM)",
+  "issue": 82,
+  "lane": "M",
+  "lane_reason": "Scoped telemetry & TA ingestion pipeline for leaf-cosmos in backend/tools/ta_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/82-leaf-cosmos-ingestion",
+  "worktree": ".worktrees/82-leaf-cosmos-ingestion",
+  "base_branch": "master",
+  "base_sha": "9e90ea6dff0f32cbadf7aeb4cf5eebcc0c824937",
+  "created_at": "2026-11-02T01:36:10Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 227,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "63ee18032c4e287bada691e45ee9970b7eba6b42",
+      "updated_at": "2026-11-02T01:43:07Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/82-leaf-cosmos-ingestion",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-02T01:57:01Z",
+    "mode": "full-auto",
+    "pr": 227,
+    "head_sha": "63ee18032c4e287bada691e45ee9970b7eba6b42"
+  }
+}
