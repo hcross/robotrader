@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "leaf-aptos-rss-catalysts",
+  "title": "feat(leaf-aptos/rss-catalysts): live RSS/Atom feed verification & catalyst scoring for Aptos",
+  "issue": 89,
+  "lane": "M",
+  "lane_reason": "Scoped ecosystem RSS verification and catalyst scoring for leaf-aptos in backend/tools/rss_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/89-leaf-aptos-rss-catalysts",
+  "worktree": ".worktrees/89-leaf-aptos-rss-catalysts",
+  "base_branch": "master",
+  "base_sha": "c9bab4505db0993b41684c6668d080a0f8afbbae",
+  "created_at": "2026-11-02T02:30:22Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merge-ready",
+  "pr": 230,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "4604bcea9f4e48ea334cd8849444e9275e524adb",
+      "updated_at": "2026-11-02T03:09:01Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/89-leaf-aptos-rss-catalysts",
+  "partial_issue": false
+}
