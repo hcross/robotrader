@@ -526,6 +526,8 @@ pub fn leaf_exclusive_assets(leaf_id: &str) -> &'static [&'static str] {
         &["XRP-RLUSD", "XRP-USDT"]
     } else if leaf_id == "leaf-tron" {
         &["TRX-USDT", "SUN-TRX"]
+    } else if leaf_id == "leaf-avalanche" {
+        &["AVAX-USDC", "sAVAX-AVAX"]
     } else {
         &[]
     }
@@ -688,6 +690,23 @@ fn tron_token_safety_impl(symbol: &str, safety: &OnChainTokenSafety) -> bool {
 
 pub fn verify_tron_token_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
     tron_token_safety_impl(symbol, safety)
+}
+
+fn avalanche_token_safety_impl(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    let allowed = leaf_exclusive_assets("leaf-avalanche");
+    if !allowed.contains(&symbol) {
+        return false;
+    }
+    safety.supply_mint_immutable
+        && safety.transfer_freeze_disabled
+        && safety.no_honeypot_or_transfer_tax
+        && safety.tx_simulation_success
+        && safety.lp_locked_pct >= 80.0
+        && safety.top10_holder_pct <= 50.0
+}
+
+pub fn verify_avalanche_token_safety(symbol: &str, safety: &OnChainTokenSafety) -> bool {
+    avalanche_token_safety_impl(symbol, safety)
 }
 
 pub const CANONICAL_LEAF_IDS: &[&str] = &[
@@ -2123,6 +2142,108 @@ mod tests {
             ..clean_safety
         };
         assert!(!verify_tron_token_safety("TRX-USDT", &compromised_safety));
+    }
+
+
+    #[test]
+    fn test_leaf_avalanche_hot_path_pods_asset_isolation_and_token_safety() {
+        let mut pods = strategy_pods_for_leaf("leaf-avalanche");
+        assert_eq!(pods.len(), 3);
+
+        let envelope = PolicyEnvelope::safe_baseline(1000);
+
+        let funding_event = MarketEvent::FundingSnapshot {
+            timestamp_ms: 1000,
+            symbol: "AVAX-USDC".to_string(),
+            spot_price: 28.5,
+            perp_price: 28.8,
+            annualized_funding_apr: 0.25,
+        };
+        let ob_event = MarketEvent::OrderbookTick {
+            timestamp_ms: 1000,
+            symbol: "sAVAX-AVAX".to_string(),
+            mid_price: 1.12,
+            bid_volume_top5: 20.0,
+            ask_volume_top5: 10.0,
+            cvd_delta: 5.0,
+            atr_pct: 1.8,
+            breakout_zscore: 2.1,
+            rsi_14: Some(60.0),
+        };
+        let smart_event = MarketEvent::OnchainSmartMoneySwap {
+            timestamp_ms: 1000,
+            symbol: "sAVAX-AVAX".to_string(),
+            token_address: "0x...savx".to_string(),
+            price_usd: 1.12,
+            whale_wallet_winrate: 0.72,
+            buy_volume_usd: 40000.0,
+            safety: OnChainTokenSafety {
+                supply_mint_immutable: true,
+                transfer_freeze_disabled: true,
+                no_honeypot_or_transfer_tax: true,
+                lp_locked_pct: 90.0,
+                top10_holder_pct: 35.0,
+                tx_simulation_success: true,
+            },
+        };
+
+        let mut intent_count = 0;
+        for pod in &mut pods {
+            let intents = pod.on_market_event(&funding_event, &envelope);
+            if !intents.is_empty() {
+                intent_count += 1;
+                assert!(intents[0].rationale.contains("[avax_benqi_savax_carry @"));
+            }
+            let ob_intents = pod.on_market_event(&ob_event, &envelope);
+            if !ob_intents.is_empty() {
+                intent_count += 1;
+                assert!(ob_intents[0].rationale.contains("[avax_lfj_bin_momentum @"));
+            }
+            let smart_intents = pod.on_market_event(&smart_event, &envelope);
+            if !smart_intents.is_empty() {
+                intent_count += 1;
+                assert!(smart_intents[0].rationale.contains("[avax_subnet_icm_flow @"));
+            }
+        }
+        assert!(intent_count > 0, "Expected at least one intent from leaf-avalanche pods");
+
+        let sol_event = MarketEvent::FundingSnapshot {
+            symbol: "SOL-USDT".to_string(),
+            spot_price: 150.0,
+            perp_price: 151.0,
+            annualized_funding_apr: 0.30,
+            timestamp_ms: 1000,
+        };
+        let eth_event = MarketEvent::FundingSnapshot {
+            symbol: "ETH-USDC".to_string(),
+            spot_price: 3000.0,
+            perp_price: 3010.0,
+            annualized_funding_apr: 0.20,
+            timestamp_ms: 1000,
+        };
+
+        for pod in &mut pods {
+            assert!(pod.on_market_event(&sol_event, &envelope).is_empty());
+            assert!(pod.on_market_event(&eth_event, &envelope).is_empty());
+        }
+
+        let clean_safety = OnChainTokenSafety {
+            supply_mint_immutable: true,
+            transfer_freeze_disabled: true,
+            no_honeypot_or_transfer_tax: true,
+            tx_simulation_success: true,
+            lp_locked_pct: 90.0,
+            top10_holder_pct: 35.0,
+        };
+        assert!(verify_avalanche_token_safety("AVAX-USDC", &clean_safety));
+        assert!(verify_avalanche_token_safety("sAVAX-AVAX", &clean_safety));
+        assert!(!verify_avalanche_token_safety("SOL-USDT", &clean_safety));
+
+        let compromised_safety = OnChainTokenSafety {
+            supply_mint_immutable: false,
+            ..clean_safety
+        };
+        assert!(!verify_avalanche_token_safety("AVAX-USDC", &compromised_safety));
     }
 
 }
