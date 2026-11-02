@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "triage",
+  "status": "merged",
   "pr": 225,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "28ebea59d03ed3198e89c1b1bd70658eaaae5144",
+      "updated_at": "2026-11-02T02:01:01Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/74-leaf-tron-execution-custody",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-02T02:38:15Z",
+    "mode": "full-auto",
+    "pr": 225,
+    "head_sha": "28ebea59d03ed3198e89c1b1bd70658eaaae5144"
+  }
 }
