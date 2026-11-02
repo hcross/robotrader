@@ -2500,6 +2500,55 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         with self.assertRaises(ValueError):
             TechnicalAnalysisTool.compute_aptos_ta_metrics(symbol="APT-USDC", venue="InvalidVenue")
 
+    def test_aptos_warm_path_reflection_and_policy_compilation(self) -> None:
+        """
+        Verifies:
+        - `orchestrator.run_leaf_agent_reflection("leaf-aptos", trigger_source="UNIT_TEST")` writes a drawer to `wing == "leaf_aptos"` with `next_wakeup_sec == 900` and `thesis_continuity in ("INITIAL", "INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED")`.
+        - `res["policy_envelope"]["asset_overrides"]` keys are strictly `{"APT-USDC", "THL-APT"}` with all 11 `AssetOverride` fields populated and `APT-USDC` support/resistance/invalidation calibrated around ~9.10.
+        - `verify_policy_hmac(SignedPolicyBundle.from_dict(res["signed_policy_bundle"]))` returns `True`.
+        """
+        cg = self.orchestrator.cost_guard
+        cg.auto_refill_enabled = False
+        cg.record_usage({"agent": "test", "cost": cg.daily_budget_usd, "tokens": 0})
+        self.assertTrue(cg.budget_exhausted)
+
+        res = self.orchestrator.run_leaf_agent_reflection("leaf-aptos", trigger_source="UNIT_TEST")
+        self.assertEqual(res["status"], "completed")
+        self.assertEqual(res["leaf_id"], "leaf-aptos")
+        self.assertEqual(res["wing"], "leaf_aptos")
+        self.assertEqual(res["drawer"]["next_wakeup_sec"], 900)
+        self.assertIn(res["drawer"]["thesis_continuity"], ("INITIAL", "INIT_THESIS", "CONFIRMED", "REFINED", "INVALIDATED"))
+
+        envelope_dict = res["policy_envelope"]
+        self.assertEqual(envelope_dict["ttl_seconds"], 900)
+        overrides = envelope_dict["asset_overrides"]
+        self.assertEqual(set(overrides.keys()), {"APT-USDC", "THL-APT"})
+
+        expected_11_keys = {
+            "catalyst_score",
+            "bias",
+            "max_leverage",
+            "support_zone_usd",
+            "resistance_zone_usd",
+            "invalidation_price_usd",
+            "entry_obi_threshold",
+            "max_rsi_long",
+            "min_rsi_short",
+            "take_profit_bps",
+            "stop_loss_bps",
+        }
+        for sym, override in overrides.items():
+            self.assertEqual(set(override.keys()), expected_11_keys)
+
+        apt_override = overrides["APT-USDC"]
+        self.assertAlmostEqual(apt_override["support_zone_usd"], 9.10 * 0.98, places=2)
+        self.assertAlmostEqual(apt_override["resistance_zone_usd"], 9.10 * 1.05, places=2)
+        self.assertAlmostEqual(apt_override["invalidation_price_usd"], 9.10 * 0.97, places=2)
+
+        from backend.core.schemas import SignedPolicyBundle, verify_policy_hmac
+        signed_bundle = SignedPolicyBundle.from_dict(res["signed_policy_bundle"])
+        self.assertTrue(verify_policy_hmac(signed_bundle.policy, signed_bundle.signature, "robotrader-dev-hmac-key"))
+
 if __name__ == "__main__":
     unittest.main()
     unittest.main()
