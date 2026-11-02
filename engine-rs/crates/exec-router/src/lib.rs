@@ -642,6 +642,94 @@ pub type SunSwapVenueAdapter = TronVenueAdapter;
 pub type JustLendBridgeQuote = TronBridgeQuote;
 pub type JustLendVenueAdapter = TronVenueAdapter;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CosmosBridgeQuote {
+    pub venues: Vec<String>,
+    pub supported_tokens: Vec<String>,
+    pub bridge_protocol: String,
+    pub base_fee_usd: f64,
+    pub variable_bps: f64,
+    pub one_way_fee_usd: f64,
+    pub round_trip_cost_bps: f64,
+    pub hurdle_rate_bps: f64,
+    pub finality_sec: u64,
+}
+
+pub struct CosmosVenueAdapter;
+
+impl CosmosVenueAdapter {
+    pub const VENUES: [&'static str; 3] = [
+        "Osmosis Supercharged Pools",
+        "Injective Helix CLOB",
+        "Noble USDC",
+    ];
+    pub const SUPPORTED_TOKENS: [&'static str; 4] = ["ATOM", "USDC", "OSMO", "INJ"];
+    pub const BRIDGE_PROTOCOL: &'static str = "IBC Native / Axelar";
+    pub const BASE_FEE_USD: f64 = 0.15;
+    pub const VARIABLE_BPS: f64 = 4.0;
+    pub const FINALITY_SEC: u64 = 6;
+
+    pub fn quote_bridge(notional_usd: f64) -> CosmosBridgeQuote {
+        let one_way_fee_usd = Self::BASE_FEE_USD + notional_usd * (Self::VARIABLE_BPS / 10_000.0);
+        let one_way_bps = if notional_usd > 0.0 {
+            (one_way_fee_usd / notional_usd) * 10_000.0
+        } else {
+            Self::VARIABLE_BPS
+        };
+        let round_trip_cost_bps = one_way_bps * 2.0;
+        let hurdle_rate_bps = round_trip_cost_bps * 2.5;
+
+        CosmosBridgeQuote {
+            venues: Self::VENUES.iter().map(|s| s.to_string()).collect(),
+            supported_tokens: Self::SUPPORTED_TOKENS.iter().map(|s| s.to_string()).collect(),
+            bridge_protocol: Self::BRIDGE_PROTOCOL.to_string(),
+            base_fee_usd: Self::BASE_FEE_USD,
+            variable_bps: Self::VARIABLE_BPS,
+            one_way_fee_usd,
+            round_trip_cost_bps,
+            hurdle_rate_bps,
+            finality_sec: Self::FINALITY_SEC,
+        }
+    }
+
+    pub fn validate_settlement_destination(dest: &str) -> bool {
+        if dest.starts_with("bridge:ibc:") || dest.starts_with("bridge:axelar:") {
+            let prefix_len = if dest.starts_with("bridge:ibc:") {
+                "bridge:ibc:".len()
+            } else {
+                "bridge:axelar:".len()
+            };
+            return dest.len() > prefix_len;
+        }
+
+        // Cosmos Bech32 address: "cosmos1" followed by 38 bech32 data chars
+        // (matches the SimulatedVault's to_bech32_chars output length).
+        if dest.starts_with("cosmos1") {
+            let rest = &dest["cosmos1".len()..];
+            if rest.is_empty() || rest.len() != 38 {
+                return false;
+            }
+            // Keep in sync with risk-gate/src/vault.rs CHARSET.
+            const BECH32_CHARSET: &str =
+                "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+            return rest.chars().all(|c| BECH32_CHARSET.contains(c));
+        }
+
+        false
+    }
+}
+
+pub type CosmosHubBridgeQuote = CosmosBridgeQuote;
+pub type CosmosHubVenueAdapter = CosmosVenueAdapter;
+pub type OsmosisBridgeQuote = CosmosBridgeQuote;
+pub type OsmosisVenueAdapter = CosmosVenueAdapter;
+pub type OsmosisSuperchargedPoolsBridgeQuote = CosmosBridgeQuote;
+pub type OsmosisSuperchargedPoolsVenueAdapter = CosmosVenueAdapter;
+pub type IbcBridgeQuote = CosmosBridgeQuote;
+pub type IbcVenueAdapter = CosmosVenueAdapter;
+pub type AxelarBridgeQuote = CosmosBridgeQuote;
+pub type AxelarVenueAdapter = CosmosVenueAdapter;
+
 pub struct SmartExecutionRouter {
     pub mode: ExecutionMode,
 }
@@ -756,6 +844,13 @@ impl SmartExecutionRouter {
             if sym != "TRX-USDT" && sym != "SUN-TRX" {
                 return Err(format!(
                     "Leaf leaf-tron violates symbol isolation: symbol {sym} not allowed"
+                ));
+            }
+        } else if leaf_id == "leaf-cosmos" {
+            let sym = &order.intent.symbol;
+            if sym != "ATOM-USDC" && sym != "OSMO-ATOM" && sym != "INJ-USDC" {
+                return Err(format!(
+                    "Leaf leaf-cosmos violates symbol isolation: symbol {sym} not allowed"
                 ));
             }
         }
@@ -1216,6 +1311,55 @@ mod tests {
 
         order.intent.symbol = "ETH-USDC".to_string();
         let res_err = router.execute_for_leaf("leaf-tron", &order, 1000);
+        assert!(res_err.is_err());
+    }
+
+    #[test]
+    fn test_cosmos_venue_adapter_bridge_quote_and_custody_destination() {
+        let quote = CosmosVenueAdapter::quote_bridge(10_000.0);
+        assert_eq!(quote.venues.len(), 3);
+        assert!(quote.venues.contains(&"Osmosis Supercharged Pools".to_string()));
+        assert!(quote.venues.contains(&"Injective Helix CLOB".to_string()));
+        assert!(quote.venues.contains(&"Noble USDC".to_string()));
+        assert_eq!(quote.bridge_protocol, "IBC Native / Axelar");
+        assert_eq!(quote.base_fee_usd, 0.15);
+        assert_eq!(quote.variable_bps, 4.0);
+        assert!((quote.one_way_fee_usd - (0.15 + 10_000.0 * 4.0 / 10_000.0)).abs() < 1e-9);
+        assert!(quote.hurdle_rate_bps > quote.round_trip_cost_bps);
+        assert_eq!(quote.finality_sec, 6);
+
+        // Test destination validation
+        // vault-style simulated address (cosmos1 + 38 chars drawn from the
+        // vault charset, including the '4'/'6' that the old charset rejected)
+        let vault_style = format!("cosmos1{}", "46".repeat(19));
+        assert_eq!(vault_style.len(), 7 + 38);
+        assert!(CosmosVenueAdapter::validate_settlement_destination(&vault_style));
+        // negative: 'b' is not in the bech32 charset
+        assert!(!CosmosVenueAdapter::validate_settlement_destination(&format!("cosmos1{}", "b".repeat(38))));
+        // length bound: too short / too long are rejected
+        assert!(!CosmosVenueAdapter::validate_settlement_destination("cosmos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs"));
+        assert!(!CosmosVenueAdapter::validate_settlement_destination(&format!("cosmos1{}", "q".repeat(37))));
+        assert!(!CosmosVenueAdapter::validate_settlement_destination(&format!("cosmos1{}", "q".repeat(39))));
+        assert!(CosmosVenueAdapter::validate_settlement_destination("bridge:ibc:destination"));
+        assert!(CosmosVenueAdapter::validate_settlement_destination("bridge:axelar:destination"));
+        assert!(!CosmosVenueAdapter::validate_settlement_destination("bridge:"));
+        assert!(!CosmosVenueAdapter::validate_settlement_destination("0xd8da6bf26964af9d7eed9e03e53415d37aa96045"));
+        assert!(!CosmosVenueAdapter::validate_settlement_destination("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"));
+    }
+
+    #[test]
+    fn test_smart_execution_router_execute_for_leaf_cosmos_isolation() {
+        let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
+        let mut order = approved_order(Venue::BinanceSpot, OrderType::Limit, 0);
+
+        for sym in ["ATOM-USDC", "OSMO-ATOM", "INJ-USDC"] {
+            order.intent.symbol = sym.to_string();
+            let res = router.execute_for_leaf("leaf-cosmos", &order, 1000);
+            assert!(res.is_ok(), "expected ok for {sym}");
+        }
+
+        order.intent.symbol = "ETH-USDC".to_string();
+        let res_err = router.execute_for_leaf("leaf-cosmos", &order, 1000);
         assert!(res_err.is_err());
     }
 }
