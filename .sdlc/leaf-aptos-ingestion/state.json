@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-aptos-ingestion",
+  "title": "feat(leaf-aptos/ingestion): live market data & on-chain TA telemetry pipeline for Aptos (APT)",
+  "issue": 88,
+  "lane": "M",
+  "lane_reason": "Scoped telemetry & TA ingestion pipeline for leaf-aptos in backend/tools/ta_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/88-leaf-aptos-ingestion",
+  "worktree": ".worktrees/88-leaf-aptos-ingestion",
+  "base_branch": "master",
+  "base_sha": "9e90ea6dff0f32cbadf7aeb4cf5eebcc0c824937",
+  "created_at": "2026-11-02T01:36:12Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 228,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "1ae519cfec971a7cf4e199972822482fce3aca03",
+      "updated_at": "2026-11-02T02:01:05Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/88-leaf-aptos-ingestion",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-02T02:29:56Z",
+    "mode": "full-auto",
+    "pr": 228,
+    "head_sha": "1ae519cfec971a7cf4e199972822482fce3aca03"
+  }
+}
