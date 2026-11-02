@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-avalanche-hot-path-pods",
+  "title": "feat(leaf-avalanche/hot-path-pods): native Rust strategy pods & on-chain token safety gates for Avalanche",
+  "issue": 79,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-avalanche pods and AVAX safety gates in engine-rs/crates/strategies + tests",
+  "lane_change": null,
+  "branch": "sdlc/79-leaf-avalanche-hot-path-pods",
+  "worktree": ".worktrees/79-leaf-avalanche-hot-path-pods",
+  "base_branch": "master",
+  "base_sha": "bc2f8df8dd1621c077fd22044f8d36dcf5f2a04f",
+  "created_at": "2026-11-02T01:13:21Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 226,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "71262916f8bca221c9f72a0531574a7a76675c89",
+      "updated_at": "2026-11-02T01:33:01Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/79-leaf-avalanche-hot-path-pods",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-02T01:35:37Z",
+    "mode": "full-auto",
+    "pr": 226,
+    "head_sha": "71262916f8bca221c9f72a0531574a7a76675c89"
+  }
+}
