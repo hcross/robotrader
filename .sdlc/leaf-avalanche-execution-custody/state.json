@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "triage",
+  "status": "merged",
   "pr": 223,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "7797840eedf0c72acd7fdedc79de7b3ead3e03e4",
+      "updated_at": "2026-11-02T01:09:06Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/80-leaf-avalanche-execution-custody",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-02T01:13:02Z",
+    "mode": "full-auto",
+    "pr": 223,
+    "head_sha": "7797840eedf0c72acd7fdedc79de7b3ead3e03e4"
+  }
 }
