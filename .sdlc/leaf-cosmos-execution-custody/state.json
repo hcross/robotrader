@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-cosmos-execution-custody",
+  "title": "feat(leaf-cosmos/execution-custody): live venue execution router & chain-valid vault signing for Cosmos",
+  "issue": 86,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-cosmos venue adapter and bridge quote in engine-rs/crates/exec-router + tests",
+  "lane_change": null,
+  "branch": "sdlc/86-leaf-cosmos-execution-custody",
+  "worktree": ".worktrees/86-leaf-cosmos-execution-custody",
+  "base_branch": "master",
+  "base_sha": "801b18841e2c95ed72aaf2b49f47719a513ed2d2",
+  "created_at": "2026-11-02T06:16:01Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 234,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 2,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "590fd34812eccb08fa7805569596d25c84e6f100",
+      "updated_at": "2026-11-02T06:49:58Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/86-leaf-cosmos-execution-custody",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-02T06:57:01Z",
+    "mode": "full-auto",
+    "pr": 234,
+    "head_sha": "590fd34812eccb08fa7805569596d25c84e6f100"
+  }
+}
