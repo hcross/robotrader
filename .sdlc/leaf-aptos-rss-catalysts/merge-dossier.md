@@ -21,7 +21,7 @@ flowchart LR
 
 | Gate | Result | Evidence |
 |---|---|---|
-| DEV | APPROVE (round 1) | `.sdlc/leaf-aptos-rss-catalysts/reviews/dev-r1.md` @ `4604bcea9f4e48ea334cd8849444e9275e524adb` |
+| DEV | APPROVE (round 2) | `.sdlc/leaf-aptos-rss-catalysts/reviews/dev-r2.md` @ `1da9568fbfc4d05b704a72642ac78eb2eb91b98e` |
 | CI | green | `gh pr checks` output |
 | Tests | pass | command + summary |
 | Lints | pass | command + summary |

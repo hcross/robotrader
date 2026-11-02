@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "merge-ready",
+  "status": "merged",
   "pr": 230,
   "areas": [],
   "stages": {
@@ -36,14 +36,21 @@
     },
     "dev": {
       "status": "approved",
-      "rounds": 1,
+      "rounds": 2,
       "last_verdict": "APPROVE",
       "last_reviewer": "sdlc-dev-reviewer",
-      "last_sha": "4604bcea9f4e48ea334cd8849444e9275e524adb",
-      "updated_at": "2026-11-02T03:09:01Z"
+      "last_sha": "1da9568fbfc4d05b704a72642ac78eb2eb91b98e",
+      "updated_at": "2026-11-02T03:23:20Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/89-leaf-aptos-rss-catalysts",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-02T06:06:13Z",
+    "mode": "full-auto",
+    "pr": 230,
+    "head_sha": "1da9568fbfc4d05b704a72642ac78eb2eb91b98e"
+  }
 }
