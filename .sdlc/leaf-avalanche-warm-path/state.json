@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-avalanche-warm-path",
+  "title": "feat(leaf-avalanche/warm-path): autonomous 900s cognitive scheduling, MemPalace wing & PolicyEnvelope compilation for leaf-avalanche",
+  "issue": 78,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-avalanche warm-path wiring in backend/agents/orchestrator.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/78-leaf-avalanche-warm-path",
+  "worktree": ".worktrees/78-leaf-avalanche-warm-path",
+  "base_branch": "master",
+  "base_sha": "05c5f77cbf04f270c936573be08e5093be0e73f4",
+  "created_at": "2026-11-01T21:55:29Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 221,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 3,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "997a458245856e86444b99a307c7ac1d423d56a2",
+      "updated_at": "2026-11-02T01:08:58Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/78-leaf-avalanche-warm-path",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-02T01:11:48Z",
+    "mode": "full-auto",
+    "pr": 221,
+    "head_sha": "997a458245856e86444b99a307c7ac1d423d56a2"
+  }
+}
