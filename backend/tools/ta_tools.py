@@ -1347,6 +1347,108 @@ class TechnicalAnalysisTool:
         )
 
 
+    APTOS_EXCLUSIVE_ASSETS = ("APT-USDC", "THL-APT")
+    APTOS_VENUES = ("Thala Labs", "Aries Markets", "Econia CLOB")
+    APTOS_FALLBACK_TA_METRICS = {
+        "block_stm_tps": 1850,
+        "kumo_regime": "INSIDE_KUMO_NEUTRAL",
+        "golden_pocket_fib_618": 9.1,
+        "rsi_14": 50.1,
+        "obi_l2": 0.05,
+    }
+
+    @classmethod
+    def compute_aptos_ta_metrics(
+        cls,
+        candles=None,
+        bids=None,
+        asks=None,
+        onchain_telemetry=None,
+        symbol="APT-USDC",
+        timeframe="15m",
+        venue="Thala Labs",
+    ):
+        if symbol not in cls.APTOS_EXCLUSIVE_ASSETS:
+            raise ValueError(f"Invalid Aptos symbol: {symbol}. Expected one of {cls.APTOS_EXCLUSIVE_ASSETS}")
+        if venue not in cls.APTOS_VENUES:
+            raise ValueError(f"Invalid Aptos venue: {venue}. Expected one of {cls.APTOS_VENUES}")
+
+        obi = 0.0
+        if bids and asks:
+            b_vol = sum(float(b[1]) for b in bids[:5])
+            a_vol = sum(float(a[1]) for a in asks[:5])
+            tot = b_vol + a_vol
+            if tot > 0:
+                obi = (b_vol - a_vol) / tot
+
+        has_candles = bool(candles and isinstance(candles, list) and len(candles) >= 5)
+
+        if not has_candles:
+            return {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "venue": venue,
+                "ta_metrics_source": "CATALOG_FIXTURE",
+                **cls.APTOS_FALLBACK_TA_METRICS,
+                "obi_l2": obi if (bids or asks) else cls.APTOS_FALLBACK_TA_METRICS["obi_l2"],
+                "venues": list(cls.APTOS_VENUES),
+                "exclusive_assets": list(cls.APTOS_EXCLUSIVE_ASSETS),
+            }
+
+        ta_result = cls.analyze_candles(symbol=symbol, candles=candles, obi=obi, timeframe=timeframe)
+        kumo_regime = ta_result.get("ichimoku", {}).get("kumo_regime", cls.APTOS_FALLBACK_TA_METRICS["kumo_regime"])
+        golden_pocket = ta_result.get("fibonacci", {}).get("golden_pocket_618", cls.APTOS_FALLBACK_TA_METRICS["golden_pocket_fib_618"])
+        rsi_14 = ta_result.get("rsi", {}).get("rsi_14", cls.APTOS_FALLBACK_TA_METRICS["rsi_14"])
+        obi_l2 = ta_result.get("obi_l2", obi)
+
+        telemetry = onchain_telemetry or {}
+        block_stm_tps = int(telemetry.get("block_stm_tps", cls.APTOS_FALLBACK_TA_METRICS["block_stm_tps"]))
+
+        return {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "venue": venue,
+            "ta_metrics_source": "LIVE_COMPUTED",
+            "block_stm_tps": block_stm_tps,
+            "kumo_regime": kumo_regime,
+            "golden_pocket_fib_618": golden_pocket,
+            "rsi_14": rsi_14,
+            "obi_l2": obi_l2,
+            "venues": list(cls.APTOS_VENUES),
+            "exclusive_assets": list(cls.APTOS_EXCLUSIVE_ASSETS),
+        }
+
+    @classmethod
+    def ingest_aptos_market_snapshot(
+        cls,
+        market_feeds=None,
+        onchain_telemetry=None,
+        venue="Thala Labs",
+    ):
+        feeds = market_feeds or {}
+        symbol = "APT-USDC"
+        candles = None
+        bids = None
+        asks = None
+
+        if feeds:
+            target_sym = next(iter(feeds.keys()))
+            if target_sym in cls.APTOS_EXCLUSIVE_ASSETS:
+                symbol = target_sym
+            feed_data = feeds.get(symbol, next(iter(feeds.values())))
+            candles = feed_data.get("candles")
+            bids = feed_data.get("bids")
+            asks = feed_data.get("asks")
+
+        return cls.compute_aptos_ta_metrics(
+            candles=candles,
+            bids=bids,
+            asks=asks,
+            onchain_telemetry=onchain_telemetry,
+            symbol=symbol,
+            venue=venue,
+        )
+
 class SocialMacroPanoramaTool:
     """
     Synthesizes high-level social narratives (X/CT, Reddit, Telegram whale alerts, macro liquidity)
