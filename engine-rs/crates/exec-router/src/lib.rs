@@ -663,7 +663,7 @@ impl CosmosVenueAdapter {
         "Injective Helix CLOB",
         "Noble USDC",
     ];
-    pub const SUPPORTED_TOKENS: [&'static str; 2] = ["ATOM", "USDC"];
+    pub const SUPPORTED_TOKENS: [&'static str; 4] = ["ATOM", "USDC", "OSMO", "INJ"];
     pub const BRIDGE_PROTOCOL: &'static str = "IBC Native / Axelar";
     pub const BASE_FEE_USD: f64 = 0.15;
     pub const VARIABLE_BPS: f64 = 4.0;
@@ -702,14 +702,16 @@ impl CosmosVenueAdapter {
             return dest.len() > prefix_len;
         }
 
-        // Cosmos Bech32 address: "cosmos1" followed by bech32 data/chars
+        // Cosmos Bech32 address: "cosmos1" followed by 38 bech32 data chars
+        // (matches the SimulatedVault's to_bech32_chars output length).
         if dest.starts_with("cosmos1") {
             let rest = &dest["cosmos1".len()..];
-            if rest.is_empty() {
+            if rest.is_empty() || rest.len() != 38 {
                 return false;
             }
+            // Keep in sync with risk-gate/src/vault.rs CHARSET.
             const BECH32_CHARSET: &str =
-                "qpzry9x8gf2tvdw0s3jnb5hcekmua7l";
+                "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
             return rest.chars().all(|c| BECH32_CHARSET.contains(c));
         }
 
@@ -1327,7 +1329,17 @@ mod tests {
         assert_eq!(quote.finality_sec, 6);
 
         // Test destination validation
-        assert!(CosmosVenueAdapter::validate_settlement_destination("cosmos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs"));
+        // vault-style simulated address (cosmos1 + 38 chars drawn from the
+        // vault charset, including the '4'/'6' that the old charset rejected)
+        let vault_style = format!("cosmos1{}", "46".repeat(19));
+        assert_eq!(vault_style.len(), 7 + 38);
+        assert!(CosmosVenueAdapter::validate_settlement_destination(&vault_style));
+        // negative: 'b' is not in the bech32 charset
+        assert!(!CosmosVenueAdapter::validate_settlement_destination(&format!("cosmos1{}", "b".repeat(38))));
+        // length bound: too short / too long are rejected
+        assert!(!CosmosVenueAdapter::validate_settlement_destination("cosmos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs"));
+        assert!(!CosmosVenueAdapter::validate_settlement_destination(&format!("cosmos1{}", "q".repeat(37))));
+        assert!(!CosmosVenueAdapter::validate_settlement_destination(&format!("cosmos1{}", "q".repeat(39))));
         assert!(CosmosVenueAdapter::validate_settlement_destination("bridge:ibc:destination"));
         assert!(CosmosVenueAdapter::validate_settlement_destination("bridge:axelar:destination"));
         assert!(!CosmosVenueAdapter::validate_settlement_destination("bridge:"));
