@@ -2306,6 +2306,73 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertIn("items", feed)
         self.assertIn("feed_mode", feed)
 
+    def test_aptos_leaf_ta_metrics_computation_and_fallback(self) -> None:
+        """
+        Verifies TechnicalAnalysisTool.compute_aptos_ta_metrics and ingest_aptos_market_snapshot.
+        """
+        from backend.tools.ta_tools import TechnicalAnalysisTool
+
+        sample_candles = [
+            [1700000000000 + i * 900000, 9.0 + i * 0.1, 9.2 + i * 0.1, 8.8 + i * 0.1, 9.05 + i * 0.1, 1000.0]
+            for i in range(25)
+        ]
+        sample_bids = [[9.05, 100.0], [9.0, 150.0]]
+        sample_asks = [[9.15, 80.0], [9.2, 120.0]]
+        sample_telemetry = {
+            "block_stm_tps": 1900,
+        }
+
+        for sym in TechnicalAnalysisTool.APTOS_EXCLUSIVE_ASSETS:
+            for venue in TechnicalAnalysisTool.APTOS_VENUES:
+                res = TechnicalAnalysisTool.compute_aptos_ta_metrics(
+                    candles=sample_candles,
+                    bids=sample_bids,
+                    asks=sample_asks,
+                    onchain_telemetry=sample_telemetry,
+                    symbol=sym,
+                    venue=venue,
+                )
+                self.assertEqual(res["symbol"], sym)
+                self.assertEqual(res["venue"], venue)
+                self.assertEqual(res["ta_metrics_source"], "LIVE_COMPUTED")
+                self.assertEqual(res["block_stm_tps"], 1900)
+                self.assertIn("kumo_regime", res)
+                self.assertIn("golden_pocket_fib_618", res)
+                self.assertIn("rsi_14", res)
+                self.assertIn("obi_l2", res)
+
+        market_feeds = {
+            "APT-USDC": {
+                "candles": sample_candles,
+                "bids": sample_bids,
+                "asks": sample_asks,
+            }
+        }
+        ingest_res = TechnicalAnalysisTool.ingest_aptos_market_snapshot(
+            market_feeds=market_feeds,
+            onchain_telemetry=sample_telemetry,
+            venue="Thala Labs",
+        )
+        self.assertEqual(ingest_res["ta_metrics_source"], "LIVE_COMPUTED")
+        self.assertEqual(ingest_res["symbol"], "APT-USDC")
+
+        fallback_res = TechnicalAnalysisTool.compute_aptos_ta_metrics(
+            candles=[],
+            bids=None,
+            asks=None,
+            onchain_telemetry=None,
+            symbol="APT-USDC",
+            venue="Thala Labs",
+        )
+        self.assertEqual(fallback_res["ta_metrics_source"], "CATALOG_FIXTURE")
+        self.assertIn("block_stm_tps", fallback_res)
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_aptos_ta_metrics(symbol="BTC-USD", venue="Thala Labs")
+
+        with self.assertRaises(ValueError):
+            TechnicalAnalysisTool.compute_aptos_ta_metrics(symbol="APT-USDC", venue="InvalidVenue")
+
 if __name__ == "__main__":
     unittest.main()
     unittest.main()
