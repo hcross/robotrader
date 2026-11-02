@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "leaf-tron-execution-custody",
+  "title": "feat(leaf-tron/execution-custody): live venue execution router & chain-valid vault signing for Tron",
+  "issue": 74,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-tron venue adapter and bridge quote in engine-rs/crates/exec-router + tests",
+  "lane_change": null,
+  "branch": "sdlc/74-leaf-tron-execution-custody",
+  "worktree": ".worktrees/74-leaf-tron-execution-custody",
+  "base_branch": "master",
+  "base_sha": "bc2f8df8dd1621c077fd22044f8d36dcf5f2a04f",
+  "created_at": "2026-11-02T01:13:19Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "triage",
+  "pr": 225,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/74-leaf-tron-execution-custody",
+  "partial_issue": false
+}
