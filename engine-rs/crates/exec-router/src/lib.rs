@@ -565,6 +565,83 @@ pub type TraderJoeVenueAdapter = AvalancheVenueAdapter;
 pub type LFJBridgeQuote = AvalancheBridgeQuote;
 pub type LFJVenueAdapter = AvalancheVenueAdapter;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TronBridgeQuote {
+    pub venues: Vec<String>,
+    pub supported_tokens: Vec<String>,
+    pub bridge_protocol: String,
+    pub base_fee_usd: f64,
+    pub variable_bps: f64,
+    pub one_way_fee_usd: f64,
+    pub round_trip_cost_bps: f64,
+    pub hurdle_rate_bps: f64,
+    pub finality_sec: u64,
+}
+
+pub struct TronVenueAdapter;
+
+impl TronVenueAdapter {
+    pub const VENUES: [&'static str; 2] = [
+        "SunSwap v3",
+        "JustLend DAO",
+    ];
+    pub const SUPPORTED_TOKENS: [&'static str; 2] = ["TRX", "USDT"];
+    pub const BRIDGE_PROTOCOL: &'static str = "BitTorrent Bridge / CEX TRC-20 Rail";
+    pub const BASE_FEE_USD: f64 = 1.00;
+    pub const VARIABLE_BPS: f64 = 4.0;
+    pub const FINALITY_SEC: u64 = 3;
+
+    pub fn quote_bridge(notional_usd: f64) -> TronBridgeQuote {
+        let one_way_fee_usd = Self::BASE_FEE_USD + notional_usd * (Self::VARIABLE_BPS / 10_000.0);
+        let one_way_bps = if notional_usd > 0.0 {
+            (one_way_fee_usd / notional_usd) * 10_000.0
+        } else {
+            Self::VARIABLE_BPS
+        };
+        let round_trip_cost_bps = one_way_bps * 2.0;
+        let hurdle_rate_bps = round_trip_cost_bps * 2.5;
+
+        TronBridgeQuote {
+            venues: Self::VENUES.iter().map(|s| s.to_string()).collect(),
+            supported_tokens: Self::SUPPORTED_TOKENS.iter().map(|s| s.to_string()).collect(),
+            bridge_protocol: Self::BRIDGE_PROTOCOL.to_string(),
+            base_fee_usd: Self::BASE_FEE_USD,
+            variable_bps: Self::VARIABLE_BPS,
+            one_way_fee_usd,
+            round_trip_cost_bps,
+            hurdle_rate_bps,
+            finality_sec: Self::FINALITY_SEC,
+        }
+    }
+
+    pub fn validate_settlement_destination(dest: &str) -> bool {
+        // TRON-bound destinations must name a specific bridge; a bare
+        // "bridge:" prefix is not a routable venue.
+        const TRON_BRIDGE_PREFIXES: [&str; 2] = ["bridge:tron:", "bridge:bittorrent:"];
+        for prefix in TRON_BRIDGE_PREFIXES {
+            if dest.starts_with(prefix) {
+                return dest.len() > prefix.len();
+            }
+        }
+
+        // TRON addresses: "T" followed by 33 Base58 characters (34 total)
+        if dest.starts_with('T') && dest.len() == 34 {
+            const TRON_BASE58: &str =
+                "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+            return dest.chars().all(|c| TRON_BASE58.contains(c));
+        }
+
+        false
+    }
+}
+
+pub type TrxVenueAdapter = TronVenueAdapter;
+pub type TrxBridgeQuote = TronBridgeQuote;
+pub type SunSwapBridgeQuote = TronBridgeQuote;
+pub type SunSwapVenueAdapter = TronVenueAdapter;
+pub type JustLendBridgeQuote = TronBridgeQuote;
+pub type JustLendVenueAdapter = TronVenueAdapter;
+
 pub struct SmartExecutionRouter {
     pub mode: ExecutionMode,
 }
@@ -672,6 +749,13 @@ impl SmartExecutionRouter {
             if sym != "AVAX-USDC" && sym != "JOE-AVAX" {
                 return Err(format!(
                     "Leaf leaf-avalanche violates symbol isolation: symbol {sym} not allowed"
+                ));
+            }
+        } else if leaf_id == "leaf-tron" {
+            let sym = &order.intent.symbol;
+            if sym != "TRX-USDT" && sym != "SUN-TRX" {
+                return Err(format!(
+                    "Leaf leaf-tron violates symbol isolation: symbol {sym} not allowed"
                 ));
             }
         }
@@ -1092,6 +1176,46 @@ mod tests {
 
         order.intent.symbol = "ETH-USDC".to_string();
         let res_err = router.execute_for_leaf("leaf-avalanche", &order, 1000);
+        assert!(res_err.is_err());
+    }
+
+    #[test]
+    fn test_tron_venue_adapter_bridge_quote_and_custody_destination() {
+        let quote = TronVenueAdapter::quote_bridge(10_000.0);
+        assert_eq!(quote.venues.len(), 2);
+        assert!(quote.venues.contains(&"SunSwap v3".to_string()));
+        assert!(quote.venues.contains(&"JustLend DAO".to_string()));
+        assert_eq!(quote.bridge_protocol, "BitTorrent Bridge / CEX TRC-20 Rail");
+        assert_eq!(quote.base_fee_usd, 1.00);
+        assert_eq!(quote.variable_bps, 4.0);
+        assert!((quote.one_way_fee_usd - (1.00 + 10_000.0 * 4.0 / 10_000.0)).abs() < 1e-9);
+        assert!(quote.hurdle_rate_bps > quote.round_trip_cost_bps);
+        assert_eq!(quote.finality_sec, 3);
+
+        // Test destination validation
+        assert!(TronVenueAdapter::validate_settlement_destination("TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7"));
+        assert!(TronVenueAdapter::validate_settlement_destination("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"));
+        assert!(TronVenueAdapter::validate_settlement_destination("bridge:tron:destination"));
+        assert!(TronVenueAdapter::validate_settlement_destination("bridge:bittorrent:destination"));
+        assert!(!TronVenueAdapter::validate_settlement_destination("bridge:"));
+        assert!(!TronVenueAdapter::validate_settlement_destination("TShort"));
+        assert!(!TronVenueAdapter::validate_settlement_destination("0xd8da6bf26964af9d7eed9e03e53415d37aa96045"));
+        assert!(!TronVenueAdapter::validate_settlement_destination("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"));
+    }
+
+    #[test]
+    fn test_smart_execution_router_execute_for_leaf_tron_isolation() {
+        let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
+        let mut order = approved_order(Venue::BinanceSpot, OrderType::Limit, 0);
+
+        for sym in ["TRX-USDT", "SUN-TRX"] {
+            order.intent.symbol = sym.to_string();
+            let res = router.execute_for_leaf("leaf-tron", &order, 1000);
+            assert!(res.is_ok(), "expected ok for {sym}");
+        }
+
+        order.intent.symbol = "ETH-USDC".to_string();
+        let res_err = router.execute_for_leaf("leaf-tron", &order, 1000);
         assert!(res_err.is_err());
     }
 }
