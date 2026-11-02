@@ -2306,6 +2306,83 @@ class TestHierarchicalArchitectureV3(unittest.TestCase):
         self.assertIn("items", feed)
         self.assertIn("feed_mode", feed)
 
+    def test_cosmos_rss_atom_parsing_and_catalyst_scoring(self) -> None:
+        """
+        Verifies Cosmos RSS/Atom parsing (Cosmos Hub & IBC Interchain Feed),
+        score_cosmos_catalyst classification across ATOM-USDC, OSMO-ATOM and INJ-USDC,
+        and CURATED_FALLBACK behavior.
+        """
+        atom_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Cosmos Hub &amp; IBC Interchain Feed</title>
+          <entry>
+            <title>Osmosis Supercharged Pools record volume and ATOM/USDC spread compression</title>
+            <summary>Injective Helix CLOB growth, Noble USDC IBC transfer expansion.</summary>
+          </entry>
+        </feed>
+        """
+        rss_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Cosmos Hub &amp; IBC Interchain Feed</title>
+            <item>
+              <title>Noble USDC IBC flows and Cosmos Hub staking surge</title>
+              <description>Osmosis Supercharged Pools shift, Injective Helix CLOB liquidity growth.</description>
+            </item>
+          </channel>
+        </rss>
+        """
+
+        payloads = {
+            "Cosmos Hub & IBC Interchain Feed": rss_xml,
+        }
+
+        feed_res = EcosystemRSSAggregator.verify_and_ingest_cosmos_feeds(
+            xml_payloads=payloads, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res["agent_id"], "leaf-cosmos")
+        self.assertEqual(feed_res["feed_mode"], "LIVE")
+        self.assertEqual(feed_res["live_count"], 1)
+        self.assertEqual(feed_res["curated_count"], 0)
+        self.assertGreaterEqual(len(feed_res["items"]), 1)
+
+        for item in feed_res["items"]:
+            self.assertEqual(item["source_kind"], "LIVE_RSS")
+            self.assertFalse(item["curated"])
+            self.assertIn("catalyst_score", item)
+            self.assertIn("impact", item)
+            self.assertIn("category", item)
+            self.assertIn("affected_assets", item)
+            for asset in item["affected_assets"]:
+                self.assertIn(asset, ["ATOM-USDC", "OSMO-ATOM", "INJ-USDC"])
+
+        for asset in ["ATOM-USDC", "OSMO-ATOM", "INJ-USDC"]:
+            self.assertIn(asset, feed_res["asset_catalyst_scores"])
+
+        payloads2 = {
+            "Cosmos Hub & IBC Interchain Feed": atom_xml,
+        }
+        feed_res2 = EcosystemRSSAggregator.verify_and_ingest_cosmos_feeds(
+            xml_payloads=payloads2, try_network=False, max_items=5
+        )
+        self.assertEqual(feed_res2["feed_mode"], "LIVE")
+        self.assertEqual(feed_res2["live_count"], 1)
+
+        fallback_res = EcosystemRSSAggregator.verify_and_ingest_cosmos_feeds(
+            xml_payloads={}, try_network=False, max_items=5
+        )
+        self.assertEqual(fallback_res["feed_mode"], "CURATED_FALLBACK")
+        self.assertEqual(fallback_res["live_count"], 0)
+        self.assertGreater(fallback_res["curated_count"], 0)
+        for item in fallback_res["items"]:
+            self.assertEqual(item["source_kind"], "CURATED_FIXTURE")
+            self.assertTrue(item["curated"])
+            self.assertEqual(item["timestamp_ms"], CURATED_FIXTURE_TIMESTAMP_MS)
+
+        feed = EcosystemRSSAggregator.get_feed_for_agent("leaf-cosmos", try_network=False)
+        self.assertIn("items", feed)
+        self.assertIn("feed_mode", feed)
+
     def test_aptos_leaf_ta_metrics_computation_and_fallback(self) -> None:
         """
         Verifies TechnicalAnalysisTool.compute_aptos_ta_metrics and ingest_aptos_market_snapshot.
