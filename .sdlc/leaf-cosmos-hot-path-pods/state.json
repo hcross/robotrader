@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "change_id": "leaf-cosmos-hot-path-pods",
+  "title": "feat(leaf-cosmos/hot-path-pods): native Rust strategy pods & on-chain token safety gates for Cosmos",
+  "issue": 85,
+  "lane": "M",
+  "lane_reason": "Scoped leaf-cosmos pods and ATOM safety gates in engine-rs/crates/strategies + tests",
+  "lane_change": null,
+  "branch": "sdlc/85-leaf-cosmos-hot-path-pods",
+  "worktree": ".worktrees/85-leaf-cosmos-hot-path-pods",
+  "base_branch": "master",
+  "base_sha": "88a000d1fd27869f7328f6a6a9c6d3a7007bb148",
+  "created_at": "2026-11-02T06:06:38Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "merged",
+  "pr": 232,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "b413f5ed50cac1ccdc86908cc463eea7df95e369",
+      "updated_at": "2026-11-02T06:13:04Z"
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/85-leaf-cosmos-hot-path-pods",
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-02T06:15:28Z",
+    "mode": "full-auto",
+    "pr": 232,
+    "head_sha": "b413f5ed50cac1ccdc86908cc463eea7df95e369"
+  }
+}
