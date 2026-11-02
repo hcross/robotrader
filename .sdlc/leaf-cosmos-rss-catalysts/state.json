@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "triage",
+  "status": "merged",
   "pr": 229,
   "areas": [],
   "stages": {
@@ -35,15 +35,22 @@
       "updated_at": null
     },
     "dev": {
-      "status": "pending",
-      "rounds": 0,
-      "last_verdict": null,
-      "last_reviewer": null,
-      "last_sha": null,
-      "updated_at": null
+      "status": "approved",
+      "rounds": 1,
+      "last_verdict": "APPROVE",
+      "last_reviewer": "sdlc-dev-reviewer",
+      "last_sha": "f8e89194fae073aae110efb31691908737a5994b",
+      "updated_at": "2026-11-02T02:52:45Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/83-leaf-cosmos-rss-catalysts",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-02T03:08:47Z",
+    "mode": "full-auto",
+    "pr": 229,
+    "head_sha": "f8e89194fae073aae110efb31691908737a5994b"
+  }
 }
