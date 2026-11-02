@@ -14,7 +14,7 @@
   "human_gates": [
     "merge"
   ],
-  "status": "merge-ready",
+  "status": "merged",
   "pr": 233,
   "areas": [],
   "stages": {
@@ -36,14 +36,21 @@
     },
     "dev": {
       "status": "approved",
-      "rounds": 1,
+      "rounds": 2,
       "last_verdict": "APPROVE",
       "last_reviewer": "sdlc-dev-reviewer",
-      "last_sha": "1b93ade016824dea51f20ada8ef88292006bb2b4",
-      "updated_at": "2026-11-02T06:13:09Z"
+      "last_sha": "a72f0df5f593fc619bbaa8c935a6310f051905b4",
+      "updated_at": "2026-11-02T06:43:18Z"
     }
   },
   "escalation": null,
   "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/90-leaf-aptos-warm-path",
-  "partial_issue": false
+  "partial_issue": false,
+  "merge_delegation": {
+    "by": "Hoani Cross — full-auto instruction 2026-10-31",
+    "at": "2026-11-02T06:46:48Z",
+    "mode": "full-auto",
+    "pr": 233,
+    "head_sha": "a72f0df5f593fc619bbaa8c935a6310f051905b4"
+  }
 }
