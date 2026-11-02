@@ -615,8 +615,13 @@ impl TronVenueAdapter {
     }
 
     pub fn validate_settlement_destination(dest: &str) -> bool {
-        if dest.starts_with("bridge:") {
-            return dest.len() > "bridge:".len();
+        // TRON-bound destinations must name a specific bridge; a bare
+        // "bridge:" prefix is not a routable venue.
+        const TRON_BRIDGE_PREFIXES: [&str; 2] = ["bridge:tron:", "bridge:bittorrent:"];
+        for prefix in TRON_BRIDGE_PREFIXES {
+            if dest.starts_with(prefix) {
+                return dest.len() > prefix.len();
+            }
         }
 
         // TRON addresses: "T" followed by 33 Base58 characters (34 total)
@@ -1171,6 +1176,46 @@ mod tests {
 
         order.intent.symbol = "ETH-USDC".to_string();
         let res_err = router.execute_for_leaf("leaf-avalanche", &order, 1000);
+        assert!(res_err.is_err());
+    }
+
+    #[test]
+    fn test_tron_venue_adapter_bridge_quote_and_custody_destination() {
+        let quote = TronVenueAdapter::quote_bridge(10_000.0);
+        assert_eq!(quote.venues.len(), 2);
+        assert!(quote.venues.contains(&"SunSwap v3".to_string()));
+        assert!(quote.venues.contains(&"JustLend DAO".to_string()));
+        assert_eq!(quote.bridge_protocol, "BitTorrent Bridge / CEX TRC-20 Rail");
+        assert_eq!(quote.base_fee_usd, 1.00);
+        assert_eq!(quote.variable_bps, 4.0);
+        assert!((quote.one_way_fee_usd - (1.00 + 10_000.0 * 4.0 / 10_000.0)).abs() < 1e-9);
+        assert!(quote.hurdle_rate_bps > quote.round_trip_cost_bps);
+        assert_eq!(quote.finality_sec, 3);
+
+        // Test destination validation
+        assert!(TronVenueAdapter::validate_settlement_destination("TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7"));
+        assert!(TronVenueAdapter::validate_settlement_destination("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"));
+        assert!(TronVenueAdapter::validate_settlement_destination("bridge:tron:destination"));
+        assert!(TronVenueAdapter::validate_settlement_destination("bridge:bittorrent:destination"));
+        assert!(!TronVenueAdapter::validate_settlement_destination("bridge:"));
+        assert!(!TronVenueAdapter::validate_settlement_destination("TShort"));
+        assert!(!TronVenueAdapter::validate_settlement_destination("0xd8da6bf26964af9d7eed9e03e53415d37aa96045"));
+        assert!(!TronVenueAdapter::validate_settlement_destination("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"));
+    }
+
+    #[test]
+    fn test_smart_execution_router_execute_for_leaf_tron_isolation() {
+        let router = SmartExecutionRouter::new(ExecutionMode::Backtest);
+        let mut order = approved_order(Venue::BinanceSpot, OrderType::Limit, 0);
+
+        for sym in ["TRX-USDT", "SUN-TRX"] {
+            order.intent.symbol = sym.to_string();
+            let res = router.execute_for_leaf("leaf-tron", &order, 1000);
+            assert!(res.is_ok(), "expected ok for {sym}");
+        }
+
+        order.intent.symbol = "ETH-USDC".to_string();
+        let res_err = router.execute_for_leaf("leaf-tron", &order, 1000);
         assert!(res_err.is_err());
     }
 }
