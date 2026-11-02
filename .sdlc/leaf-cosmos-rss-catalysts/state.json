@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "change_id": "leaf-cosmos-rss-catalysts",
+  "title": "feat(leaf-cosmos/rss-catalysts): live RSS/Atom feed verification & catalyst scoring for Cosmos",
+  "issue": 83,
+  "lane": "M",
+  "lane_reason": "Scoped ecosystem RSS verification and catalyst scoring for leaf-cosmos in backend/tools/rss_tools.py + tests",
+  "lane_change": null,
+  "branch": "sdlc/83-leaf-cosmos-rss-catalysts",
+  "worktree": ".worktrees/83-leaf-cosmos-rss-catalysts",
+  "base_branch": "master",
+  "base_sha": "c9bab4505db0993b41684c6668d080a0f8afbbae",
+  "created_at": "2026-11-02T02:30:19Z",
+  "human_gates": [
+    "merge"
+  ],
+  "status": "triage",
+  "pr": 229,
+  "areas": [],
+  "stages": {
+    "spec": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "plan": {
+      "status": "skipped",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    },
+    "dev": {
+      "status": "pending",
+      "rounds": 0,
+      "last_verdict": null,
+      "last_reviewer": null,
+      "last_sha": null,
+      "updated_at": null
+    }
+  },
+  "escalation": null,
+  "worktree_abs": "/Users/hoanicross/devel/perso/cryptocurrency/robotrader/.worktrees/83-leaf-cosmos-rss-catalysts",
+  "partial_issue": false
+}
