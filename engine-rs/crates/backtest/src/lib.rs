@@ -387,7 +387,7 @@ fn leaf_market_profile(leaf_id: &str) -> (&'static str, &'static str, f64, f64) 
         "leaf-bnb" => ("BNB-USDT", "CAKE-BNB", 612.0, 0.0042),
         "leaf-xrp" => ("XRP-RLUSD", "XRP-USDT", 2.38, 2.38),
         "leaf-ton" => ("TON-USDT", "NOT-TON", 5.45, 0.0014),
-        "leaf-tron" => ("TRX-USDT", "USDT-TRX", 0.24, 1.0),
+        "leaf-tron" => ("TRX-USDT", "SUN-TRX", 0.24, 1.0),
         "leaf-avalanche" => ("AVAX-USDC", "sAVAX-AVAX", 28.50, 1.12),
         "leaf-cosmos" => ("ATOM-USDC", "TIA-USDC", 6.80, 5.20),
         "leaf-aptos" => ("APT-USDC", "stAPT-APT", 9.40, 1.08),
