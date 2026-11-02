@@ -565,6 +565,78 @@ pub type TraderJoeVenueAdapter = AvalancheVenueAdapter;
 pub type LFJBridgeQuote = AvalancheBridgeQuote;
 pub type LFJVenueAdapter = AvalancheVenueAdapter;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TronBridgeQuote {
+    pub venues: Vec<String>,
+    pub supported_tokens: Vec<String>,
+    pub bridge_protocol: String,
+    pub base_fee_usd: f64,
+    pub variable_bps: f64,
+    pub one_way_fee_usd: f64,
+    pub round_trip_cost_bps: f64,
+    pub hurdle_rate_bps: f64,
+    pub finality_sec: u64,
+}
+
+pub struct TronVenueAdapter;
+
+impl TronVenueAdapter {
+    pub const VENUES: [&'static str; 2] = [
+        "SunSwap v3",
+        "JustLend DAO",
+    ];
+    pub const SUPPORTED_TOKENS: [&'static str; 2] = ["TRX", "USDT"];
+    pub const BRIDGE_PROTOCOL: &'static str = "BitTorrent Bridge / CEX TRC-20 Rail";
+    pub const BASE_FEE_USD: f64 = 1.00;
+    pub const VARIABLE_BPS: f64 = 4.0;
+    pub const FINALITY_SEC: u64 = 3;
+
+    pub fn quote_bridge(notional_usd: f64) -> TronBridgeQuote {
+        let one_way_fee_usd = Self::BASE_FEE_USD + notional_usd * (Self::VARIABLE_BPS / 10_000.0);
+        let one_way_bps = if notional_usd > 0.0 {
+            (one_way_fee_usd / notional_usd) * 10_000.0
+        } else {
+            Self::VARIABLE_BPS
+        };
+        let round_trip_cost_bps = one_way_bps * 2.0;
+        let hurdle_rate_bps = round_trip_cost_bps * 2.5;
+
+        TronBridgeQuote {
+            venues: Self::VENUES.iter().map(|s| s.to_string()).collect(),
+            supported_tokens: Self::SUPPORTED_TOKENS.iter().map(|s| s.to_string()).collect(),
+            bridge_protocol: Self::BRIDGE_PROTOCOL.to_string(),
+            base_fee_usd: Self::BASE_FEE_USD,
+            variable_bps: Self::VARIABLE_BPS,
+            one_way_fee_usd,
+            round_trip_cost_bps,
+            hurdle_rate_bps,
+            finality_sec: Self::FINALITY_SEC,
+        }
+    }
+
+    pub fn validate_settlement_destination(dest: &str) -> bool {
+        if dest.starts_with("bridge:") {
+            return dest.len() > "bridge:".len();
+        }
+
+        // TRON addresses: "T" followed by 33 Base58 characters (34 total)
+        if dest.starts_with('T') && dest.len() == 34 {
+            const TRON_BASE58: &str =
+                "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+            return dest.chars().all(|c| TRON_BASE58.contains(c));
+        }
+
+        false
+    }
+}
+
+pub type TrxVenueAdapter = TronVenueAdapter;
+pub type TrxBridgeQuote = TronBridgeQuote;
+pub type SunSwapBridgeQuote = TronBridgeQuote;
+pub type SunSwapVenueAdapter = TronVenueAdapter;
+pub type JustLendBridgeQuote = TronBridgeQuote;
+pub type JustLendVenueAdapter = TronVenueAdapter;
+
 pub struct SmartExecutionRouter {
     pub mode: ExecutionMode,
 }
@@ -672,6 +744,13 @@ impl SmartExecutionRouter {
             if sym != "AVAX-USDC" && sym != "JOE-AVAX" {
                 return Err(format!(
                     "Leaf leaf-avalanche violates symbol isolation: symbol {sym} not allowed"
+                ));
+            }
+        } else if leaf_id == "leaf-tron" {
+            let sym = &order.intent.symbol;
+            if sym != "TRX-USDT" && sym != "SUN-TRX" {
+                return Err(format!(
+                    "Leaf leaf-tron violates symbol isolation: symbol {sym} not allowed"
                 ));
             }
         }
